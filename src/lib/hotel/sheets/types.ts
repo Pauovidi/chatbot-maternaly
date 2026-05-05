@@ -2,9 +2,12 @@ import type {
   DemoReservationRecord,
   HotelSlot,
   MonthOccupancySnapshot,
+  SheetCellMetadataUpdate,
   SheetCellUpdate,
   SheetColorPlan,
+  SheetReservationRegistration,
   SheetWritePlan,
+  SheetsCancellationResult,
   SheetsAvailabilityInput,
   SheetsAvailabilityResult,
   SheetsWriteResult,
@@ -19,9 +22,12 @@ export type {
   DemoReservationRecord,
   HotelSlot,
   MonthOccupancySnapshot,
+  SheetCellMetadataUpdate,
   SheetCellUpdate,
   SheetColorPlan,
+  SheetReservationRegistration,
   SheetWritePlan,
+  SheetsCancellationResult,
   SheetsAvailabilityInput,
   SheetsAvailabilityResult,
   SheetsWriteResult,
@@ -72,6 +78,7 @@ export interface SheetAdapter {
   checkAvailability(input: SheetsAvailabilityInput): Promise<SheetsAvailabilityResult>;
   buildWritePlan(reservation: DemoReservationRecord): Promise<SheetWritePlan>;
   writeReservation(reservation: DemoReservationRecord): Promise<SheetsWriteResult>;
+  cancelReservation(reservationId: string): Promise<SheetsCancellationResult>;
 }
 
 export interface SheetMonthReadResult extends MonthOccupancySnapshot {

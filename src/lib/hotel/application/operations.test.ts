@@ -80,7 +80,7 @@ describe("operations workflow", () => {
     expect(reservation?.reminderSentAt).toBeDefined();
   });
 
-  it("registra una solicitud de cancelacion sin ejecutarla operativamente", async () => {
+  it("registra una solicitud de cancelacion manual si Sheets real no esta activo", async () => {
     const processed = await processReservationEmail({
       subject: "Solicitud",
       rawText: MANUAL_SAMPLE_EMAIL,
@@ -92,5 +92,24 @@ describe("operations workflow", () => {
     expect(result.message).toContain("sin coste adicional");
     expect(result.reservation.cancellationRequestedAt).toBeDefined();
     expect(result.reservation.manualFollowupRequired).toBe(true);
+  });
+
+  it("retira recordatorios cuando se solicita cancelacion", async () => {
+    const processed = await processReservationEmail({
+      subject: "Solicitud",
+      rawText: MANUAL_SAMPLE_EMAIL,
+    });
+    const confirmation = await confirmReservation(
+      processed.reservation?.reservationId ?? "",
+    );
+
+    await requestReservationCancellation(confirmation.reservation.reservationId);
+
+    const state = await loadDemoState();
+    expect(
+      state.reminders.some(
+        (item) => item.reservationId === confirmation.reservation.reservationId,
+      ),
+    ).toBe(false);
   });
 });

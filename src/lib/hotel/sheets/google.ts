@@ -4,11 +4,14 @@ import { getSheetsAdapterContextFromEnv, mergeSheetsLayout } from "@/lib/hotel/c
 import {
   applyWritePlanToMatrix,
   buildAvailabilityResult,
+  buildCancelledReservationCellNote,
   buildMonthSnapshotFromGrid,
   buildWritePlanForReservation,
   buildWriteResult,
+  columnIndexToLetter,
   getSheetNameForMonth,
   getSheetRange,
+  noteHasReservationId,
   normalizeSheetTitle,
   validateMonthGrid,
 } from "@/lib/hotel/sheets/structure";
@@ -236,6 +239,125 @@ async function applyColorPlan(
   });
 }
 
+async function applyCellNotes(
+  client: sheets_v4.Sheets,
+  spreadsheetId: string,
+  sheetId: number,
+  metadataUpdates: Array<{ cell: string; note: string }>,
+): Promise<void> {
+  if (metadataUpdates.length === 0) {
+    return;
+  }
+
+  await client.spreadsheets.batchUpdate({
+    spreadsheetId,
+    requestBody: {
+      requests: metadataUpdates.map((item) => {
+        const columnLetters = item.cell.replace(/\d+/g, "");
+        const rowIndex = Number(item.cell.replace(/^[A-Z]+/, ""));
+        const columnIndex = columnLetters
+          .split("")
+          .reduce((value, char) => value * 26 + (char.charCodeAt(0) - 64), 0);
+
+        return {
+          repeatCell: {
+            range: {
+              sheetId,
+              startRowIndex: rowIndex - 1,
+              endRowIndex: rowIndex,
+              startColumnIndex: columnIndex - 1,
+              endColumnIndex: columnIndex,
+            },
+            cell: {
+              note: item.note,
+            },
+            fields: "note",
+          },
+        };
+      }),
+    },
+  });
+}
+
+async function findReservationCellsById(
+  client: sheets_v4.Sheets,
+  spreadsheetId: string,
+  context: SheetAdapterContext,
+  reservationId: string,
+): Promise<Array<{
+  sheetId: number;
+  sheetName: string;
+  cell: string;
+  row: number;
+  column: number;
+}>> {
+  const properties = await getSheetProperties(client, spreadsheetId);
+  const knownMonthlyTitles = new Set(
+    Object.values(context.sheetTitleByMonthKey ?? {}).map((title) => normalizeSheetTitle(title)),
+  );
+  const layout = mergeSheetsLayout(context.layout);
+  const range = getSheetRange(layout);
+  const ranges = properties
+    .filter((property) => {
+      const title = property.title ?? "";
+      return knownMonthlyTitles.size === 0 || knownMonthlyTitles.has(normalizeSheetTitle(title));
+    })
+    .map((property) => quoteSheetRange(property.title ?? "", range));
+
+  if (ranges.length === 0) {
+    return [];
+  }
+
+  const response = await client.spreadsheets.get({
+    spreadsheetId,
+    includeGridData: true,
+    ranges,
+    fields: "sheets(properties(sheetId,title),data(startRow,startColumn,rowData(values(formattedValue,note))))",
+  });
+
+  const matches: Array<{
+    sheetId: number;
+    sheetName: string;
+    cell: string;
+    row: number;
+    column: number;
+  }> = [];
+
+  for (const sheet of response.data.sheets ?? []) {
+    const sheetId = sheet.properties?.sheetId;
+    const sheetName = sheet.properties?.title;
+    if (sheetId === undefined || sheetId === null || !sheetName) {
+      continue;
+    }
+
+    for (const data of sheet.data ?? []) {
+      const rows = data.rowData ?? [];
+      const startRow = data.startRow ?? 0;
+      const startColumn = data.startColumn ?? 0;
+      rows.forEach((row, rowOffset) => {
+        const values = row.values ?? [];
+        values.forEach((cell, columnOffset) => {
+          if (!noteHasReservationId(cell.note ?? undefined, reservationId)) {
+            return;
+          }
+
+          const rowIndex = startRow + rowOffset + 1;
+          const columnIndex = startColumn + columnOffset + 1;
+          matches.push({
+            sheetId,
+            sheetName,
+            cell: `${columnIndexToLetter(columnIndex)}${rowIndex}`,
+            row: rowIndex,
+            column: columnIndex,
+          });
+        });
+      });
+    }
+  }
+
+  return matches;
+}
+
 export async function buildGoogleSheetAdapter(
   providedContext?: Partial<SheetAdapterContext>,
 ): Promise<SheetAdapter> {
@@ -307,8 +429,26 @@ export async function buildGoogleSheetAdapter(
 
   async function writeReservation(reservation: Parameters<typeof buildWritePlanForReservation>[0]) {
     const monthKey = reservation.entryDate.slice(0, 7);
+    const initialMonth = await readMonthValues(client, spreadsheetId, monthKey, context);
+    assertValidStructure(initialMonth.structure);
+    const initialAvailability = buildAvailabilityResult(
+      initialMonth,
+      reservation,
+      initialMonth.rawValues,
+      context,
+    );
+
+    if (!initialAvailability.available) {
+      throw new Error("No hay disponibilidad en la lectura inicial de Google Sheets.");
+    }
+
     const month = await readMonthValues(client, spreadsheetId, monthKey, context);
     assertValidStructure(month.structure);
+    const availability = buildAvailabilityResult(month, reservation, month.rawValues, context);
+
+    if (!availability.available) {
+      throw new Error("No hay disponibilidad en la relectura previa a la escritura.");
+    }
 
     const plan = buildWritePlanForReservation(
       {
@@ -330,8 +470,55 @@ export async function buildGoogleSheetAdapter(
 
     await applyCellUpdates(client, spreadsheetId, month.sheetName, plan.cellUpdates);
     await applyColorPlan(client, spreadsheetId, month.sheetId, plan.colorPlan);
+    await applyCellNotes(client, spreadsheetId, month.sheetId, plan.metadataUpdates);
 
     return buildWriteResult(plan, "real");
+  }
+
+  async function cancelReservation(reservationId: string) {
+    const matches = await findReservationCellsById(client, spreadsheetId, context, reservationId);
+    if (matches.length === 0) {
+      throw new Error(`No se ha encontrado reservationId ${reservationId} en notas de Google Sheets.`);
+    }
+
+    const sheetName = matches[0].sheetName;
+    const sheetId = matches[0].sheetId;
+    const sameSheetMatches = matches.filter((match) => match.sheetId === sheetId);
+    const cancelledAt = new Date().toISOString();
+    const metadataUpdates = sameSheetMatches.map((match) => ({
+      cell: match.cell,
+      note: buildCancelledReservationCellNote(reservationId, cancelledAt),
+    }));
+
+    await applyCellUpdates(
+      client,
+      spreadsheetId,
+      sheetName,
+      sameSheetMatches.map((match) => ({ cell: match.cell, value: "" })),
+    );
+    await applyColorPlan(
+      client,
+      spreadsheetId,
+      sheetId,
+      sameSheetMatches.map((match) => ({
+        row: match.row,
+        column: match.column,
+        color: "#FFFFFF",
+        label: `Cancelada ${reservationId}`,
+      })),
+    );
+    await applyCellNotes(client, spreadsheetId, sheetId, metadataUpdates);
+
+    return {
+      ok: true,
+      reservationId,
+      sheetName,
+      rowHint: sameSheetMatches[0]?.row,
+      clearedCells: sameSheetMatches.map((match) => match.cell),
+      metadataUpdates,
+      mode: "real" as const,
+      cancelledAt,
+    };
   }
 
   return {
@@ -340,5 +527,6 @@ export async function buildGoogleSheetAdapter(
     checkAvailability,
     buildWritePlan,
     writeReservation,
+    cancelReservation,
   };
 }

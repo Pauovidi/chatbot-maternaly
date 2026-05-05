@@ -5,6 +5,7 @@ export type ReservationStatus =
   | "available"
   | "no_availability"
   | "confirmed"
+  | "cancelled"
   | "needs_review";
 
 export type TransportMode = "mock" | "real" | "hybrid";
@@ -77,7 +78,9 @@ export interface DemoReservationRecord {
   specialNotes?: string;
   manualFollowupRequired?: boolean;
   cancellationRequestedAt?: string;
+  cancellationCompletedAt?: string;
   reminderSentAt?: string;
+  sheetRegistration?: SheetReservationRegistration;
   status: ReservationStatus;
   source: "email" | "manual" | "mock";
   sheetName?: string;
@@ -110,11 +113,37 @@ export interface SheetWritePlan {
   rowHint?: number;
   colorPlan: SheetColorPlan[];
   cellUpdates: SheetCellUpdate[];
+  metadataUpdates: SheetCellMetadataUpdate[];
 }
 
 export interface SheetCellUpdate {
   cell: string;
   value: string;
+}
+
+export interface SheetCellMetadataUpdate {
+  cell: string;
+  note: string;
+}
+
+export interface SheetReservationRegistration {
+  spreadsheetId?: string;
+  sheetName: string;
+  reservationId: string;
+  rowHint?: number;
+  cells: string[];
+  writtenAt: string;
+}
+
+export interface SheetsCancellationResult {
+  ok: boolean;
+  reservationId: string;
+  sheetName?: string;
+  rowHint?: number;
+  clearedCells: string[];
+  metadataUpdates: SheetCellMetadataUpdate[];
+  mode: TransportMode;
+  cancelledAt: string;
 }
 
 export interface ReminderJob {
@@ -215,10 +244,13 @@ export interface SheetsAvailabilityResult {
 
 export interface SheetsWriteResult {
   ok: boolean;
+  reservationId: string;
   sheetName: string;
+  petName: string;
   rowHint?: number;
   colorPlan: SheetColorPlan[];
   cellUpdates: SheetCellUpdate[];
+  metadataUpdates: SheetCellMetadataUpdate[];
   mode: TransportMode;
 }
 

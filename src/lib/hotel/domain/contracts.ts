@@ -11,6 +11,7 @@ import type {
   ReservationWorkflowTransition,
 } from "./states";
 import type { ReservationIdentityTrace } from "./identifiers";
+import type { SheetReservationRegistration } from "../integrations/types";
 
 export interface HotelCapacityConfig {
   standardRoomsPerSlot: number;
@@ -201,7 +202,9 @@ export interface ReservationRecord {
   specialNotes?: string;
   manualFollowupRequired?: boolean;
   cancellationRequestedAt?: string;
+  cancellationCompletedAt?: string;
   reminderSentAt?: string;
+  sheetRegistration?: SheetReservationRegistration;
   reviewFlags: ReservationReviewFlag[];
   availability?: AvailabilityResult;
   pricing?: PricingQuote;
@@ -243,6 +246,7 @@ export interface DemoStatusCounters {
   available: number;
   noAvailability: number;
   confirmed: number;
+  cancelled: number;
 }
 
 export interface SheetMonthKey {
@@ -275,7 +279,9 @@ export interface SheetsReservationWritePayload {
   specialNotes?: string;
   manualFollowupRequired?: boolean;
   cancellationRequestedAt?: string;
+  cancellationCompletedAt?: string;
   reminderSentAt?: string;
+  sheetRegistration?: SheetReservationRegistration;
   status: ReservationStatus;
   reviewState: ReservationReviewState;
   colorKey?: string;

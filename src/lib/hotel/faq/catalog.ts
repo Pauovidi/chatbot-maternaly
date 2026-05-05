@@ -475,7 +475,7 @@ export const FAQ_KNOWLEDGE_ENTRIES: readonly FaqKnowledgeEntry[] = [
     label: "Cancelaciones",
     question: "¿Qué pasa si cancelo?",
     answer:
-      "La reserva puede cancelarse sin coste adicional. En esta fase registramos la intención y la revisa el equipo, pero no ejecutamos una cancelación operativa automática.",
+      "La reserva puede cancelarse sin coste adicional. Si tenemos la referencia de reserva, podemos localizarla por reservationId, anularla en el cuadrante y retirar sus recordatorios; si faltan datos, lo dejamos en revisión segura para no cancelar a ciegas.",
     examples: [
       "¿qué pasa si cancelo?",
       "¿puedo cambiar fechas?",

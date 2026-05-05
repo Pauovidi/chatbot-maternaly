@@ -11,6 +11,7 @@ import type { SheetAdapter } from "@/lib/hotel/sheets/types";
 import {
   applyWritePlanToMatrix,
   buildAvailabilityResult,
+  buildCancelledReservationCellNote,
   buildMonthSnapshotFromGrid,
   buildWritePlanForReservation,
   buildWriteResult,
@@ -177,16 +178,102 @@ export async function buildMockSheetAdapter(
     reservation: DemoReservationRecord,
   ): Promise<SheetsWriteResult> {
     const monthKey = reservation.entryDate.slice(0, 7);
+    const initialState = await loadState(monthKey, storeName, context);
+    const initialAvailability = buildAvailabilityResult(
+      initialState.snapshot,
+      reservation,
+      initialState.values,
+      context,
+    );
+    if (!initialAvailability.available) {
+      throw new Error("No hay disponibilidad en la lectura inicial de Google Sheets.");
+    }
+
     const state = await loadState(monthKey, storeName, context);
+    const prewriteAvailability = buildAvailabilityResult(state.snapshot, reservation, state.values, context);
+    if (!prewriteAvailability.available) {
+      throw new Error("No hay disponibilidad en la relectura previa a la escritura.");
+    }
+
     const plan = buildWritePlanForReservation(reservation, state.values, context);
     const nextValues = applyWritePlanToMatrix(state.values, plan);
     const snapshot = await persistState(monthKey, nextValues, storeName, context);
+    const result = buildWriteResult(plan, "mock");
 
     const key = makeStateKey(storeName, monthKey);
     memoryState.set(key, { values: nextValues, snapshot });
-    await upsertReservation(reservation, storeName);
+    await upsertReservation(
+      {
+        ...reservation,
+        sheetRegistration: {
+          sheetName: result.sheetName,
+          reservationId: result.reservationId,
+          rowHint: result.rowHint,
+          cells: result.cellUpdates.map((update) => update.cell),
+          writtenAt: new Date().toISOString(),
+        },
+      },
+      storeName,
+    );
 
-    return buildWriteResult(plan, "mock");
+    return result;
+  }
+
+  async function cancelReservation(reservationId: string) {
+    const persisted = await loadDemoState(storeName);
+    const reservation = persisted.reservations.find((item) => item.id === reservationId);
+    if (!reservation) {
+      throw new Error(`No se ha encontrado la reserva ${reservationId} en la persistencia mock.`);
+    }
+
+    const monthKey = reservation.entryDate.slice(0, 7);
+    const state = await loadState(monthKey, storeName, context);
+    const cellsToClear = reservation.sheetRegistration?.cells ?? [];
+    if (cellsToClear.length === 0) {
+      throw new Error(`La reserva ${reservationId} no tiene celdas registradas para cancelar.`);
+    }
+
+    const cancelledAt = new Date().toISOString();
+    const nextValues = state.values.map((row) => [...row]);
+
+    for (const cell of cellsToClear) {
+      const columnLetters = cell.replace(/\d+/g, "");
+      const rowIndex = Number(cell.replace(/^[A-Z]+/, ""));
+      const columnIndex = columnLetters.split("").reduce(
+        (value, char) => value * 26 + (char.charCodeAt(0) - 64),
+        0,
+      );
+      if (Number.isInteger(rowIndex) && rowIndex > 0 && columnIndex > 0) {
+        nextValues[rowIndex - 1][columnIndex - 1] = "";
+      }
+    }
+
+    const snapshot = await persistState(monthKey, nextValues, storeName, context);
+    const key = makeStateKey(storeName, monthKey);
+    memoryState.set(key, { values: nextValues, snapshot });
+    await upsertReservation(
+      {
+        ...reservation,
+        status: "cancelled",
+        cancellationCompletedAt: cancelledAt,
+        updatedAt: cancelledAt,
+      },
+      storeName,
+    );
+
+    return {
+      ok: true,
+      reservationId,
+      sheetName: reservation.sheetRegistration?.sheetName ?? snapshot.sheetName,
+      rowHint: reservation.sheetRegistration?.rowHint,
+      clearedCells: cellsToClear,
+      metadataUpdates: cellsToClear.map((cell) => ({
+        cell,
+        note: buildCancelledReservationCellNote(reservationId, cancelledAt),
+      })),
+      mode: "mock" as const,
+      cancelledAt,
+    };
   }
 
   return {
@@ -195,5 +282,6 @@ export async function buildMockSheetAdapter(
     checkAvailability,
     buildWritePlan,
     writeReservation,
+    cancelReservation,
   };
 }

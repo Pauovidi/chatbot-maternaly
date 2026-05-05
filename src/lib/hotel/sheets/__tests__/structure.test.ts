@@ -151,6 +151,34 @@ describe("Sheets structure", () => {
     expect(plan.cellUpdates.length).toBeGreaterThan(0);
   });
 
+  it("ocupa varias habitaciones cuando la reserva es multi-perro", () => {
+    const values = createWorkbookLikeMatrix();
+    const reservation: DemoReservationRecord = {
+      id: "res-2",
+      petKey: "res-2",
+      petName: "Nala y Kira",
+      ownerName: "Marta",
+      phoneE164: "+34600111222",
+      entryDate: "2026-08-08",
+      entrySlot: "morning",
+      exitDate: "2026-08-10",
+      exitSlot: "morning",
+      dogs: 2,
+      status: "confirmed",
+      source: "mock",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    const plan = buildWritePlanForReservation(reservation, values);
+    const rows = new Set(plan.colorPlan.map((item) => item.row));
+
+    expect(rows.size).toBe(2);
+    expect(plan.cellUpdates.some((update) => update.value.includes("(1/2)"))).toBe(true);
+    expect(plan.cellUpdates.some((update) => update.value.includes("(2/2)"))).toBe(true);
+    expect(plan.metadataUpdates.every((update) => update.note.includes("SMP_RESERVATION_ID=res-2"))).toBe(true);
+  });
+
   it("encuentra CHENIL 3 libre del 1 al 5 de abril y explica el analisis tecnico", () => {
     const values = seedBlankMonthMatrix("2026-04");
     const requestedColumns = [2, 3, 4, 5, 6];

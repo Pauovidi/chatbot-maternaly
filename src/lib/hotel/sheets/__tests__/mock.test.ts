@@ -45,4 +45,43 @@ describe("Mock Sheets adapter", () => {
     );
     expect(persisted.reservations.some((item) => item.id === reservation.id)).toBe(true);
   });
+
+  it("revalida disponibilidad antes de escribir y evita dobles reservas", async () => {
+    const storeName = `sheets-test-${randomUUID()}.json`;
+    const adapter = await buildMockSheetAdapter(storeName);
+    const reservation = buildReservation("2026-08-20", "2026-08-21");
+    reservation.dogs = 16;
+    const conflicting = buildReservation("2026-08-20", "2026-08-21");
+    conflicting.id = randomUUID();
+
+    await adapter.writeReservation(reservation);
+
+    await expect(adapter.writeReservation(conflicting)).rejects.toThrow(
+      "No hay disponibilidad",
+    );
+  });
+
+  it("cancela una reserva escrita y deja trazabilidad de celdas liberadas", async () => {
+    const storeName = `sheets-test-${randomUUID()}.json`;
+    const adapter = await buildMockSheetAdapter(storeName);
+    const reservation = buildReservation("2026-08-22", "2026-08-23");
+
+    const write = await adapter.writeReservation(reservation);
+    const cancellation = await adapter.cancelReservation(reservation.id);
+    const persisted = await loadDemoState(storeName);
+
+    expect(cancellation.ok).toBe(true);
+    expect(cancellation.clearedCells).toEqual(write.cellUpdates.map((update) => update.cell));
+    expect(cancellation.metadataUpdates[0]?.note).toContain("SMP_CANCELLED_RESERVATION_ID");
+    expect(persisted.reservations.find((item) => item.id === reservation.id)?.status).toBe("cancelled");
+  });
+
+  it("rechaza cancelar una reserva inexistente", async () => {
+    const storeName = `sheets-test-${randomUUID()}.json`;
+    const adapter = await buildMockSheetAdapter(storeName);
+
+    await expect(adapter.cancelReservation("missing-reservation")).rejects.toThrow(
+      "No se ha encontrado la reserva missing-reservation",
+    );
+  });
 });

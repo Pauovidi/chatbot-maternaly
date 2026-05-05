@@ -44,14 +44,29 @@ export function buildWhatsAppAvailabilityMessage(input: {
   const petText = input.petName ? ` para ${input.petName}` : "";
 
   const timeAdjustmentLines = buildTimeAdjustmentLines(input.reservation);
+  const isSheetConfirmed =
+    input.reservation?.status === "confirmada" &&
+    Boolean(input.reservation.sheetRegistration);
+  const confirmationLine = isSheetConfirmed
+    ? `La reserva ya queda anotada en nuestro cuadrante con referencia ${input.reservation?.reservationId}.`
+    : "Si te encaja, completa el formulario web para dejar la reserva cerrada.";
 
   return [
     `${greeting}, sí tenemos disponibilidad${petText}.`,
     pricingText,
+    confirmationLine,
     ...timeAdjustmentLines,
     "El pago se realiza a la llegada en efectivo, Bizum o transferencia. La señal no es obligatoria, aunque se acepta por Bizum o transferencia.",
-    "Si te encaja, completa el formulario web para dejar la reserva cerrada.",
-    HOTEL_DEMO_CONFIG.bookingFormUrl,
+    isSheetConfirmed ? undefined : HOTEL_DEMO_CONFIG.bookingFormUrl,
+  ].filter((line): line is string => Boolean(line)).join(" ");
+}
+
+export function buildWhatsAppCancellationConfirmedMessage(record: ReservationRecord): string {
+  const petText = record.petName ? ` de ${record.petName}` : "";
+  return [
+    `Hola ${record.ownerName ?? "familia"}, la reserva${petText} queda anulada sin coste adicional.`,
+    `Referencia: ${record.reservationId}.`,
+    "Ya no queda ningun recordatorio pendiente asociado a esta reserva.",
   ].join(" ");
 }
 

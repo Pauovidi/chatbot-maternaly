@@ -4,6 +4,7 @@ import type {
   HotelSlot,
   MonthOccupancySnapshot,
   SheetCellUpdate,
+  SheetCellMetadataUpdate,
   SheetColorPlan,
   SheetWritePlan,
   SheetsAvailabilityInput,
@@ -30,6 +31,8 @@ import type {
 } from "./types";
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
+export const SHEETS_RESERVATION_ID_NOTE_KEY = "SMP_RESERVATION_ID";
+export const SHEETS_CANCELLED_RESERVATION_ID_NOTE_KEY = "SMP_CANCELLED_RESERVATION_ID";
 
 export function columnIndexToLetter(columnIndex: number): string {
   if (columnIndex < 1) {
@@ -1105,6 +1108,18 @@ export function findAvailableRowForReservation(
   return inspection.freeUnits[0]?.unit.rowIndex ?? null;
 }
 
+export function findAvailableRowsForReservation(
+  values: string[][],
+  reservation: Pick<SheetsAvailabilityInput, "entryDate" | "entrySlot" | "exitDate" | "exitSlot" | "dogs">,
+  context?: Partial<SheetAdapterContext>,
+): number[] {
+  const inspection = inspectAvailabilityByUnit(values, reservation, context);
+  const unitsNeeded = Math.max(1, Math.ceil(reservation.dogs));
+  return inspection.freeUnits
+    .slice(0, unitsNeeded)
+    .map((unit) => unit.unit.rowIndex);
+}
+
 function statusToColor(
   status: DemoReservationRecord["status"],
   context?: Partial<SheetAdapterContext>,
@@ -1118,6 +1133,8 @@ function statusToColor(
       return palette.noAvailability;
     case "confirmed":
       return palette.confirmed;
+    case "cancelled":
+      return palette.review;
     case "needs_review":
       return palette.review;
     case "pending":
@@ -1131,7 +1148,8 @@ function occupiedCellUpdates(
   reservation: DemoReservationRecord,
   values: string[][],
   context?: Partial<SheetAdapterContext>,
-): { updates: SheetCellUpdate[]; colors: SheetColorPlan[] } {
+  visibleValue = reservation.petName,
+): { updates: SheetCellUpdate[]; colors: SheetColorPlan[]; metadata: SheetCellMetadataUpdate[] } {
   const layout = mergeSheetsLayout(context?.layout);
   const occupiedSlots = getOccupiedSlotsForStay({
     entryDate: reservation.entryDate,
@@ -1143,7 +1161,9 @@ function occupiedCellUpdates(
   const color = statusToColor(reservation.status, context);
   const updates: SheetCellUpdate[] = [];
   const colors: SheetColorPlan[] = [];
+  const metadata: SheetCellMetadataUpdate[] = [];
   const seenCells = new Set<string>();
+  const note = buildReservationCellNote(reservation);
 
   for (const occupiedSlot of occupiedSlots) {
     const descriptor = descriptors.find(
@@ -1163,16 +1183,61 @@ function occupiedCellUpdates(
     }
 
     seenCells.add(cell);
-    updates.push({ cell, value: reservation.petName });
+    updates.push({ cell, value: visibleValue });
     colors.push({
       row: rowIndex,
       column: columnIndex,
       color,
-      label: reservation.petName,
+      label: visibleValue,
+    });
+    metadata.push({
+      cell,
+      note,
     });
   }
 
-  return { updates, colors };
+  return { updates, colors, metadata };
+}
+
+export function buildReservationCellNote(reservation: DemoReservationRecord): string {
+  return [
+    `${SHEETS_RESERVATION_ID_NOTE_KEY}=${reservation.id}`,
+    `Mascota: ${reservation.petName}`,
+    reservation.ownerName ? `Cliente: ${reservation.ownerName}` : undefined,
+    `Entrada: ${reservation.entryDate} ${reservation.entrySlot}`,
+    `Salida: ${reservation.exitDate} ${reservation.exitSlot}`,
+    `Perros: ${reservation.dogs}`,
+    reservation.originalRequestedCheckInTime
+      ? `Hora entrada solicitada: ${reservation.originalRequestedCheckInTime}`
+      : undefined,
+    reservation.normalizedCheckInTime
+      ? `Hora entrada aplicada: ${reservation.normalizedCheckInTime}`
+      : undefined,
+    reservation.originalRequestedCheckOutTime
+      ? `Hora salida solicitada: ${reservation.originalRequestedCheckOutTime}`
+      : undefined,
+    reservation.normalizedCheckOutTime
+      ? `Hora salida aplicada: ${reservation.normalizedCheckOutTime}`
+      : undefined,
+    reservation.bathRequested ? "Baño/peluquería: solicitado" : undefined,
+    reservation.specialNotes ? `Notas: ${reservation.specialNotes}` : undefined,
+    `Escrito por sistema: ${new Date().toISOString()}`,
+  ].filter(Boolean).join("\n");
+}
+
+export function buildCancelledReservationCellNote(
+  reservationId: string,
+  cancelledAt: string,
+): string {
+  return [
+    `${SHEETS_CANCELLED_RESERVATION_ID_NOTE_KEY}=${reservationId}`,
+    `Cancelada sin coste adicional: ${cancelledAt}`,
+    "Celda liberada por el sistema de reservas.",
+  ].join("\n");
+}
+
+export function noteHasReservationId(note: string | undefined, reservationId: string): boolean {
+  return Boolean(note?.includes(`${SHEETS_RESERVATION_ID_NOTE_KEY}=${reservationId}`));
 }
 
 export function buildWritePlanForReservation(
@@ -1183,17 +1248,30 @@ export function buildWritePlanForReservation(
   const layout = mergeSheetsLayout(context?.layout);
   const monthKey = reservation.entryDate.slice(0, 7);
   const sheetName = reservation.sheetName ?? getSheetNameForMonth(monthKey, context);
-  const rowHint = findAvailableRowForReservation(values, reservation, context);
-  const targetRow = rowHint ?? layout.lastDataRowIndex;
-  const { updates, colors } = occupiedCellUpdates(targetRow, reservation, values, context);
+  const rows = findAvailableRowsForReservation(values, reservation, context);
+  const targetRows = rows.length > 0 ? rows : [layout.lastDataRowIndex];
+  const unitCount = targetRows.length;
+  const updates: SheetCellUpdate[] = [];
+  const colors: SheetColorPlan[] = [];
+  const metadata: SheetCellMetadataUpdate[] = [];
+
+  targetRows.forEach((targetRow, index) => {
+    const visibleValue =
+      unitCount > 1 ? `${reservation.petName} (${index + 1}/${unitCount})` : reservation.petName;
+    const rowPlan = occupiedCellUpdates(targetRow, reservation, values, context, visibleValue);
+    updates.push(...rowPlan.updates);
+    colors.push(...rowPlan.colors);
+    metadata.push(...rowPlan.metadata);
+  });
 
   return {
     sheetName,
     reservationId: reservation.id,
     petName: reservation.petName,
-    rowHint: targetRow,
+    rowHint: targetRows[0],
     colorPlan: colors,
     cellUpdates: updates,
+    metadataUpdates: metadata,
   };
 }
 
@@ -1220,10 +1298,13 @@ export function buildWriteResult(
 ): SheetsWriteResult {
   return {
     ok: true,
+    reservationId: plan.reservationId,
     sheetName: plan.sheetName,
+    petName: plan.petName,
     rowHint: plan.rowHint,
     colorPlan: plan.colorPlan,
     cellUpdates: plan.cellUpdates,
+    metadataUpdates: plan.metadataUpdates,
     mode,
   };
 }

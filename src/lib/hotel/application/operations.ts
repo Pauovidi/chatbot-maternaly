@@ -12,13 +12,12 @@ import {
   mapLegacyWritePlanToDemoPlan,
   toLegacyReservationRecord,
 } from "./integration-bridge";
+import { buildReservationReminderJob } from "./reminder-job";
 import { processReservationEmail } from "./process-reservation";
 import {
   getHotelEmailRuntimeConfig,
   getHotelFeatureFlags,
-  getHotelRuntimeConfig,
 } from "../config";
-import { buildWhatsAppManualReminderMessage } from "../content/whatsapp-templates";
 import { createImapEmailSource, pollReservationMailbox } from "../email";
 import type { ReminderJob, ReservationRecord } from "../domain/contracts";
 import {
@@ -27,6 +26,7 @@ import {
 } from "../domain/states";
 import { createWhatsAppOutputFacade } from "../output";
 import { buildGoogleSheetAdapter } from "../sheets";
+import type { SheetsWriteResult } from "../sheets/types";
 
 export interface MailboxWorkflowItem {
   fingerprint: string;
@@ -99,44 +99,6 @@ function appendWorkflowState(
   };
 }
 
-function getSlotStartTime(slot: ReservationRecord["checkInSlot"]): string {
-  return slot === "morning" ? "08:00:00" : "16:30:00";
-}
-
-function buildReminderJob(reservation: ReservationRecord): ReminderJob {
-  const runtimeConfig = getHotelRuntimeConfig();
-  const entryDateTime = new Date(
-    `${reservation.checkInDate}T${getSlotStartTime(reservation.checkInSlot)}`,
-  );
-  const scheduledFor = new Date(
-    entryDateTime.getTime() - runtimeConfig.reminderLeadHours * 60 * 60 * 1000,
-  );
-  const createdAt = new Date().toISOString();
-
-  return {
-    reminderId: `rem-${reservation.reservationId}`,
-    reservationId: reservation.reservationId,
-    petName: reservation.petName,
-    ownerName: reservation.ownerName,
-    scheduledFor: scheduledFor.toISOString(),
-    leadHours: runtimeConfig.reminderLeadHours,
-    status: "pendiente",
-    channel: "whatsapp",
-    messagePreview: buildWhatsAppManualReminderMessage(reservation),
-    mode: getHotelFeatureFlags().useRemindersReal ? "real" : "preview",
-    createdAt,
-    updatedAt: createdAt,
-    attempts: 0,
-    trace: [
-      {
-        at: createdAt,
-        event: "scheduled",
-        message: "Recordatorio planificado para 5 dias antes de la entrada.",
-      },
-    ],
-  };
-}
-
 function withReminderTrace(
   reminder: ReminderJob,
   event: string,
@@ -156,6 +118,25 @@ function withReminderTrace(
       },
     ],
   };
+}
+
+function buildSheetRegistration(
+  result: SheetsWriteResult,
+): NonNullable<ReservationRecord["sheetRegistration"]> {
+  return {
+    sheetName: result.sheetName,
+    reservationId: result.reservationId,
+    rowHint: result.rowHint,
+    cells: result.cellUpdates.map((update) => update.cell),
+    writtenAt: new Date().toISOString(),
+  };
+}
+
+function appendSpecialNote(
+  current: string | undefined,
+  note: string,
+): string {
+  return [current, note].filter(Boolean).join(" ");
 }
 
 function getReminderWebhookUrl(): string | undefined {
@@ -259,6 +240,10 @@ export async function confirmReservation(
     throw new Error("No se puede confirmar una reserva sin disponibilidad.");
   }
 
+  if (reservation.status === "cancelada") {
+    throw new Error("No se puede confirmar una reserva cancelada.");
+  }
+
   let confirmed = appendWorkflowState(
     {
       ...reservation,
@@ -270,14 +255,46 @@ export async function confirmReservation(
   );
 
   let sheetWritePlan: ReturnType<typeof mapLegacyWritePlanToDemoPlan> | null = null;
-  if (getHotelFeatureFlags().useGoogleSheetsReal) {
+  if (getHotelFeatureFlags().useGoogleSheetsReal && !confirmed.sheetRegistration) {
     const adapter = await buildGoogleSheetAdapter();
     const legacyReservation = toLegacyReservationRecord(confirmed, "confirmada");
-    const plan = await adapter.buildWritePlan(legacyReservation);
-    sheetWritePlan = mapLegacyWritePlanToDemoPlan(plan, "confirmada");
+    try {
+      const writeResult = await adapter.writeReservation(legacyReservation);
+      sheetWritePlan = mapLegacyWritePlanToDemoPlan(writeResult, "confirmada");
+      confirmed = {
+        ...confirmed,
+        sheetRegistration: buildSheetRegistration(writeResult),
+      };
+    } catch (error) {
+      await appendLog({
+        level: "error",
+        event: "reservation_sheet_write_failed",
+        message:
+          error instanceof Error
+            ? `No se pudo escribir la reserva ${reservationId} en Sheets: ${error.message}`
+            : `No se pudo escribir la reserva ${reservationId} en Sheets por un error desconocido.`,
+      });
+      throw error;
+    }
+  } else if (confirmed.sheetRegistration) {
+    sheetWritePlan = {
+      sheetName: confirmed.sheetRegistration.sheetName,
+      monthKey: confirmed.sheetRegistration.sheetName,
+      prepared: true,
+      colorKey: "reservado",
+      colorHex: "#00B0F0",
+      petName: confirmed.petName,
+      notes: [
+        `Reserva ya escrita en Sheets con referencia ${confirmed.sheetRegistration.reservationId}.`,
+      ],
+      cellUpdates: confirmed.sheetRegistration.cells.map((cell) => ({
+        field: cell,
+        value: confirmed.petName ?? "",
+      })),
+    };
   }
 
-  const reminder = buildReminderJob(confirmed);
+  const reminder = buildReservationReminderJob(confirmed);
   confirmed = appendWorkflowState(
     confirmed,
     "reminder_scheduled",
@@ -342,6 +359,83 @@ export async function requestReservationCancellation(
   }
 
   const requestedAt = new Date().toISOString();
+
+  if (reservation.status === "cancelada") {
+    await replaceRemindersForReservation(reservationId, []);
+    return {
+      reservation,
+      message:
+        "La reserva ya figura cancelada sin coste adicional. No queda ningun recordatorio pendiente.",
+    };
+  }
+
+  if (getHotelFeatureFlags().useGoogleSheetsReal) {
+    try {
+      const adapter = await buildGoogleSheetAdapter();
+      const cancellation = await adapter.cancelReservation(reservationId);
+      const cancelled = appendWorkflowState(
+        {
+          ...reservation,
+          status: "cancelada",
+          cancellationRequestedAt: reservation.cancellationRequestedAt ?? requestedAt,
+          cancellationCompletedAt: cancellation.cancelledAt,
+          manualFollowupRequired: false,
+          updatedAt: cancellation.cancelledAt,
+          specialNotes: appendSpecialNote(
+            reservation.specialNotes,
+            `Cancelacion ejecutada en Sheets sin coste adicional. Celdas liberadas: ${cancellation.clearedCells.join(", ")}.`,
+          ),
+        },
+        "cancelled",
+        "Reserva cancelada operativamente en Google Sheets.",
+      );
+
+      await upsertReservation(cancelled);
+      await replaceRemindersForReservation(reservationId, []);
+      await appendLog({
+        level: "info",
+        event: "reservation_cancelled",
+        message: `Reserva ${reservationId} cancelada en Sheets y recordatorios retirados.`,
+      });
+
+      return {
+        reservation: cancelled,
+        message:
+          "La reserva ha quedado anulada sin coste adicional y ya se ha liberado en nuestro cuadrante.",
+      };
+    } catch (error) {
+      const pendingFollowup = {
+        ...reservation,
+        cancellationRequestedAt: reservation.cancellationRequestedAt ?? requestedAt,
+        manualFollowupRequired: true,
+        updatedAt: requestedAt,
+        specialNotes: appendSpecialNote(
+          reservation.specialNotes,
+          error instanceof Error
+            ? `Cancelacion solicitada, pero no se pudo ejecutar automaticamente en Sheets: ${error.message}.`
+            : "Cancelacion solicitada, pero no se pudo ejecutar automaticamente en Sheets.",
+        ),
+      } satisfies ReservationRecord;
+
+      await upsertReservation(pendingFollowup);
+      await replaceRemindersForReservation(reservationId, []);
+      await appendLog({
+        level: "warn",
+        event: "reservation_cancellation_followup_required",
+        message:
+          error instanceof Error
+            ? `Cancelacion de ${reservationId} pendiente de revision: ${error.message}`
+            : `Cancelacion de ${reservationId} pendiente de revision por error desconocido.`,
+      });
+
+      return {
+        reservation: pendingFollowup,
+        message:
+          "La reserva puede cancelarse sin coste adicional, pero no hemos podido localizarla de forma segura en Sheets por reservationId. La dejamos marcada para revisión manual y sin recordatorios pendientes.",
+      };
+    }
+  }
+
   const updatedReservation = {
     ...reservation,
     cancellationRequestedAt: requestedAt,
@@ -349,11 +443,12 @@ export async function requestReservationCancellation(
     updatedAt: requestedAt,
     specialNotes: [
       reservation.specialNotes,
-      "Solicitud de cancelacion registrada para gestion manual. No se ejecuta cancelacion operativa ni escritura en Sheets en esta fase.",
+      "Solicitud de cancelacion registrada para gestion manual; Google Sheets real no esta activo en este entorno.",
     ].filter(Boolean).join(" "),
   } satisfies ReservationRecord;
 
   await upsertReservation(updatedReservation);
+  await replaceRemindersForReservation(reservationId, []);
   await appendLog({
     level: "info",
     event: "reservation_cancellation_requested",
@@ -363,7 +458,7 @@ export async function requestReservationCancellation(
   return {
     reservation: updatedReservation,
     message:
-      "La reserva puede cancelarse sin coste adicional. Hemos dejado la solicitud registrada para que el equipo la gestione manualmente; en esta fase no se cancela operativamente en Sheets.",
+      "La reserva puede cancelarse sin coste adicional. Google Sheets real no esta activo en este entorno, asi que queda registrada para gestion manual y sin recordatorios pendientes.",
   };
 }
 

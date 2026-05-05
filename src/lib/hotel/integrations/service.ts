@@ -6,6 +6,7 @@ import type {
   ReminderJob,
   SheetsAvailabilityInput,
   SheetsAvailabilityResult,
+  SheetsCancellationResult,
   SheetsWriteResult,
   TransportMode,
   WhatsappMessagePayload,
@@ -28,6 +29,7 @@ export interface HotelIntegrationBundle {
   log(entry: Omit<DemoLogEntry, "id" | "at">): Promise<DemoLogEntry>;
   readAvailability(input: SheetsAvailabilityInput): Promise<SheetsAvailabilityResult>;
   writeReservation(reservation: DemoReservationRecord): Promise<SheetsWriteResult>;
+  cancelReservation(reservationId: string): Promise<SheetsCancellationResult>;
 }
 
 export async function createHotelIntegrationBundle(
@@ -72,6 +74,9 @@ export async function createHotelIntegrationBundle(
     },
     async writeReservation(reservation) {
       return sheets.writeReservation(reservation);
+    },
+    async cancelReservation(reservationId) {
+      return sheets.cancelReservation(reservationId);
     },
   };
 }

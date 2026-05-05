@@ -11,6 +11,7 @@ const statusOrder = [
   "disponible",
   "sin_disponibilidad",
   "confirmada",
+  "cancelada",
 ] as const;
 
 export function AdminDashboard({

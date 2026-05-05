@@ -47,6 +47,7 @@ export const reservationStatusLabels = {
   disponible: "Disponible",
   sin_disponibilidad: "Sin disponibilidad",
   confirmada: "Confirmada",
+  cancelada: "Cancelada",
 } as const;
 
 export function formatSpanishDate(value?: string): string {

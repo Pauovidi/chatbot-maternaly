@@ -49,6 +49,7 @@ export const HOTEL_COLOR_MAPPING: HotelColorMapping = {
     disponible: "#16A34A",
     sin_disponibilidad: "#DC2626",
     confirmada: "#2563EB",
+    cancelada: "#6B7280",
   },
   reviewState: {
     ok: "#0F766E",

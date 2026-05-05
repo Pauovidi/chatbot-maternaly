@@ -5,11 +5,41 @@ import { seedBlankMonthMatrix } from "../structure";
 
 const googleMock = vi.hoisted(() => {
   const valuesGet = vi.fn(async () => ({ data: { values: buildMatrix() } }));
-  const spreadsheetsGet = vi.fn(async () => ({
-    data: {
-      sheets: [{ properties: { sheetId: 123, title: "AGOSTO 2026" } }],
-    },
-  }));
+  const spreadsheetsGet = vi.fn(async (params?: { includeGridData?: boolean }) => {
+    if (params?.includeGridData) {
+      return {
+        data: {
+          sheets: [
+            {
+              properties: { sheetId: 123, title: "AGOSTO 2026" },
+              data: [
+                {
+                  startRow: 19,
+                  startColumn: 12,
+                  rowData: [
+                    {
+                      values: [
+                        {
+                          formattedValue: "Nala",
+                          note: "SMP_RESERVATION_ID=res-google-1\nMascota: Nala",
+                        },
+                      ],
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      };
+    }
+
+    return {
+      data: {
+        sheets: [{ properties: { sheetId: 123, title: "AGOSTO 2026" } }],
+      },
+    };
+  });
   const valuesBatchUpdate = vi.fn(async () => ({ data: { updatedCells: 3 } }));
   const batchUpdate = vi.fn(async () => ({ data: { replies: [] } }));
   const setCredentials = vi.fn();
@@ -110,5 +140,35 @@ describe("Google Sheets adapter", () => {
     expect(googleMock.valuesGet).toHaveBeenCalled();
     expect(googleMock.valuesBatchUpdate).toHaveBeenCalled();
     expect(googleMock.batchUpdate).toHaveBeenCalled();
+    expect(result.metadataUpdates[0]?.note).toContain("SMP_RESERVATION_ID=res-google-1");
+  });
+
+  it("localiza y cancela por reservationId usando notas de celda", async () => {
+    const adapter = await buildGoogleSheetAdapter(
+      {
+        mode: "real",
+        spreadsheetId: "sheet-1",
+        accessToken: "token",
+      },
+    );
+
+    const result = await adapter.cancelReservation("res-google-1");
+
+    expect(result.ok).toBe(true);
+    expect(result.clearedCells).toEqual(["M20"]);
+    expect(result.metadataUpdates[0]?.note).toContain("SMP_CANCELLED_RESERVATION_ID=res-google-1");
+    expect(googleMock.valuesBatchUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        spreadsheetId: "sheet-1",
+        requestBody: expect.objectContaining({
+          data: expect.arrayContaining([
+            expect.objectContaining({
+              range: "'AGOSTO 2026'!M20",
+              values: [[""]],
+            }),
+          ]),
+        }),
+      }),
+    );
   });
 });

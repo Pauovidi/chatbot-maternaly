@@ -31,7 +31,9 @@ import {
   toLegacyAvailabilityInput,
   toLegacyReservationRecord,
 } from "./integration-bridge";
+import { buildReservationReminderJob } from "./reminder-job";
 import type { DemoSheetWritePlan, ProcessReservationResult } from "./types";
+import type { SheetsWriteResult } from "../sheets/types";
 
 function buildExistingStays(records: ReservationRecord[]): ExistingStay[] {
   return records
@@ -461,6 +463,18 @@ function buildSheetWritePlan(
   };
 }
 
+function buildSheetRegistration(
+  result: SheetsWriteResult,
+): NonNullable<ReservationRecord["sheetRegistration"]> {
+  return {
+    sheetName: result.sheetName,
+    reservationId: result.reservationId,
+    rowHint: result.rowHint,
+    cells: result.cellUpdates.map((update) => update.cell),
+    writtenAt: new Date().toISOString(),
+  };
+}
+
 export async function processReservationEmail(input: {
   subject: string;
   rawText: string;
@@ -569,38 +583,88 @@ export async function processReservationEmail(input: {
     reminders = [];
   }
 
-  const effectiveReviewFlags = Array.from(
+  let effectiveReviewFlags = Array.from(
     new Set([
       ...parsedEmail.draft.reviewFlags,
       ...integrationReviewFlags,
     ]),
   );
-  const status = deriveStatus({
+  let status = deriveStatus({
     availability,
     reviewFlags: effectiveReviewFlags,
   });
-  const workflow = deriveWorkflowTrail({
-    reservation,
-    availability,
-    reviewFlags: effectiveReviewFlags,
-    reminders,
-    parsed: parsedEmail,
-    isConfirmed: false,
-  });
+  let sheetRegistration: ReservationRecord["sheetRegistration"];
 
-  const record =
+  if (reservation && flags.useGoogleSheetsReal && status === "disponible") {
+    try {
+      const sheetAdapter = await buildGoogleSheetAdapter();
+      const writeResult = await sheetAdapter.writeReservation(
+        toLegacyReservationRecord(reservation, "confirmada"),
+      );
+      sheetRegistration = buildSheetRegistration(writeResult);
+      sheetWritePlan = mapLegacyWritePlanToDemoPlan(writeResult, "confirmada");
+      status = "confirmada";
+      integrationNotes.push(
+        `Sheets: reserva escrita en ${writeResult.sheetName} (${writeResult.cellUpdates
+          .map((update) => update.cell)
+          .join(", ")}).`,
+      );
+    } catch (error) {
+      integrationReviewFlags.add("requiere_revision_manual");
+      integrationNotes.push(
+        error instanceof Error
+          ? `Sheets real: no se pudo escribir la reserva tras revalidar disponibilidad: ${error.message}`
+          : "Sheets real: no se pudo escribir la reserva tras revalidar disponibilidad.",
+      );
+      effectiveReviewFlags = Array.from(
+        new Set([
+          ...parsedEmail.draft.reviewFlags,
+          ...integrationReviewFlags,
+        ]),
+      );
+      status = deriveStatus({
+        availability,
+        reviewFlags: effectiveReviewFlags,
+      });
+    }
+  }
+
+  const preliminaryRecord =
     reservation &&
     ({
       ...reservation,
       status,
+      sheetRegistration,
       updatedAt: new Date().toISOString(),
       availability: availability ?? undefined,
       pricing: pricing ?? undefined,
       reviewFlags: effectiveReviewFlags,
       reviewState: effectiveReviewFlags.length > 0 ? "necesita_revision" : reservation.reviewState,
+      manualFollowupRequired:
+        reservation.manualFollowupRequired ||
+        effectiveReviewFlags.includes("requiere_revision_manual"),
+      identityTrace: reservation.identityTrace,
+    } satisfies ReservationRecord);
+
+  if (preliminaryRecord?.status === "confirmada") {
+    reminders = [buildReservationReminderJob(preliminaryRecord)];
+  }
+
+  const workflow = deriveWorkflowTrail({
+    reservation: preliminaryRecord,
+    availability,
+    reviewFlags: effectiveReviewFlags,
+    reminders,
+    parsed: parsedEmail,
+    isConfirmed: preliminaryRecord?.status === "confirmada",
+  });
+
+  const record =
+    preliminaryRecord &&
+    ({
+      ...preliminaryRecord,
       workflowState: workflow.workflowState,
       workflowTrail: workflow.workflowTrail,
-      identityTrace: reservation.identityTrace,
     } satisfies ReservationRecord);
 
   if (record && flags.useDemoPersistence) {

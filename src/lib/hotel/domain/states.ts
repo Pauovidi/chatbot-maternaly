@@ -3,6 +3,7 @@ export const RESERVATION_STATUSES = [
   "disponible",
   "sin_disponibilidad",
   "confirmada",
+  "cancelada",
 ] as const;
 
 export type ReservationStatus = (typeof RESERVATION_STATUSES)[number];
@@ -14,6 +15,7 @@ export const RESERVATION_WORKFLOW_STATES = [
   "available",
   "no_availability",
   "confirmed",
+  "cancelled",
   "reminder_scheduled",
   "reminder_sent",
   "failed",
@@ -59,11 +61,12 @@ export const RESERVATION_WORKFLOW_TRANSITIONS: Record<
   detected: ["parsed", "failed"],
   parsed: ["pending_review", "available", "no_availability", "failed"],
   pending_review: ["available", "no_availability", "failed"],
-  available: ["confirmed", "reminder_scheduled", "failed"],
+  available: ["confirmed", "cancelled", "reminder_scheduled", "failed"],
   no_availability: ["failed"],
-  confirmed: ["reminder_scheduled", "reminder_sent", "failed"],
-  reminder_scheduled: ["reminder_sent", "failed"],
-  reminder_sent: ["failed"],
+  confirmed: ["cancelled", "reminder_scheduled", "reminder_sent", "failed"],
+  cancelled: [],
+  reminder_scheduled: ["cancelled", "reminder_sent", "failed"],
+  reminder_sent: ["cancelled", "failed"],
   failed: [],
 } as const;
 
@@ -77,7 +80,7 @@ export function canTransitionWorkflowState(
 export function isTerminalWorkflowState(
   state: ReservationWorkflowState,
 ): boolean {
-  return state === "no_availability" || state === "reminder_sent" || state === "failed";
+  return state === "no_availability" || state === "cancelled" || state === "reminder_sent" || state === "failed";
 }
 
 export function mapLegacyReservationStatusToWorkflowState(
@@ -92,6 +95,8 @@ export function mapLegacyReservationStatusToWorkflowState(
       return "no_availability";
     case "confirmada":
       return "confirmed";
+    case "cancelada":
+      return "cancelled";
   }
 }
 
@@ -107,6 +112,8 @@ export function mapWorkflowStateToLegacyReservationStatus(
       return "disponible";
     case "no_availability":
       return "sin_disponibilidad";
+    case "cancelled":
+      return "cancelada";
     case "confirmed":
     case "reminder_scheduled":
     case "reminder_sent":

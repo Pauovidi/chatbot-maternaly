@@ -22,6 +22,8 @@ function mapLegacyStatus(status: ReservationStatus): DemoReservationRecord["stat
       return "no_availability";
     case "confirmada":
       return "confirmed";
+    case "cancelada":
+      return "cancelled";
     case "pendiente":
     default:
       return "needs_review";
@@ -56,7 +58,9 @@ export function toLegacyReservationRecord(
     specialNotes: reservation.specialNotes,
     manualFollowupRequired: reservation.manualFollowupRequired,
     cancellationRequestedAt: reservation.cancellationRequestedAt,
+    cancellationCompletedAt: reservation.cancellationCompletedAt,
     reminderSentAt: reservation.reminderSentAt,
+    sheetRegistration: reservation.sheetRegistration,
     status: mapLegacyStatus(status),
     source:
       reservation.source === "demo"
