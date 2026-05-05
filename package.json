@@ -6,10 +6,24 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test": "vitest",
+    "test:run": "vitest run",
+    "smoke": "npm run lint && npm run test:run && npm run build",
+    "smoke:http": "node scripts/smoke-http.mjs",
+    "hotel:email:poll": "tsx scripts/hotel-email-poll.ts",
+    "hotel:sheet:init": "tsx scripts/hotel-sheet-init.ts",
+    "hotel:reminders:dispatch": "tsx scripts/hotel-reminders-dispatch.ts",
+    "hotel:worker": "tsx scripts/hotel-worker.ts"
   },
   "dependencies": {
+    "exceljs": "^4.4.0",
+    "googleapis": "^171.4.0",
+    "imapflow": "^1.2.17",
+    "lucide-react": "^0.564.0",
     "next": "16.2.1",
+    "node-cron": "^4.2.1",
+    "postal-mime": "^2.7.4",
     "react": "19.2.4",
     "react-dom": "19.2.4"
   },
@@ -21,6 +35,9 @@
     "eslint": "^9",
     "eslint-config-next": "16.2.1",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "tsx": "^4.21.0",
+    "typescript": "^5",
+    "vite-tsconfig-paths": "^6.1.1",
+    "vitest": "^4.1.1"
   }
 }

@@ -23,6 +23,9 @@
 # misc
 .DS_Store
 *.pem
+.demo-state/
+.tokens/
+bot-somos-muy-perros-*.json
 
 # debug
 npm-debug.log*
