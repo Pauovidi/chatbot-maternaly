@@ -11,6 +11,7 @@
     "test:run": "vitest run",
     "smoke": "npm run lint && npm run test:run && npm run build",
     "smoke:http": "node scripts/smoke-http.mjs",
+    "hotel:conversations:seed": "tsx scripts/hotel-conversations-seed.ts",
     "hotel:email:poll": "tsx scripts/hotel-email-poll.ts",
     "hotel:sheet:init": "tsx scripts/hotel-sheet-init.ts",
     "hotel:reminders:dispatch": "tsx scripts/hotel-reminders-dispatch.ts",

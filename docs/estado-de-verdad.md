@@ -223,6 +223,16 @@ FAQ puras:
 - `faq_ubicacion`
 - `faq_contacto`
 
+## Panel de conversaciones V0
+
+- Rama de trabajo: `codex/smp-conversations-panel-v0`.
+- Nueva UI protegida: `GET /admin/conversations`.
+- Nuevas APIs protegidas: `GET/POST /api/conversations`, detalle por id, `reply`, `mode` y `mark-read`.
+- Nuevo webhook Twilio: `POST /api/twilio/whatsapp`.
+- Persistencia demo aislada: `/tmp/hotel-conversations.json` via `ConversationStore`.
+- La store de reservas demo no se sustituye y sigue aparcada hasta aprobacion.
+- Twilio real es opcional por env; sin credenciales funciona en mock.
+
 Workflow:
 
 - `workflow_disponibilidad`

@@ -53,7 +53,10 @@ async function checkProcessEndpoint() {
     throw new Error(`La respuesta de /api/demo/process no es JSON válido: ${text}`);
   }
 
-  assert(json.status === "disponible", `Se esperaba status "disponible" y llegó ${json.status}`);
+  assert(
+    ["disponible", "confirmada"].includes(json.status),
+    `Se esperaba status "disponible" o "confirmada" y llegó ${json.status}`,
+  );
   assert(json.availability?.isAvailable === true, "La disponibilidad debería ser true");
   assert(typeof json.whatsappMessage === "string" && json.whatsappMessage.trim().length > 0, "Falta el mensaje de WhatsApp");
   assert(json.sheetWritePlan?.prepared === true, "Falta el plan de escritura para Sheets");

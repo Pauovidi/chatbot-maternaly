@@ -1,0 +1,34 @@
+import { describe, expect, it } from "vitest";
+import { verifyPanelAuthorization } from "./auth";
+
+function basic(username: string, password: string) {
+  return `Basic ${Buffer.from(`${username}:${password}`).toString("base64")}`;
+}
+
+describe("panel auth", () => {
+  it("protects production access when credentials are missing", () => {
+    const result = verifyPanelAuthorization(null, { NODE_ENV: "production" });
+    expect(result.ok).toBe(false);
+    expect(result.response?.status).toBe(503);
+  });
+
+  it("accepts valid basic credentials", () => {
+    const result = verifyPanelAuthorization(basic("ops", "secret"), {
+      NODE_ENV: "production",
+      HOTEL_PANEL_USERNAME: "ops",
+      HOTEL_PANEL_PASSWORD: "secret",
+    });
+    expect(result.ok).toBe(true);
+    expect(result.agent).toBe("ops");
+  });
+
+  it("rejects invalid basic credentials", () => {
+    const result = verifyPanelAuthorization(basic("ops", "bad"), {
+      NODE_ENV: "production",
+      HOTEL_PANEL_USERNAME: "ops",
+      HOTEL_PANEL_PASSWORD: "secret",
+    });
+    expect(result.ok).toBe(false);
+    expect(result.response?.status).toBe(401);
+  });
+});
