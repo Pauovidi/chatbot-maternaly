@@ -42,14 +42,28 @@ export function PublicSiteHeader() {
           >
             Recepción emails
           </Link>
+          <Link
+            href="/admin/conversations"
+            className="text-xs font-bold uppercase tracking-[0.18em] text-[#4c3a2d] transition-colors hover:text-[#201911]"
+          >
+            Panel conversaciones
+          </Link>
         </nav>
 
-        <a
-          href={demoFormUrl}
-          className="rounded-full border border-black/10 bg-white px-5 py-2.5 text-xs font-bold uppercase tracking-[0.18em] text-[#4c3a2d] transition-colors hover:bg-[#f8f2e8]"
-        >
-          Formulario oficial
-        </a>
+        <div className="flex items-center gap-2">
+          <Link
+            href="/admin/conversations"
+            className="rounded-full border border-[#201911]/15 bg-[#201911] px-4 py-2.5 text-xs font-bold uppercase tracking-[0.14em] text-white transition-colors hover:bg-[#4c3a2d] md:hidden lg:inline-flex"
+          >
+            Conversaciones
+          </Link>
+          <a
+            href={demoFormUrl}
+            className="rounded-full border border-black/10 bg-white px-5 py-2.5 text-xs font-bold uppercase tracking-[0.18em] text-[#4c3a2d] transition-colors hover:bg-[#f8f2e8]"
+          >
+            Formulario oficial
+          </a>
+        </div>
       </div>
     </header>
   );

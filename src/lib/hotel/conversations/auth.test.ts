@@ -22,6 +22,15 @@ describe("panel auth", () => {
     expect(result.agent).toBe("ops");
   });
 
+  it("allows preview review when panel credentials are not configured", () => {
+    const result = verifyPanelAuthorization(null, {
+      NODE_ENV: "production",
+      VERCEL_ENV: "preview",
+    });
+    expect(result.ok).toBe(true);
+    expect(result.agent).toBe("demo-admin");
+  });
+
   it("rejects invalid basic credentials", () => {
     const result = verifyPanelAuthorization(basic("ops", "bad"), {
       NODE_ENV: "production",

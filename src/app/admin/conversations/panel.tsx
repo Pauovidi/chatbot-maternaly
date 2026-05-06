@@ -1,10 +1,13 @@
 "use client";
 
+import Link from "next/link";
 import { useMemo, useState } from "react";
 import {
   Bot,
   CheckCheck,
+  Circle,
   MessageSquareText,
+  PawPrint,
   RefreshCcw,
   Search,
   Send,
@@ -19,14 +22,15 @@ import type {
 
 interface ConversationsPanelProps {
   initialDashboard: ConversationDashboard;
+  twilioMode: "mock" | "real";
 }
 
 type FilterMode = NonNullable<ConversationListFilters["mode"]>;
 
 const filters: Array<{ label: string; value: FilterMode }> = [
-  { label: "Todas", value: "all" },
+  { label: "Todos", value: "all" },
   { label: "Bot", value: "bot" },
-  { label: "Humanas", value: "human" },
+  { label: "Humano", value: "human" },
   { label: "Pendientes", value: "pending" },
   { label: "Leídas", value: "read" },
 ];
@@ -70,7 +74,23 @@ function formatSender(value: string) {
   return labels[value] ?? value;
 }
 
-export function ConversationsPanel({ initialDashboard }: ConversationsPanelProps) {
+function conversationTitle(conversation: ConversationRecord) {
+  return conversation.customerName ?? conversation.displayName ?? conversation.phoneE164;
+}
+
+function conversationSubtitle(conversation: ConversationRecord) {
+  const parts = [
+    conversation.phoneE164,
+    conversation.petName ? `Mascota: ${conversation.petName}` : undefined,
+  ].filter(Boolean);
+
+  return parts.join(" · ");
+}
+
+export function ConversationsPanel({
+  initialDashboard,
+  twilioMode,
+}: ConversationsPanelProps) {
   const [dashboard, setDashboard] = useState(initialDashboard);
   const [selectedId, setSelectedId] = useState(
     initialDashboard.conversations[0]?.id ?? "",
@@ -199,22 +219,32 @@ export function ConversationsPanel({ initialDashboard }: ConversationsPanelProps
 
   return (
     <section className="conversations-panel" aria-busy={isPending}>
-      <div className="conversation-metrics">
-        <Metric label="Pendientes" value={dashboard.stats.pending} />
-        <Metric label="Modo humano" value={dashboard.stats.human} />
-        <Metric label="No leídas" value={dashboard.stats.unread} />
-        <Metric label="Resueltas" value={dashboard.stats.read} />
-      </div>
-
       <div className="conversation-workspace">
         <aside className="conversation-sidebar">
+          <div className="conversation-sidebar-brand">
+            <span className="conversation-brand-mark">
+              <PawPrint size={18} />
+            </span>
+            <div>
+              <strong>Somos Muy Perros</strong>
+              <small>Panel conversaciones</small>
+            </div>
+          </div>
+
+          <div className="conversation-metrics">
+            <Metric label="Pendientes" value={dashboard.stats.pending} />
+            <Metric label="Modo humano" value={dashboard.stats.human} />
+            <Metric label="Activas" value={dashboard.stats.total} />
+            <Metric label="Resueltas" value={dashboard.stats.read} />
+          </div>
+
           <div className="conversation-toolbar">
             <label className="conversation-search">
               <Search size={17} aria-hidden="true" />
               <input
                 value={query}
-              onChange={(event) => search(event.target.value)}
-                placeholder="Buscar teléfono, nombre o texto"
+                onChange={(event) => search(event.target.value)}
+                placeholder="Buscar teléfono, nombre o mascota"
               />
             </label>
             <button
@@ -243,6 +273,10 @@ export function ConversationsPanel({ initialDashboard }: ConversationsPanelProps
             ))}
           </div>
 
+          <Link className="conversation-admin-link" href="/admin">
+            Ver panel operativo de reservas
+          </Link>
+
           <div className="conversation-list">
             {dashboard.conversations.length === 0 ? (
               <div className="conversation-empty">No hay conversaciones para este filtro.</div>
@@ -256,8 +290,14 @@ export function ConversationsPanel({ initialDashboard }: ConversationsPanelProps
                   type="button"
                   onClick={() => setSelectedId(conversation.id)}
                 >
-                  <span>
-                    <strong>{conversation.displayName ?? conversation.phoneE164}</strong>
+                  <span className="conversation-list-main">
+                    <span className="conversation-list-title-row">
+                      <strong>{conversationTitle(conversation)}</strong>
+                      <time>{formatDate(conversation.updatedAt)}</time>
+                    </span>
+                    <span className="conversation-list-subtitle">
+                      {conversationSubtitle(conversation)}
+                    </span>
                     <small>{conversation.lastMessagePreview ?? "Sin mensajes todavía"}</small>
                   </span>
                   <span className="conversation-list-meta">
@@ -278,9 +318,11 @@ export function ConversationsPanel({ initialDashboard }: ConversationsPanelProps
               <header className="conversation-detail-header">
                 <div>
                   <p className="demo-kicker">WhatsApp</p>
-                  <h2>{selected.displayName ?? selected.phoneE164}</h2>
+                  <h2>{conversationTitle(selected)}</h2>
                   <span>
-                    {selected.phoneE164} · {selected.sourceType}
+                    {selected.phoneE164}
+                    {selected.petName ? ` · Mascota: ${selected.petName}` : ""}
+                    {selected.reservationId ? ` · Reserva: ${selected.reservationId}` : ""}
                     {selected.assignedAgent ? ` · ${selected.assignedAgent}` : ""}
                   </span>
                 </div>
@@ -291,7 +333,7 @@ export function ConversationsPanel({ initialDashboard }: ConversationsPanelProps
                     disabled={isPending || (selected.unreadCount === 0 && !selected.humanRequested)}
                   >
                     <CheckCheck size={16} />
-                    Leída
+                    Marcar como leído
                   </button>
                   <button
                     type="button"
@@ -299,7 +341,7 @@ export function ConversationsPanel({ initialDashboard }: ConversationsPanelProps
                     disabled={isPending || selected.mode === "human"}
                   >
                     <UserRound size={16} />
-                    Humano
+                    Tomar conversación
                   </button>
                   <button
                     type="button"
@@ -307,7 +349,7 @@ export function ConversationsPanel({ initialDashboard }: ConversationsPanelProps
                     disabled={isPending || selected.mode === "bot"}
                   >
                     <Bot size={16} />
-                    Bot
+                    Devolver al bot
                   </button>
                 </div>
               </header>
@@ -316,12 +358,19 @@ export function ConversationsPanel({ initialDashboard }: ConversationsPanelProps
                 <ModeBadge mode={selected.mode} />
                 <span>{selected.humanRequested ? "Handoff solicitado" : "Sin handoff"}</span>
                 <span>{selected.unreadCount} no leídos</span>
+                <span>{selected.channel ?? selected.sourceType}</span>
                 <span>{selected.messages.length} mensajes</span>
                 <span>{selected.events.length} eventos</span>
                 <span>Última actividad {formatDate(selected.updatedAt)}</span>
               </div>
 
               {error ? <div className="conversation-error">{error}</div> : null}
+              <div className={`conversation-transport conversation-transport-${twilioMode}`}>
+                <Circle size={10} fill="currentColor" />
+                {twilioMode === "mock"
+                  ? "Modo demo: los mensajes no se envían por WhatsApp real."
+                  : "Twilio real configurado para respuestas manuales."}
+              </div>
 
               <div className="conversation-timeline">
                 {[...selected.messages, ...selected.events]

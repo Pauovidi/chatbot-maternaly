@@ -9,6 +9,7 @@ export const demoOperationalBanner =
 export const demoNavItems = [
   { href: "/", label: "Demo pública" },
   { href: "/ops", label: "Ops" },
+  { href: "/admin/conversations", label: "Conversaciones" },
 ];
 
 export const demoRoutes = [
@@ -21,6 +22,11 @@ export const demoRoutes = [
     href: "/ops",
     label: "Ops",
     description: "Zona secundaria con parser, disponibilidad, precio, recordatorios y admin.",
+  },
+  {
+    href: "/admin/conversations",
+    label: "Panel conversaciones",
+    description: "Inbox de WhatsApp con modo bot/humano, handoff y respuesta manual.",
   },
 ];
 

@@ -226,10 +226,14 @@ FAQ puras:
 ## Panel de conversaciones V0
 
 - Rama de trabajo: `codex/smp-conversations-panel-v0`.
+- Pasada visible demo: `codex/smp-conversations-panel-v0-1-visible-demo`.
 - Nueva UI protegida: `GET /admin/conversations`.
+- Acceso visible desde header publico, navegacion demo y `/admin`.
 - Nuevas APIs protegidas: `GET/POST /api/conversations`, detalle por id, `reply`, `mode` y `mark-read`.
 - Nuevo webhook Twilio: `POST /api/twilio/whatsapp`.
 - Persistencia demo aislada: `/tmp/hotel-conversations.json` via `ConversationStore`.
+- Auto-seed demo en local/test/preview si la store de conversaciones esta vacia.
+- La V0.1 deja el inbox no vacio en preview/local, con cinco conversaciones sinteticas y UI de sidebar + detalle tipo chat.
 - La store de reservas demo no se sustituye y sigue aparcada hasta aprobacion.
 - Twilio real es opcional por env; sin credenciales funciona en mock.
 

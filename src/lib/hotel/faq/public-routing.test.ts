@@ -10,7 +10,11 @@ describe("routing público de la experiencia", () => {
     expect(navHrefs).not.toContain("/admin");
   });
 
-  it("reduce la navegación principal a demo pública y ops", () => {
-    expect(demoRoutes.map((route) => route.href)).toEqual(["/", "/ops"]);
+  it("mantiene la demo, ops y el panel de conversaciones como rutas navegables", () => {
+    expect(demoRoutes.map((route) => route.href)).toEqual([
+      "/",
+      "/ops",
+      "/admin/conversations",
+    ]);
   });
 });

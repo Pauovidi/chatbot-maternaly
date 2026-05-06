@@ -2,6 +2,7 @@ import { ConversationsPanel } from "./panel";
 import { SiteShell } from "@/components/site-shell";
 import { verifyPanelPageAccess } from "@/lib/hotel/conversations/auth";
 import { listConversationDashboard } from "@/lib/hotel/conversations/service";
+import { readTwilioWhatsAppConfig } from "@/lib/hotel/twilio/client";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -25,6 +26,7 @@ export default async function ConversationsAdminPage() {
   }
 
   const dashboard = await listConversationDashboard();
+  const twilioConfig = readTwilioWhatsAppConfig();
 
   return (
     <SiteShell>
@@ -36,7 +38,10 @@ export default async function ConversationsAdminPage() {
           respuestas manuales sin tocar el flujo validado de reservas.
         </p>
       </section>
-      <ConversationsPanel initialDashboard={dashboard} />
+      <ConversationsPanel
+        initialDashboard={dashboard}
+        twilioMode={twilioConfig.mock ? "mock" : "real"}
+      />
     </SiteShell>
   );
 }

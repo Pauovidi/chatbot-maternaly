@@ -25,7 +25,14 @@ describe("conversations panel seed contract", () => {
     const seed = buildConversationSeed("2026-05-06T08:00:00.000Z");
 
     expect(seed.updatedAt).toBe("2026-05-06T08:00:00.000Z");
-    expect(seed.conversations.length).toBeGreaterThanOrEqual(2);
+    expect(seed.conversations).toHaveLength(5);
+    expect(seed.conversations.map((conversation) => conversation.petName)).toEqual([
+      "Luna",
+      "Nala",
+      "Roco",
+      "Bruno",
+      "Kira",
+    ]);
     expect(
       seed.conversations.some(
         (conversation) => conversation.mode === "human" && conversation.humanRequested,

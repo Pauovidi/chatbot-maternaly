@@ -1,0 +1,87 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { renderToStaticMarkup } from "react-dom/server";
+import { describe, expect, it } from "vitest";
+import { demoNavItems } from "@/components/demo-data";
+import { ConversationsPanel } from "@/app/admin/conversations/panel";
+import { buildConversationSeed } from "./demo-seed";
+import type { ConversationDashboard } from "./types";
+
+function readSurface(relativePath: string) {
+  return readFileSync(path.join(process.cwd(), relativePath), "utf8");
+}
+
+function forbiddenReferenceCopyPatterns() {
+  const brand = String.fromCharCode(77, 117, 100, 97, 110, 122, 97, 115);
+  const shortBrand = String.fromCharCode(77, 70, 77);
+
+  return [
+    new RegExp(`\\b${brand}FM\\b`, "i"),
+    new RegExp(`\\bSoporte${brand}FM\\b`, "i"),
+    new RegExp(`\\b${shortBrand}\\b`),
+    new RegExp(`\\b${brand.toLowerCase()}s?\\b`, "i"),
+    /\benv[ií]o\b/i,
+  ];
+}
+
+describe("conversations panel visible demo copy", () => {
+  it("exposes the conversations panel from demo navigation data", () => {
+    expect(demoNavItems).toContainEqual({
+      href: "/admin/conversations",
+      label: "Conversaciones",
+    });
+    expect(readSurface("src/components/public-site-header.tsx")).toContain(
+      "Panel conversaciones",
+    );
+    expect(readSurface("src/app/admin/page.tsx")).toContain(
+      "Abrir panel de conversaciones",
+    );
+  });
+
+  it("renders a non-empty Somos Muy Perros inbox with mock WhatsApp notice", () => {
+    const conversations = buildConversationSeed("2026-05-06T08:00:00.000Z").conversations;
+    const dashboard: ConversationDashboard = {
+      conversations,
+      stats: {
+        total: conversations.length,
+        pending: conversations.filter(
+          (conversation) => conversation.humanRequested || conversation.unreadCount > 0,
+        ).length,
+        human: conversations.filter((conversation) => conversation.mode === "human").length,
+        unread: conversations.filter((conversation) => conversation.unreadCount > 0).length,
+        read: conversations.filter(
+          (conversation) => conversation.unreadCount === 0 && !conversation.humanRequested,
+        ).length,
+      },
+    };
+
+    const html = renderToStaticMarkup(
+      <ConversationsPanel initialDashboard={dashboard} twilioMode="mock" />,
+    );
+
+    expect(html).toContain("Somos Muy Perros");
+    expect(html).toContain("Panel conversaciones");
+    expect(html).toContain("Marta R.");
+    expect(html).toContain("Mascota: Luna");
+    expect(html).toContain("Modo demo: los mensajes no se envían por WhatsApp real.");
+    expect(html).not.toContain("No hay conversaciones para este filtro");
+  });
+
+  it("does not expose reference moving-company copy in user-facing panel surfaces", () => {
+    const surfaces = [
+      "src/app/admin/conversations/page.tsx",
+      "src/app/admin/conversations/panel.tsx",
+      "src/components/demo-data.ts",
+      "src/components/public-site-header.tsx",
+      "src/components/site-shell.tsx",
+      "src/lib/hotel/conversations/demo-seed.ts",
+      "docs/CONVERSATIONS_PANEL_V0.md",
+    ]
+      .map(readSurface)
+      .join("\n");
+
+    for (const pattern of forbiddenReferenceCopyPatterns()) {
+      expect(surfaces).not.toMatch(pattern);
+    }
+  });
+});

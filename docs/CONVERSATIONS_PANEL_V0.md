@@ -1,4 +1,16 @@
-# Panel de conversaciones V0
+# Panel de conversaciones V0/V0.1
+
+## V0.1 visible demo
+
+La pasada V0.1 hace que el panel sea revisable sin preparar datos manuales:
+
+- Acceso visible desde el header publico con `Panel conversaciones` y `Conversaciones`.
+- Acceso visible desde `/admin` con `Abrir panel de conversaciones`.
+- Inbox de dos columnas: sidebar con marca, metricas, filtros, busqueda y lista; detalle tipo chat con timeline, eventos y composer.
+- Auto-seed demo en local/test/Vercel preview cuando la store esta vacia.
+- Cinco conversaciones sinteticas del hotel canino: disponibilidad, handoff humano, comida, vacunas y cancelacion.
+- Aviso visible de Twilio mock: `Modo demo: los mensajes no se envian por WhatsApp real.`
+- Produccion sigue bloqueada sin `HOTEL_PANEL_USERNAME` y `HOTEL_PANEL_PASSWORD`.
 
 ## Arquitectura
 
@@ -16,6 +28,7 @@ La persistencia es intencionadamente demo/no durable. Para produccion real debe 
 ## Rutas UI
 
 - `GET /admin/conversations`: inbox operativo con listado, filtros, detalle, timeline, cambio bot/human, mark-read y composer manual.
+- Accesos visibles: header publico, navegacion demo y card en `/admin`.
 
 ## Rutas API
 
@@ -42,9 +55,18 @@ Panel:
 - `HOTEL_PANEL_PASSWORD`
 - `HOTEL_PANEL_ALLOW_LOCAL_AUTH_BYPASS=true` solo para local si hace falta.
 
+Sin credenciales, local/test y Vercel preview permiten acceso practico para revision de demo. En produccion sin credenciales, el panel y las APIs admin quedan bloqueados.
+
 Conversaciones:
 
 - `HOTEL_CONVERSATIONS_STORE_PATH` opcional. Por defecto usa `/tmp/hotel-conversations.json`.
+- `HOTEL_CONVERSATIONS_DEMO_SEED=true` fuerza seed demo si la store esta vacia.
+
+Auto-seed:
+
+- Local/test: si la store esta vacia, se crean conversaciones demo sinteticas.
+- Vercel preview: si la store esta vacia, se crean conversaciones demo sinteticas.
+- Produccion: no hay auto-seed salvo `HOTEL_CONVERSATIONS_DEMO_SEED=true`.
 
 Twilio:
 
@@ -80,6 +102,8 @@ Si faltan credenciales Twilio o `HOTEL_CONVERSATIONS_MOCK_TWILIO=true`, el reply
 ```bash
 npm run hotel:conversations:seed
 ```
+
+El seed incluye cinco conversaciones sinteticas del hotel canino: disponibilidad, handoff humano, comida, vacunas y cancelacion.
 
 ## Tests
 

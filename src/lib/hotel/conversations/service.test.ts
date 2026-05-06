@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  ensureDemoConversationSeed,
   handleInboundWhatsApp,
   markConversationRead,
   sendManualReply,
   setConversationMode,
+  shouldAutoSeedConversations,
 } from "./service";
 import {
   createEmptyConversationSnapshot,
@@ -126,6 +128,43 @@ class MemoryConversationStore implements ConversationStore {
 }
 
 describe("conversation service", () => {
+  it("auto-seeds local and preview empty stores without seeding production by default", async () => {
+    expect(shouldAutoSeedConversations({ NODE_ENV: "development" })).toBe(true);
+    expect(shouldAutoSeedConversations({ NODE_ENV: "production", VERCEL_ENV: "preview" })).toBe(true);
+    expect(shouldAutoSeedConversations({ NODE_ENV: "production", VERCEL_ENV: "production" })).toBe(false);
+    expect(
+      shouldAutoSeedConversations({
+        NODE_ENV: "production",
+        VERCEL_ENV: "production",
+        HOTEL_CONVERSATIONS_DEMO_SEED: "true",
+      }),
+    ).toBe(true);
+
+    const store = new MemoryConversationStore();
+    await expect(
+      ensureDemoConversationSeed(store, {
+        NODE_ENV: "production",
+        VERCEL_ENV: "preview",
+      }),
+    ).resolves.toBe(true);
+    expect((await store.list()).length).toBeGreaterThanOrEqual(5);
+    await expect(
+      ensureDemoConversationSeed(store, {
+        NODE_ENV: "production",
+        VERCEL_ENV: "preview",
+      }),
+    ).resolves.toBe(false);
+
+    const productionStore = new MemoryConversationStore();
+    await expect(
+      ensureDemoConversationSeed(productionStore, {
+        NODE_ENV: "production",
+        VERCEL_ENV: "production",
+      }),
+    ).resolves.toBe(false);
+    expect(await productionStore.list()).toHaveLength(0);
+  });
+
   it("creates and reuses a conversation by phone", async () => {
     const store = new MemoryConversationStore();
 

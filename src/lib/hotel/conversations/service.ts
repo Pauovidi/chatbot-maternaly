@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { buildConversationSeed } from "./demo-seed";
 import { resolvePublicChatReply } from "@/lib/hotel/faq/public-chat";
 import { getConversationStore } from "./file-store";
 import type { ConversationStore } from "./store";
@@ -50,6 +51,12 @@ export interface ManualReplyResult {
   error?: string;
 }
 
+export interface DemoSeedDecisionEnv {
+  NODE_ENV?: string;
+  VERCEL_ENV?: string;
+  HOTEL_CONVERSATIONS_DEMO_SEED?: string;
+}
+
 function nowIso() {
   return new Date().toISOString();
 }
@@ -85,6 +92,34 @@ export function isHumanRequest(body: string): boolean {
     "atencion",
     "responsable",
   ].some((phrase) => normalized.includes(phrase));
+}
+
+export function shouldAutoSeedConversations(
+  env: DemoSeedDecisionEnv = process.env,
+): boolean {
+  if (env.HOTEL_CONVERSATIONS_DEMO_SEED === "true") {
+    return true;
+  }
+
+  if (env.VERCEL_ENV === "preview") {
+    return true;
+  }
+
+  return env.NODE_ENV !== "production";
+}
+
+export async function ensureDemoConversationSeed(
+  store: ConversationStore = getConversationStore(),
+  env: DemoSeedDecisionEnv = process.env,
+): Promise<boolean> {
+  const snapshot = await store.load();
+
+  if (snapshot.conversations.length > 0 || !shouldAutoSeedConversations(env)) {
+    return false;
+  }
+
+  await store.seed(buildConversationSeed().conversations);
+  return true;
 }
 
 function createEvent(conversationId: string, eventType: string, payload?: unknown): ConversationEvent {
@@ -176,6 +211,7 @@ export async function listConversationDashboard(
   filters?: ConversationListFilters,
   store: ConversationStore = getConversationStore(),
 ): Promise<ConversationDashboard> {
+  await ensureDemoConversationSeed(store);
   const conversations = await store.list(filters);
   const all = await store.list();
 

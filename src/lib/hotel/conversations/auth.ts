@@ -10,6 +10,7 @@ export interface PanelAuthResult {
 
 type PanelAuthEnv = {
   NODE_ENV?: string;
+  VERCEL_ENV?: string;
   HOTEL_PANEL_USERNAME?: string;
   HOTEL_PANEL_PASSWORD?: string;
   HOTEL_PANEL_ALLOW_LOCAL_AUTH_BYPASS?: string;
@@ -51,6 +52,7 @@ function canBypassMissingCredentials(env: PanelAuthEnv = process.env): boolean {
   return (
     env.NODE_ENV === "test" ||
     env.NODE_ENV === "development" ||
+    env.VERCEL_ENV === "preview" ||
     env.HOTEL_PANEL_ALLOW_LOCAL_AUTH_BYPASS === "true"
   );
 }

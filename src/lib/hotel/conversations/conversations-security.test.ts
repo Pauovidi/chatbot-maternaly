@@ -68,6 +68,8 @@ describe("conversations security", () => {
       "src/app/api/conversations/[id]/reply/route.ts",
       "src/app/api/conversations/[id]/mode/route.ts",
       "src/app/api/conversations/[id]/mark-read/route.ts",
+      "src/app/api/conversations/[id]/messages/route.ts",
+      "src/app/api/conversations/events/route.ts",
     ];
 
     for (const routeFile of routeFiles) {
