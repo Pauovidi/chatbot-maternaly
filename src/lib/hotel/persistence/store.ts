@@ -1,4 +1,5 @@
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 
 import type {
@@ -24,12 +25,22 @@ const defaultState: DemoPersistenceState = {
   updatedAt: new Date().toISOString(),
 };
 
+function getStoreDirectory(): string {
+  if (process.env.HOTEL_DEMO_STORE_DIR?.trim()) {
+    return process.env.HOTEL_DEMO_STORE_DIR.trim();
+  }
+
+  return process.env.VERCEL
+    ? path.join(os.tmpdir(), "hotel-canino-demo")
+    : path.join(process.cwd(), ".demo-state");
+}
+
 function getStorePath(storeName = "hotel-demo-state.json"): string {
-  return path.join(process.cwd(), ".demo-state", storeName);
+  return path.join(getStoreDirectory(), storeName);
 }
 
 async function ensureDirectory(): Promise<void> {
-  await mkdir(path.join(process.cwd(), ".demo-state"), { recursive: true });
+  await mkdir(getStoreDirectory(), { recursive: true });
 }
 
 export async function loadDemoState(
@@ -65,6 +76,7 @@ export async function saveDemoState(
   );
 
   await writeFile(tempPath, payload, "utf8");
+  await rm(filePath, { force: true });
   await rename(tempPath, filePath);
 }
 

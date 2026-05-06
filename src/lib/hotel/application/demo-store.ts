@@ -1,4 +1,5 @@
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 
 import {
@@ -9,8 +10,19 @@ import {
 import type { ReminderJob, ReservationRecord } from "../domain/contracts";
 import type { DemoLogEntry, DemoStoreState } from "./types";
 
-const STORE_DIRECTORY = path.join(process.cwd(), ".demo-state");
-const STORE_FILE = path.join(STORE_DIRECTORY, "hotel-canino-domain.json");
+function getStoreDirectory(): string {
+  if (process.env.HOTEL_DEMO_STORE_DIR?.trim()) {
+    return process.env.HOTEL_DEMO_STORE_DIR.trim();
+  }
+
+  return process.env.VERCEL
+    ? path.join(os.tmpdir(), "hotel-canino-demo")
+    : path.join(process.cwd(), ".demo-state");
+}
+
+function getStoreFile(): string {
+  return path.join(getStoreDirectory(), "hotel-canino-domain.json");
+}
 
 const initialState: DemoStoreState = {
   reservations: DEMO_RESERVATION_RECORDS,
@@ -34,12 +46,12 @@ const initialState: DemoStoreState = {
 };
 
 async function ensureStoreDirectory(): Promise<void> {
-  await mkdir(STORE_DIRECTORY, { recursive: true });
+  await mkdir(getStoreDirectory(), { recursive: true });
 }
 
 async function seedIfNeeded(): Promise<void> {
   try {
-    await readFile(STORE_FILE, "utf8");
+    await readFile(getStoreFile(), "utf8");
   } catch {
     await saveDemoState(initialState);
   }
@@ -50,7 +62,7 @@ export async function loadDemoState(): Promise<DemoStoreState> {
   await seedIfNeeded();
 
   try {
-    const raw = await readFile(STORE_FILE, "utf8");
+    const raw = await readFile(getStoreFile(), "utf8");
     return {
       ...initialState,
       ...(JSON.parse(raw) as DemoStoreState),
@@ -70,10 +82,11 @@ export async function saveDemoState(state: DemoStoreState): Promise<void> {
     null,
     2,
   );
-  const tempFile = `${STORE_FILE}.tmp`;
+  const tempFile = `${getStoreFile()}.tmp`;
 
   await writeFile(tempFile, payload, "utf8");
-  await rename(tempFile, STORE_FILE);
+  await rm(getStoreFile(), { force: true });
+  await rename(tempFile, getStoreFile());
 }
 
 export async function appendLog(
