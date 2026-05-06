@@ -319,3 +319,9 @@ export function getConversationStore(): FileConversationStore {
 
   return storeSingleton;
 }
+
+export function resetConversationStoreForTests(): void {
+  if (process.env.NODE_ENV === "test") {
+    storeSingleton = undefined;
+  }
+}

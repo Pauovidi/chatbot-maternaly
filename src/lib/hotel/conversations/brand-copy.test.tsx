@@ -61,8 +61,13 @@ describe("conversations panel visible demo copy", () => {
 
     expect(html).toContain("Somos Muy Perros");
     expect(html).toContain("Panel conversaciones");
+    expect(html).toContain("Inbox WhatsApp");
+    expect(html).toContain("Pendientes");
+    expect(html).toContain("En humano");
+    expect(html).toContain("Todas");
     expect(html).toContain("Marta R.");
     expect(html).toContain("Mascota: Luna");
+    expect(html).toContain("Respuesta manual del equipo");
     expect(html).toContain("Modo demo: los mensajes no se envían por WhatsApp real.");
     expect(html).not.toContain("No hay conversaciones para este filtro");
   });

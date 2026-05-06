@@ -1,4 +1,17 @@
-# Panel de conversaciones V0/V0.1
+# Panel de conversaciones V0/V0.2
+
+## V0.2 UI + Twilio Sandbox
+
+La pasada V0.2 pule el inbox y deja preparado el Sandbox de Twilio:
+
+- Header operativo compacto con marca, estado `Modo demo`/`Twilio real` y accesos a chat web y admin de reservas.
+- Sidebar mas densa: metricas, busqueda, filtros `Todas`, `Pendientes`, `Humano`, `Bot`, `Leidas` y seleccion clara.
+- Detalle tipo chat con cabecera de contexto, timeline, eventos de sistema y composer sticky.
+- Seed demo enriquecido con eventos `reservation_context_detected`, `human_requested`, `auto_reply_skipped_human_mode`, `manual_reply_sent` y `marked_read`.
+- Webhook Twilio acepta `x-twilio-webhook-token`, `x-hotel-webhook-token` o `?token=` cuando `TWILIO_WEBHOOK_AUTH_TOKEN` esta configurado.
+- Inbound media-only queda registrado como adjunto en lugar de descartarse si `Body` viene vacio.
+- Retries de Twilio con el mismo `MessageSid` no duplican mensajes.
+- Outbound Twilio real devuelve fallo controlado si hay error de red.
 
 ## V0.1 visible demo
 
@@ -74,20 +87,42 @@ Twilio:
 - `TWILIO_AUTH_TOKEN`
 - `TWILIO_WHATSAPP_FROM`
 - `TWILIO_VALIDATE_SIGNATURES` reservado para endurecer validacion.
-- `TWILIO_WEBHOOK_AUTH_TOKEN` opcional. Si se define, el webhook exige `?token=` o header `x-hotel-webhook-token`.
+- `TWILIO_WEBHOOK_AUTH_TOKEN` opcional. Si se define, el webhook exige `?token=`, header `x-twilio-webhook-token` o header `x-hotel-webhook-token`.
 - `HOTEL_CONVERSATIONS_MOCK_TWILIO=true|false`
 
 Si faltan credenciales Twilio o `HOTEL_CONVERSATIONS_MOCK_TWILIO=true`, el reply manual usa mock y no llama a Twilio.
 
-## Configurar Twilio real
+Vercel preview:
+
+- La preview puede estar protegida por Vercel Deployment Protection.
+- Twilio no puede llamar una preview que responde 401.
+- En local no hay `VERCEL_AUTOMATION_BYPASS_SECRET` exportado.
+- El proyecto Vercel tiene Protection Bypass for Automation configurado; no se imprime ni se documenta el valor.
+- Para Twilio Sandbox en preview protegida, usa plantilla:
+
+  `https://hotel-canino-demo-devestial-devestial.vercel.app/api/twilio/whatsapp?x-vercel-protection-bypass=<VERCEL_AUTOMATION_BYPASS_SECRET>&token=<TWILIO_WEBHOOK_AUTH_TOKEN>`
+
+- Si no se puede recuperar el bypass, usa una URL publica no protegida, desactiva temporalmente la proteccion de preview o configura el Sandbox contra produccion solo cuando el panel este protegido y validado.
+
+## Configurar Twilio Sandbox/real
 
 1. Define `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN` y `TWILIO_WHATSAPP_FROM`.
 2. Pon `HOTEL_CONVERSATIONS_MOCK_TWILIO=false`.
-3. En Twilio, configura el webhook WhatsApp como:
+3. Define `TWILIO_WEBHOOK_AUTH_TOKEN` para proteger inbound.
+4. En Twilio Console entra en `Messaging` -> `Try it out` -> `Send a WhatsApp message` -> `Sandbox settings`.
+5. En `When a message comes in`, metodo `POST`, configura:
 
-   `POST https://<dominio>/api/twilio/whatsapp`
+   `https://<dominio-publico>/api/twilio/whatsapp?token=<TWILIO_WEBHOOK_AUTH_TOKEN>`
 
-4. Si usas `TWILIO_WEBHOOK_AUTH_TOKEN`, configura la URL con `?token=<valor>` o añade el header desde tu capa proxy.
+6. Si usas preview protegida con bypass de Vercel:
+
+   `https://<preview>/api/twilio/whatsapp?x-vercel-protection-bypass=<masked>&token=<masked>`
+
+7. `TWILIO_WHATSAPP_FROM` debe ser el remitente de WhatsApp de Twilio, por ejemplo el Sandbox o numero aprobado, pero no se hardcodea en codigo.
+
+Al cambiar el webhook del Sandbox que antes apuntaba a otro proyecto, ese otro proyecto deja de recibir inbound desde ese Sandbox. Es reversible pegando de nuevo la URL anterior del campo `When a message comes in`.
+
+`TWILIO_VALIDATE_SIGNATURES=true` queda reservado para validacion criptografica oficial de Twilio antes de produccion real con numero definitivo.
 
 ## Comportamiento bot/human
 
@@ -104,6 +139,19 @@ npm run hotel:conversations:seed
 ```
 
 El seed incluye cinco conversaciones sinteticas del hotel canino: disponibilidad, handoff humano, comida, vacunas y cancelacion.
+
+## Smoke Twilio Sandbox local
+
+```bash
+curl -X POST http://127.0.0.1:3000/api/twilio/whatsapp \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  --data-urlencode "From=whatsapp:+34600000001" \
+  --data-urlencode "To=whatsapp:+14155238886" \
+  --data-urlencode "Body=Hola, quiero hablar con una persona" \
+  --data-urlencode "MessageSid=SM_SMOKE_001"
+```
+
+Debe devolver TwiML, crear o reutilizar conversacion, guardar inbound, activar `mode=human` si detecta handoff y hacerlo visible en `/admin/conversations`.
 
 ## Tests
 

@@ -22,7 +22,20 @@ export async function POST(
     return NextResponse.json({ ok: false, error: "Invalid mode" }, { status: 400 });
   }
 
-  const conversation = await setConversationMode(id, body.mode, auth.agent);
+  let conversation: Awaited<ReturnType<typeof setConversationMode>>;
+  try {
+    conversation = await setConversationMode(id, body.mode, auth.agent);
+  } catch (error) {
+    if (error instanceof Error && error.message === "Conversation not found") {
+      return NextResponse.json(
+        { ok: false, error: "Conversation not found" },
+        { status: 404 },
+      );
+    }
+
+    throw error;
+  }
+
   return NextResponse.json({ ok: true, conversation });
 }
 

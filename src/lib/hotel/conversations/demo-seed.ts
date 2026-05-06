@@ -104,7 +104,7 @@ export function buildConversationSeed(
       humanRequested: false,
       lastInboundAt: "2026-04-07T17:24:00.000Z",
       lastOutboundAt: "2026-04-07T17:19:00.000Z",
-      lastMessagePreview: "Perfecto, avisadme si falta algun dato antes de confirmar.",
+      lastMessagePreview: "Perfecto, os paso el formulario y quedo pendiente de la confirmacion.",
       unreadCount: 1,
       createdAt: "2026-04-07T17:18:00.000Z",
       updatedAt: "2026-04-07T17:24:00.000Z",
@@ -115,7 +115,7 @@ export function buildConversationSeed(
           "2026-04-07T17:18:00.000Z",
           "inbound",
           "user",
-          "Hola, quiero reservar para Luna del 12 al 16 de abril. Es una labradora tranquila.",
+          "Hola, ¿teneis disponibilidad para Luna del 12 al 16 de abril? Es una labradora tranquila.",
         ),
         message(
           "conv-demo-001",
@@ -123,7 +123,7 @@ export function buildConversationSeed(
           "2026-04-07T17:19:00.000Z",
           "outbound",
           "bot",
-          "Para comprobar disponibilidad real necesitamos que envies la solicitud por el formulario oficial con fechas y turnos.",
+          "Para comprobar disponibilidad real, envia la solicitud por el formulario oficial con fechas de entrada y salida. El equipo revisa plazas y te confirma.",
         ),
         message(
           "conv-demo-001",
@@ -131,12 +131,12 @@ export function buildConversationSeed(
           "2026-04-07T17:24:00.000Z",
           "inbound",
           "user",
-          "Perfecto, avisadme si falta algun dato antes de confirmar.",
+          "Perfecto, os paso el formulario y quedo pendiente de la confirmacion.",
         ),
       ],
       events: [
         event("conv-demo-001", 1, "2026-04-07T17:18:00.000Z", "conversation_created"),
-        event("conv-demo-001", 2, "2026-04-07T17:24:00.000Z", "booking_context_detected"),
+        event("conv-demo-001", 2, "2026-04-07T17:24:00.000Z", "reservation_context_detected"),
       ],
     },
     {
@@ -190,6 +190,12 @@ export function buildConversationSeed(
       events: [
         event("conv-demo-002", 1, "2026-04-08T09:27:00.000Z", "conversation_created"),
         event("conv-demo-002", 2, "2026-04-08T09:30:00.000Z", "human_requested"),
+        event(
+          "conv-demo-002",
+          3,
+          "2026-04-08T09:35:00.000Z",
+          "auto_reply_skipped_human_mode",
+        ),
       ],
     },
     {
@@ -234,6 +240,7 @@ export function buildConversationSeed(
       events: [
         event("conv-demo-003", 1, "2026-04-05T11:40:00.000Z", "conversation_created"),
         event("conv-demo-003", 2, "2026-04-05T11:45:00.000Z", "bot_reply_sent"),
+        event("conv-demo-003", 3, "2026-04-05T11:45:00.000Z", "marked_read"),
       ],
     },
     {
@@ -295,14 +302,14 @@ export function buildConversationSeed(
       sourceRecordId: "res-demo-kira-20260421",
       reservationId: "res-demo-kira-20260421",
       mode: "human",
-      humanRequested: true,
+      humanRequested: false,
       assignedAgent: "recepcion",
       lastInboundAt: "2026-04-10T18:02:00.000Z",
-      lastOutboundAt: "2026-04-10T17:55:00.000Z",
-      lastMessagePreview: "Necesito cancelar la reserva de Kira para el finde.",
-      unreadCount: 1,
+      lastOutboundAt: "2026-04-10T18:09:00.000Z",
+      lastMessagePreview: "Hola Laura, lo reviso contigo. Podemos cambiar fechas o dejar la cancelacion anotada si lo prefieres.",
+      unreadCount: 0,
       createdAt: "2026-04-10T17:50:00.000Z",
-      updatedAt: "2026-04-10T18:02:00.000Z",
+      updatedAt: "2026-04-10T18:09:00.000Z",
       messages: [
         message(
           "conv-demo-005",
@@ -328,10 +335,19 @@ export function buildConversationSeed(
           "user",
           "Necesito cancelar la reserva de Kira para el finde.",
         ),
+        message(
+          "conv-demo-005",
+          4,
+          "2026-04-10T18:09:00.000Z",
+          "outbound",
+          "human",
+          "Hola Laura, lo reviso contigo. Podemos cambiar fechas o dejar la cancelacion anotada si lo prefieres.",
+        ),
       ],
       events: [
         event("conv-demo-005", 1, "2026-04-10T17:50:00.000Z", "conversation_created"),
         event("conv-demo-005", 2, "2026-04-10T17:55:00.000Z", "human_requested"),
+        event("conv-demo-005", 3, "2026-04-10T18:09:00.000Z", "manual_reply_sent"),
       ],
     },
   ];

@@ -198,6 +198,31 @@ describe("conversation service", () => {
     expect(inbound.conversation.events.some((event) => event.eventType === "auto_reply_skipped_human_mode")).toBe(true);
   });
 
+  it("detects reception handoff language and deduplicates Twilio retries by MessageSid", async () => {
+    const store = new MemoryConversationStore();
+
+    const first = await handleInboundWhatsApp(
+      {
+        from: "whatsapp:+34612345678",
+        body: "Hola, quiero hablar con recepción por una urgencia",
+        messageSid: "SM_DEDUPE_001",
+      },
+      store,
+    );
+    const retry = await handleInboundWhatsApp(
+      {
+        from: "whatsapp:+34612345678",
+        body: "Hola, quiero hablar con recepción por una urgencia",
+        messageSid: "SM_DEDUPE_001",
+      },
+      store,
+    );
+
+    expect(first.conversation.mode).toBe("human");
+    expect(retry.inbound.id).toBe(first.inbound.id);
+    expect((await store.list())[0].messages).toHaveLength(2);
+  });
+
   it("manual reply stores outbound human message and uses mock sender", async () => {
     const store = new MemoryConversationStore();
     const inbound = await handleInboundWhatsApp(

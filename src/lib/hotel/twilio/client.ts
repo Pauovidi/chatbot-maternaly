@@ -65,23 +65,32 @@ export async function sendTwilioWhatsAppText(
     };
   }
 
-  const response = await fetch(
-    `https://api.twilio.com/2010-04-01/Accounts/${config.accountSid}/Messages.json`,
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Basic ${Buffer.from(
-          `${config.accountSid}:${config.authToken}`,
-        ).toString("base64")}`,
-        "Content-Type": "application/x-www-form-urlencoded",
+  let response: Response;
+  try {
+    response = await fetch(
+      `https://api.twilio.com/2010-04-01/Accounts/${config.accountSid}/Messages.json`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Basic ${Buffer.from(
+            `${config.accountSid}:${config.authToken}`,
+          ).toString("base64")}`,
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: new URLSearchParams({
+          From: asWhatsAppAddress(config.from),
+          To: asWhatsAppAddress(input.to),
+          Body: input.body,
+        }),
       },
-      body: new URLSearchParams({
-        From: asWhatsAppAddress(config.from),
-        To: asWhatsAppAddress(input.to),
-        Body: input.body,
-      }),
-    },
-  );
+    );
+  } catch {
+    return {
+      ok: false,
+      mode: "real",
+      error: "Twilio network request failed.",
+    };
+  }
 
   const text = await response.text();
 

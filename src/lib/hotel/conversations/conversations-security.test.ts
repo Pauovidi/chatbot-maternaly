@@ -1,4 +1,5 @@
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
@@ -10,10 +11,19 @@ import {
   normalizePhone,
 } from "./service";
 import { verifyPanelAuthorization } from "./auth";
+import { resetConversationStoreForTests } from "./file-store";
 
 describe("conversations security", () => {
+  let tempDir: string | undefined;
+
   afterEach(() => {
+    resetConversationStoreForTests();
     delete process.env.TWILIO_WEBHOOK_AUTH_TOKEN;
+    delete process.env.HOTEL_CONVERSATIONS_STORE_DIR;
+    if (tempDir) {
+      rmSync(tempDir, { recursive: true, force: true });
+      tempDir = undefined;
+    }
   });
 
   it("rejects panel access in production when credentials are missing", () => {
@@ -96,6 +106,80 @@ describe("conversations security", () => {
     expect(await response.text()).toBe(
       '<?xml version="1.0" encoding="UTF-8"?><Response></Response>',
     );
+  });
+
+  it("accepts Twilio webhook token by dedicated header and creates a handoff", async () => {
+    tempDir = mkdtempSync(path.join(os.tmpdir(), "hotel-twilio-webhook-"));
+    process.env.HOTEL_CONVERSATIONS_STORE_DIR = tempDir;
+    process.env.TWILIO_WEBHOOK_AUTH_TOKEN = "expected-token";
+
+    const response = await postTwilioWebhook(
+      new Request("https://example.test/api/twilio/whatsapp", {
+        method: "POST",
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+          "x-twilio-webhook-token": "expected-token",
+        },
+        body: new URLSearchParams({
+          From: "whatsapp:+34600000001",
+          To: "whatsapp:+14155238886",
+          Body: "Hola, quiero hablar con recepción",
+          MessageSid: "SM_HEADER_TOKEN_001",
+          ProfileName: "Cliente Sandbox",
+        }),
+      }),
+    );
+
+    const text = await response.text();
+    const payload = JSON.parse(
+      readFileSync(path.join(tempDir, "hotel-conversations.json"), "utf8"),
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Content-Type")).toContain("text/xml");
+    expect(text).toContain("<Response><Message>");
+    expect(payload.conversations).toHaveLength(1);
+    expect(payload.conversations[0]).toEqual(
+      expect.objectContaining({
+        phoneNormalized: "34600000001",
+        mode: "human",
+        humanRequested: true,
+      }),
+    );
+    expect(payload.conversations[0].events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ eventType: "human_requested" }),
+      ]),
+    );
+  });
+
+  it("accepts media-only Twilio webhook payloads without crashing", async () => {
+    tempDir = mkdtempSync(path.join(os.tmpdir(), "hotel-twilio-media-"));
+    process.env.HOTEL_CONVERSATIONS_STORE_DIR = tempDir;
+
+    const response = await postTwilioWebhook(
+      new Request("https://example.test/api/twilio/whatsapp", {
+        method: "POST",
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+        },
+        body: new URLSearchParams({
+          From: "whatsapp:+34600000002",
+          To: "whatsapp:+14155238886",
+          Body: "",
+          MessageSid: "SM_MEDIA_001",
+          NumMedia: "1",
+          MediaUrl0: "https://example.test/media.jpg",
+        }),
+      }),
+    );
+
+    const payload = JSON.parse(
+      readFileSync(path.join(tempDir, "hotel-conversations.json"), "utf8"),
+    );
+
+    expect(response.status).toBe(200);
+    expect(payload.conversations[0].messages[0].body).toContain("adjunto");
   });
 
   it.todo("gates the admin conversations page with verifyPanelPageAccess");

@@ -25,12 +25,24 @@ export async function POST(
     );
   }
 
-  const result = await sendManualReply(
-    id,
-    body.body.trim(),
-    createTwilioWhatsAppSender(),
-    auth.agent,
-  );
+  let result: Awaited<ReturnType<typeof sendManualReply>>;
+  try {
+    result = await sendManualReply(
+      id,
+      body.body.trim(),
+      createTwilioWhatsAppSender(),
+      auth.agent,
+    );
+  } catch (error) {
+    if (error instanceof Error && error.message === "Conversation not found") {
+      return NextResponse.json(
+        { ok: false, error: "Conversation not found" },
+        { status: 404 },
+      );
+    }
+
+    throw error;
+  }
   const status = result.ok ? 200 : 207;
 
   return NextResponse.json({ ...result, ok: result.ok }, { status });

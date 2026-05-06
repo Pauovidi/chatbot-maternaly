@@ -32,4 +32,26 @@ describe("twilio whatsapp client", () => {
     expect(result.mode).toBe("real");
     fetchMock.mockRestore();
   });
+
+  it("returns a non-throwing failure when the network request fails", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockRejectedValueOnce(new Error("network down"));
+
+    const result = await sendTwilioWhatsAppText(
+      { to: "+34612345678", body: "Hola" },
+      {
+        accountSid: "AC_test",
+        authToken: "token",
+        from: "+15551234567",
+        mock: false,
+      },
+    );
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(result.ok).toBe(false);
+    expect(result.mode).toBe("real");
+    expect(result.error).toBe("Twilio network request failed.");
+    fetchMock.mockRestore();
+  });
 });

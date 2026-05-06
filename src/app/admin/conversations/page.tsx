@@ -18,7 +18,7 @@ export default async function ConversationsAdminPage() {
           <h1 className="page-title">Conversaciones</h1>
           <p className="page-description">
             Configura HOTEL_PANEL_USERNAME y HOTEL_PANEL_PASSWORD para acceder al
-            panel de conversaciones en produccion.
+            panel de conversaciones en producción.
           </p>
         </section>
       </SiteShell>
@@ -34,8 +34,8 @@ export default async function ConversationsAdminPage() {
         <p className="demo-kicker">Operaciones</p>
         <h1 className="page-title">Panel de conversaciones</h1>
         <p className="page-description">
-          Inbox de WhatsApp para revisar handoffs, alternar bot/persona y enviar
-          respuestas manuales sin tocar el flujo validado de reservas.
+          Centraliza WhatsApp, handoffs del bot y contexto de reservas en un
+          único inbox operativo del equipo Somos Muy Perros.
         </p>
       </section>
       <ConversationsPanel

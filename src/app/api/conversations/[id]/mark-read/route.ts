@@ -15,6 +15,19 @@ export async function POST(
   }
 
   const { id } = await context.params;
-  const conversation = await markConversationRead(id);
+  let conversation: Awaited<ReturnType<typeof markConversationRead>>;
+  try {
+    conversation = await markConversationRead(id);
+  } catch (error) {
+    if (error instanceof Error && error.message === "Conversation not found") {
+      return NextResponse.json(
+        { ok: false, error: "Conversation not found" },
+        { status: 404 },
+      );
+    }
+
+    throw error;
+  }
+
   return NextResponse.json({ ok: true, conversation });
 }

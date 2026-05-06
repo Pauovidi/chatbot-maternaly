@@ -87,10 +87,17 @@ export function isHumanRequest(body: string): boolean {
     "persona",
     "agente",
     "humano",
+    "operador",
+    "recepcion",
     "hablar con alguien",
     "que me llamen",
+    "telefono",
+    "llamada",
     "atencion",
     "responsable",
+    "urgente",
+    "emergencia",
+    "asesor",
   ].some((phrase) => normalized.includes(phrase));
 }
 
@@ -243,6 +250,20 @@ export async function handleInboundWhatsApp(
   store: ConversationStore = getConversationStore(),
 ): Promise<InboundResult> {
   const conversation = await getOrCreateConversation(store, payload.from, payload.displayName);
+  if (payload.messageSid) {
+    const existing = conversation.messages.find(
+      (message) => message.externalMessageSid === payload.messageSid,
+    );
+
+    if (existing) {
+      return {
+        conversation,
+        inbound: existing,
+        twiml: buildTwilioMessageResponse(),
+      };
+    }
+  }
+
   const inbound = await store.addMessage(
     createMessage({
       conversationId: conversation.id,

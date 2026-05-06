@@ -6,6 +6,7 @@ import {
   Bot,
   CheckCheck,
   Circle,
+  ExternalLink,
   MessageSquareText,
   PawPrint,
   RefreshCcw,
@@ -28,10 +29,10 @@ interface ConversationsPanelProps {
 type FilterMode = NonNullable<ConversationListFilters["mode"]>;
 
 const filters: Array<{ label: string; value: FilterMode }> = [
-  { label: "Todos", value: "all" },
-  { label: "Bot", value: "bot" },
-  { label: "Humano", value: "human" },
+  { label: "Todas", value: "all" },
   { label: "Pendientes", value: "pending" },
+  { label: "Humano", value: "human" },
+  { label: "Bot", value: "bot" },
   { label: "Leídas", value: "read" },
 ];
 
@@ -58,6 +59,7 @@ function formatEventType(value: string) {
     manual_reply_sent: "Respuesta manual enviada",
     marked_read: "Marcada como leída",
     mode_changed: "Modo actualizado",
+    reservation_context_detected: "Reserva detectada",
   };
 
   return labels[value] ?? value.replaceAll("_", " ");
@@ -219,6 +221,33 @@ export function ConversationsPanel({
 
   return (
     <section className="conversations-panel" aria-busy={isPending}>
+      <header className="conversation-panel-hero">
+        <div className="conversation-panel-title">
+          <span className="conversation-brand-mark conversation-brand-mark-large">
+            <PawPrint size={22} />
+          </span>
+          <div>
+            <p className="demo-kicker">Somos Muy Perros</p>
+            <h2>Panel de conversaciones</h2>
+            <span>Inbox WhatsApp para reservas, estancias y handoffs del equipo.</span>
+          </div>
+        </div>
+        <div className="conversation-panel-actions">
+          <span className={`conversation-transport conversation-transport-${twilioMode}`}>
+            <Circle size={10} fill="currentColor" />
+            {twilioMode === "mock" ? "Modo demo" : "Twilio real"}
+          </span>
+          <Link href="/" className="conversation-top-link">
+            Chat web
+            <ExternalLink size={14} />
+          </Link>
+          <Link href="/admin" className="conversation-top-link">
+            Admin reservas
+            <ExternalLink size={14} />
+          </Link>
+        </div>
+      </header>
+
       <div className="conversation-workspace">
         <aside className="conversation-sidebar">
           <div className="conversation-sidebar-brand">
@@ -233,9 +262,9 @@ export function ConversationsPanel({
 
           <div className="conversation-metrics">
             <Metric label="Pendientes" value={dashboard.stats.pending} />
-            <Metric label="Modo humano" value={dashboard.stats.human} />
+            <Metric label="En humano" value={dashboard.stats.human} />
             <Metric label="Activas" value={dashboard.stats.total} />
-            <Metric label="Resueltas" value={dashboard.stats.read} />
+            <Metric label="Leídas" value={dashboard.stats.read} />
           </div>
 
           <div className="conversation-toolbar">
@@ -278,8 +307,14 @@ export function ConversationsPanel({
           </Link>
 
           <div className="conversation-list">
+            {isPending ? (
+              <div className="conversation-loading">Actualizando inbox...</div>
+            ) : null}
             {dashboard.conversations.length === 0 ? (
-              <div className="conversation-empty">No hay conversaciones para este filtro.</div>
+              <div className="conversation-empty">
+                <strong>No hay conversaciones para este filtro.</strong>
+                <span>Prueba con otro filtro o espera al siguiente WhatsApp entrante.</span>
+              </div>
             ) : (
               dashboard.conversations.map((conversation) => (
                 <button
@@ -317,7 +352,7 @@ export function ConversationsPanel({
             <>
               <header className="conversation-detail-header">
                 <div>
-                  <p className="demo-kicker">WhatsApp</p>
+                  <p className="demo-kicker">Conversación WhatsApp</p>
                   <h2>{conversationTitle(selected)}</h2>
                   <span>
                     {selected.phoneE164}
@@ -327,6 +362,7 @@ export function ConversationsPanel({
                   </span>
                 </div>
                 <div className="conversation-actions">
+                  <ModeBadge mode={selected.mode} />
                   <button
                     type="button"
                     onClick={() => markRead(selected)}
@@ -355,7 +391,6 @@ export function ConversationsPanel({
               </header>
 
               <div className="conversation-status-row">
-                <ModeBadge mode={selected.mode} />
                 <span>{selected.humanRequested ? "Handoff solicitado" : "Sin handoff"}</span>
                 <span>{selected.unreadCount} no leídos</span>
                 <span>{selected.channel ?? selected.sourceType}</span>
@@ -398,14 +433,22 @@ export function ConversationsPanel({
               </div>
 
               <div className="conversation-composer">
-                <textarea
-                  value={reply}
-                  onChange={(event) => setReply(event.target.value)}
-                  placeholder="Escribe una respuesta manual para WhatsApp"
-                  rows={3}
-                  maxLength={1200}
-                  disabled={isPending}
-                />
+                <label className="conversation-composer-field">
+                  <span>Respuesta manual del equipo</span>
+                  <textarea
+                    value={reply}
+                    onChange={(event) => setReply(event.target.value)}
+                    placeholder="Escribe una respuesta clara para WhatsApp"
+                    rows={3}
+                    maxLength={1200}
+                    disabled={isPending}
+                  />
+                  <small>
+                    {twilioMode === "mock"
+                      ? "Modo demo: se guarda en el timeline, no sale por WhatsApp real."
+                      : "Twilio real activo: revisa el mensaje antes de enviarlo."}
+                  </small>
+                </label>
                 <button
                   type="button"
                   onClick={() => sendReply(selected)}
