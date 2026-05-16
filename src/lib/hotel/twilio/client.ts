@@ -2,8 +2,13 @@ export interface TwilioWhatsAppConfig {
   accountSid?: string;
   authToken?: string;
   from?: string;
+  messagingServiceSid?: string;
   mock: boolean;
+  providerMode: "mock" | "sandbox" | "real";
+  statusCallbackUrl?: string;
 }
+
+type TwilioProviderMode = TwilioWhatsAppConfig["providerMode"];
 
 export interface TwilioSendInput {
   to: string;
@@ -25,23 +30,63 @@ function parseBoolean(value: string | undefined, fallback: boolean): boolean {
   return ["1", "true", "yes", "on"].includes(value.trim().toLowerCase());
 }
 
+function parseProviderMode(value: string | undefined): TwilioProviderMode | undefined {
+  if (value === "mock" || value === "sandbox" || value === "real") {
+    return value;
+  }
+
+  return undefined;
+}
+
 function asWhatsAppAddress(phone: string) {
   return phone.startsWith("whatsapp:") ? phone : `whatsapp:${phone}`;
+}
+
+function inferProviderMode(config: {
+  from?: string;
+  mock: boolean;
+  override?: TwilioProviderMode;
+}): TwilioProviderMode {
+  if (config.override) {
+    return config.mock ? "mock" : config.override;
+  }
+
+  if (config.mock) {
+    return "mock";
+  }
+
+  const normalizedFrom = config.from?.replace(/^whatsapp:/i, "").replace(/[^\d+]/g, "");
+  if (normalizedFrom === "+14155238886") {
+    return "sandbox";
+  }
+
+  return "real";
 }
 
 export function readTwilioWhatsAppConfig(
   env: NodeJS.ProcessEnv = process.env,
 ): TwilioWhatsAppConfig {
   const hasCredentials = Boolean(
-    env.TWILIO_ACCOUNT_SID && env.TWILIO_AUTH_TOKEN && env.TWILIO_WHATSAPP_FROM,
+    env.TWILIO_ACCOUNT_SID &&
+      env.TWILIO_AUTH_TOKEN &&
+      (env.TWILIO_MESSAGING_SERVICE_SID || env.TWILIO_WHATSAPP_FROM),
   );
   const explicitMock = parseBoolean(env.HOTEL_CONVERSATIONS_MOCK_TWILIO, !hasCredentials);
+  const mock = explicitMock || !hasCredentials;
+  const providerModeOverride = parseProviderMode(env.TWILIO_WHATSAPP_PROVIDER_MODE);
 
   return {
     accountSid: env.TWILIO_ACCOUNT_SID,
     authToken: env.TWILIO_AUTH_TOKEN,
     from: env.TWILIO_WHATSAPP_FROM,
-    mock: explicitMock || !hasCredentials,
+    messagingServiceSid: env.TWILIO_MESSAGING_SERVICE_SID,
+    mock,
+    providerMode: inferProviderMode({
+      from: env.TWILIO_WHATSAPP_FROM,
+      mock,
+      override: providerModeOverride,
+    }),
+    statusCallbackUrl: env.TWILIO_STATUS_CALLBACK_URL,
   };
 }
 
@@ -57,12 +102,27 @@ export async function sendTwilioWhatsAppText(
     };
   }
 
-  if (!config.accountSid || !config.authToken || !config.from) {
+  if (!config.accountSid || !config.authToken || (!config.from && !config.messagingServiceSid)) {
     return {
       ok: false,
       mode: "mock",
       error: "Twilio credentials are not configured.",
     };
+  }
+
+  const formBody = new URLSearchParams({
+    To: asWhatsAppAddress(input.to),
+    Body: input.body,
+  });
+
+  if (config.messagingServiceSid) {
+    formBody.set("MessagingServiceSid", config.messagingServiceSid);
+  } else if (config.from) {
+    formBody.set("From", asWhatsAppAddress(config.from));
+  }
+
+  if (config.statusCallbackUrl) {
+    formBody.set("StatusCallback", config.statusCallbackUrl);
   }
 
   let response: Response;
@@ -77,11 +137,7 @@ export async function sendTwilioWhatsAppText(
           ).toString("base64")}`,
           "Content-Type": "application/x-www-form-urlencoded",
         },
-        body: new URLSearchParams({
-          From: asWhatsAppAddress(config.from),
-          To: asWhatsAppAddress(input.to),
-          Body: input.body,
-        }),
+        body: formBody,
       },
     );
   } catch {

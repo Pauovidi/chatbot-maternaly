@@ -40,7 +40,7 @@ export default async function ConversationsAdminPage() {
       </section>
       <ConversationsPanel
         initialDashboard={dashboard}
-        twilioMode={twilioConfig.mock ? "mock" : "real"}
+        twilioProviderMode={twilioConfig.providerMode}
       />
     </SiteShell>
   );

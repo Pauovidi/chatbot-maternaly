@@ -23,7 +23,7 @@ import type {
 
 interface ConversationsPanelProps {
   initialDashboard: ConversationDashboard;
-  twilioMode: "mock" | "real";
+  twilioProviderMode: "mock" | "sandbox" | "real";
 }
 
 type FilterMode = NonNullable<ConversationListFilters["mode"]>;
@@ -91,7 +91,7 @@ function conversationSubtitle(conversation: ConversationRecord) {
 
 export function ConversationsPanel({
   initialDashboard,
-  twilioMode,
+  twilioProviderMode,
 }: ConversationsPanelProps) {
   const [dashboard, setDashboard] = useState(initialDashboard);
   const [selectedId, setSelectedId] = useState(
@@ -233,9 +233,9 @@ export function ConversationsPanel({
           </div>
         </div>
         <div className="conversation-panel-actions">
-          <span className={`conversation-transport conversation-transport-${twilioMode}`}>
+          <span className={`conversation-transport conversation-transport-${twilioProviderMode}`}>
             <Circle size={10} fill="currentColor" />
-            {twilioMode === "mock" ? "Modo demo" : "Twilio real"}
+            Proveedor: Twilio WhatsApp · {formatProviderMode(twilioProviderMode)}
           </span>
           <Link href="/" className="conversation-top-link">
             Chat web
@@ -400,11 +400,13 @@ export function ConversationsPanel({
               </div>
 
               {error ? <div className="conversation-error">{error}</div> : null}
-              <div className={`conversation-transport conversation-transport-${twilioMode}`}>
+              <div className={`conversation-transport conversation-transport-${twilioProviderMode}`}>
                 <Circle size={10} fill="currentColor" />
-                {twilioMode === "mock"
+                {twilioProviderMode === "mock"
                   ? "Modo demo: los mensajes no se envían por WhatsApp real."
-                  : "Twilio real configurado para respuestas manuales."}
+                  : twilioProviderMode === "sandbox"
+                    ? "Twilio Sandbox activo para pruebas de WhatsApp."
+                    : "Twilio real activo para respuestas manuales."}
               </div>
 
               <div className="conversation-timeline">
@@ -444,9 +446,11 @@ export function ConversationsPanel({
                     disabled={isPending}
                   />
                   <small>
-                    {twilioMode === "mock"
+                    {twilioProviderMode === "mock"
                       ? "Modo demo: se guarda en el timeline, no sale por WhatsApp real."
-                      : "Twilio real activo: revisa el mensaje antes de enviarlo."}
+                      : twilioProviderMode === "sandbox"
+                        ? "Twilio Sandbox activo: revisa que el destinatario sea participante del Sandbox."
+                        : "Twilio real activo: revisa el mensaje antes de enviarlo."}
                   </small>
                 </label>
                 <button
@@ -468,6 +472,16 @@ export function ConversationsPanel({
       </div>
     </section>
   );
+}
+
+function formatProviderMode(mode: ConversationsPanelProps["twilioProviderMode"]) {
+  const labels: Record<ConversationsPanelProps["twilioProviderMode"], string> = {
+    mock: "Mock",
+    real: "Real",
+    sandbox: "Sandbox",
+  };
+
+  return labels[mode];
 }
 
 function Metric({ label, value }: { label: string; value: number }) {

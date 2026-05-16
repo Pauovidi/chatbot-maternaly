@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
@@ -19,6 +19,7 @@ describe("conversations security", () => {
   afterEach(() => {
     resetConversationStoreForTests();
     delete process.env.TWILIO_WEBHOOK_AUTH_TOKEN;
+    delete process.env.VERCEL_ENV;
     delete process.env.HOTEL_CONVERSATIONS_STORE_DIR;
     if (tempDir) {
       rmSync(tempDir, { recursive: true, force: true });
@@ -108,6 +109,35 @@ describe("conversations security", () => {
     );
   });
 
+  it("rejects production Twilio webhook calls when token is not configured", async () => {
+    const previousNodeEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = "production";
+    process.env.VERCEL_ENV = "production";
+
+    try {
+      const response = await postTwilioWebhook(
+        new Request("https://example.test/api/twilio/whatsapp", {
+          method: "POST",
+          headers: {
+            "content-type": "application/x-www-form-urlencoded",
+          },
+          body: new URLSearchParams({
+            From: "whatsapp:+34600000001",
+            Body: "Hola",
+            MessageSid: "SM_NO_TOKEN_PROD",
+          }),
+        }),
+      );
+
+      expect(response.status).toBe(401);
+      expect(await response.text()).toBe(
+        '<?xml version="1.0" encoding="UTF-8"?><Response></Response>',
+      );
+    } finally {
+      process.env.NODE_ENV = previousNodeEnv;
+    }
+  });
+
   it("accepts Twilio webhook token by dedicated header and creates a handoff", async () => {
     tempDir = mkdtempSync(path.join(os.tmpdir(), "hotel-twilio-webhook-"));
     process.env.HOTEL_CONVERSATIONS_STORE_DIR = tempDir;
@@ -151,6 +181,64 @@ describe("conversations security", () => {
         expect.objectContaining({ eventType: "human_requested" }),
       ]),
     );
+  });
+
+  it("accepts Twilio webhook token by query param for console webhooks", async () => {
+    tempDir = mkdtempSync(path.join(os.tmpdir(), "hotel-twilio-query-token-"));
+    process.env.HOTEL_CONVERSATIONS_STORE_DIR = tempDir;
+    process.env.TWILIO_WEBHOOK_AUTH_TOKEN = "expected-token";
+
+    const response = await postTwilioWebhook(
+      new Request("https://example.test/api/twilio/whatsapp?token=expected-token", {
+        method: "POST",
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+        },
+        body: new URLSearchParams({
+          From: "whatsapp:+34600000003",
+          To: "whatsapp:+14155238886",
+          Body: "Hola, quiero hablar con una persona",
+          MessageSid: "SM_QUERY_TOKEN_001",
+        }),
+      }),
+    );
+
+    const payload = JSON.parse(
+      readFileSync(path.join(tempDir, "hotel-conversations.json"), "utf8"),
+    );
+
+    expect(response.status).toBe(200);
+    expect(payload.conversations[0]).toEqual(
+      expect.objectContaining({
+        phoneNormalized: "34600000003",
+        mode: "human",
+      }),
+    );
+  });
+
+  it("does not add direct Meta WhatsApp API routes or transports", () => {
+    const files = [
+      "src/app/api",
+      "src/lib/hotel",
+      "scripts",
+    ].flatMap((root) =>
+      Array.from(
+        readdirSync(path.join(process.cwd(), root), { recursive: true })
+          .filter((entry: unknown): entry is string => typeof entry === "string")
+          .map((entry: string) => path.join(root, entry)),
+      ),
+    );
+
+    for (const file of files) {
+      const absolute = path.join(process.cwd(), file);
+      try {
+        const source = readFileSync(absolute, "utf8");
+        expect(source, file).not.toMatch(/graph\.facebook\.com/i);
+        expect(source, file).not.toMatch(/\/api\/meta\/whatsapp/i);
+      } catch {
+        // Directories and binary files are irrelevant for this guardrail.
+      }
+    }
   });
 
   it("accepts media-only Twilio webhook payloads without crashing", async () => {

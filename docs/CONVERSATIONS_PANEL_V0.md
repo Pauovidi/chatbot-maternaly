@@ -1,4 +1,15 @@
-# Panel de conversaciones V0/V0.2
+# Panel de conversaciones V0/V0.3
+
+## V0.3 Twilio WhatsApp real
+
+La decision tecnica queda fijada: WhatsApp se integra mediante Twilio Programmable Messaging y WhatsApp Senders. No se implementa Meta Cloud API directa ni rutas `/api/meta/whatsapp`.
+
+- El panel muestra `Proveedor: Twilio WhatsApp`.
+- Estados visibles: `Mock`, `Sandbox` o `Real`.
+- `TWILIO_MESSAGING_SERVICE_SID` es opcional y tiene precedencia sobre `TWILIO_WHATSAPP_FROM` para outbound.
+- `TWILIO_WHATSAPP_FROM` soporta formato `whatsapp:+34...` o `+34...`.
+- Si faltan credenciales o `HOTEL_CONVERSATIONS_MOCK_TWILIO=true`, el panel sigue en mock.
+- Para numero real, registra el numero como WhatsApp Sender en Twilio y configura el webhook inbound contra `/api/twilio/whatsapp`.
 
 ## V0.2 UI + Twilio Sandbox
 
@@ -86,11 +97,14 @@ Twilio:
 - `TWILIO_ACCOUNT_SID`
 - `TWILIO_AUTH_TOKEN`
 - `TWILIO_WHATSAPP_FROM`
+- `TWILIO_MESSAGING_SERVICE_SID` opcional. Si se define, outbound usa `MessagingServiceSid` en vez de `From`.
+- `TWILIO_STATUS_CALLBACK_URL` opcional para callbacks de estados Twilio.
+- `TWILIO_WHATSAPP_PROVIDER_MODE=mock|sandbox|real` opcional para forzar el estado mostrado en panel.
 - `TWILIO_VALIDATE_SIGNATURES` reservado para endurecer validacion.
 - `TWILIO_WEBHOOK_AUTH_TOKEN` opcional. Si se define, el webhook exige `?token=`, header `x-twilio-webhook-token` o header `x-hotel-webhook-token`.
 - `HOTEL_CONVERSATIONS_MOCK_TWILIO=true|false`
 
-Si faltan credenciales Twilio o `HOTEL_CONVERSATIONS_MOCK_TWILIO=true`, el reply manual usa mock y no llama a Twilio.
+Si faltan credenciales Twilio o `HOTEL_CONVERSATIONS_MOCK_TWILIO=true`, el reply manual usa mock y no llama a Twilio. En produccion real, `TWILIO_WEBHOOK_AUTH_TOKEN` debe estar configurado o el webhook inbound responde 401.
 
 Vercel preview:
 
@@ -104,21 +118,22 @@ Vercel preview:
 
 - Si no se puede recuperar el bypass, usa una URL publica no protegida, desactiva temporalmente la proteccion de preview o configura el Sandbox contra produccion solo cuando el panel este protegido y validado.
 
-## Configurar Twilio Sandbox/real
+## Configurar Twilio real
 
-1. Define `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN` y `TWILIO_WHATSAPP_FROM`.
+1. Define `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN` y `TWILIO_WHATSAPP_FROM` o `TWILIO_MESSAGING_SERVICE_SID`.
 2. Pon `HOTEL_CONVERSATIONS_MOCK_TWILIO=false`.
 3. Define `TWILIO_WEBHOOK_AUTH_TOKEN` para proteger inbound.
-4. En Twilio Console entra en `Messaging` -> `Try it out` -> `Send a WhatsApp message` -> `Sandbox settings`.
-5. En `When a message comes in`, metodo `POST`, configura:
+4. En Twilio Console entra en `Messaging` -> `Senders` -> `WhatsApp Senders`.
+5. Confirma que el numero real aparece como WhatsApp Sender activo.
+6. Configura `When a message comes in` con metodo `POST`:
 
    `https://<dominio-publico>/api/twilio/whatsapp?token=<TWILIO_WEBHOOK_AUTH_TOKEN>`
 
-6. Si usas preview protegida con bypass de Vercel:
+7. Si usas preview protegida con bypass de Vercel:
 
    `https://<preview>/api/twilio/whatsapp?x-vercel-protection-bypass=<masked>&token=<masked>`
 
-7. `TWILIO_WHATSAPP_FROM` debe ser el remitente de WhatsApp de Twilio, por ejemplo el Sandbox o numero aprobado, pero no se hardcodea en codigo.
+8. `TWILIO_WHATSAPP_FROM` debe ser el remitente de WhatsApp de Twilio, por ejemplo `whatsapp:+34...` o `+34...`; no se hardcodea en codigo.
 
 Al cambiar el webhook del Sandbox que antes apuntaba a otro proyecto, ese otro proyecto deja de recibir inbound desde ese Sandbox. Es reversible pegando de nuevo la URL anterior del campo `When a message comes in`.
 

@@ -228,6 +228,7 @@ FAQ puras:
 - Rama de trabajo: `codex/smp-conversations-panel-v0`.
 - Pasada visible demo: `codex/smp-conversations-panel-v0-1-visible-demo`.
 - Sprint V0.2 UI/Twilio Sandbox: `codex/smp-conversations-panel-v0-2-ui-twilio-sandbox`.
+- Sprint V0.3 Twilio real: `codex/smp-conversations-panel-v0-3-twilio-real`.
 - Nueva UI protegida: `GET /admin/conversations`.
 - Acceso visible desde header publico, navegacion demo y `/admin`.
 - Nuevas APIs protegidas: `GET/POST /api/conversations`, detalle por id, `reply`, `mode` y `mark-read`.
@@ -237,6 +238,7 @@ FAQ puras:
 - La V0.1 deja el inbox no vacio en preview/local, con cinco conversaciones sinteticas y UI de sidebar + detalle tipo chat.
 - La V0.2 pule el inbox, refuerza seed/eventos demo y deja documentada la conexion Twilio Sandbox por `POST /api/twilio/whatsapp`.
 - La preview sigue protegida por Deployment Protection; Twilio Sandbox debe usar Protection Bypass for Automation para llamar a `/api/twilio/whatsapp`.
+- La V0.3 fija Twilio como proveedor principal; no hay ruta Meta directa. El panel muestra `Mock`, `Sandbox` o `Real`, y outbound real soporta `TWILIO_WHATSAPP_FROM` o `TWILIO_MESSAGING_SERVICE_SID`.
 - La store de reservas demo no se sustituye y sigue aparcada hasta aprobacion.
 - Twilio real es opcional por env; sin credenciales funciona en mock.
 

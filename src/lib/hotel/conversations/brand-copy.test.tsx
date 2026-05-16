@@ -56,12 +56,14 @@ describe("conversations panel visible demo copy", () => {
     };
 
     const html = renderToStaticMarkup(
-      <ConversationsPanel initialDashboard={dashboard} twilioMode="mock" />,
+      <ConversationsPanel initialDashboard={dashboard} twilioProviderMode="mock" />,
     );
 
     expect(html).toContain("Somos Muy Perros");
     expect(html).toContain("Panel conversaciones");
     expect(html).toContain("Inbox WhatsApp");
+    expect(html).toContain("Proveedor: Twilio WhatsApp");
+    expect(html).toContain("Mock");
     expect(html).toContain("Pendientes");
     expect(html).toContain("En humano");
     expect(html).toContain("Todas");
@@ -70,6 +72,33 @@ describe("conversations panel visible demo copy", () => {
     expect(html).toContain("Respuesta manual del equipo");
     expect(html).toContain("Modo demo: los mensajes no se envían por WhatsApp real.");
     expect(html).not.toContain("No hay conversaciones para este filtro");
+  });
+
+  it("renders sandbox and real Twilio provider states without changing provider", () => {
+    const conversations = buildConversationSeed("2026-05-06T08:00:00.000Z").conversations;
+    const dashboard: ConversationDashboard = {
+      conversations,
+      stats: {
+        total: conversations.length,
+        pending: 0,
+        human: 0,
+        unread: 0,
+        read: conversations.length,
+      },
+    };
+    const sandbox = renderToStaticMarkup(
+      <ConversationsPanel initialDashboard={dashboard} twilioProviderMode="sandbox" />,
+    );
+    const real = renderToStaticMarkup(
+      <ConversationsPanel initialDashboard={dashboard} twilioProviderMode="real" />,
+    );
+
+    expect(sandbox).toContain("Proveedor: Twilio WhatsApp");
+    expect(sandbox).toContain("Sandbox");
+    expect(sandbox).toContain("Twilio Sandbox activo para pruebas de WhatsApp.");
+    expect(real).toContain("Proveedor: Twilio WhatsApp");
+    expect(real).toContain("Real");
+    expect(real).toContain("Twilio real activo para respuestas manuales.");
   });
 
   it("does not expose reference moving-company copy in user-facing panel surfaces", () => {
@@ -81,6 +110,7 @@ describe("conversations panel visible demo copy", () => {
       "src/components/site-shell.tsx",
       "src/lib/hotel/conversations/demo-seed.ts",
       "docs/CONVERSATIONS_PANEL_V0.md",
+      "docs/TWILIO_WHATSAPP_REAL_V0.md",
     ]
       .map(readSurface)
       .join("\n");

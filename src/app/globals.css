@@ -1171,6 +1171,16 @@ input {
   background: rgba(255, 235, 226, 0.82);
 }
 
+.conversation-transport-sandbox {
+  color: #244caa;
+  background: rgba(37, 99, 235, 0.12);
+}
+
+.conversation-transport-real {
+  color: #0f7a34;
+  background: rgba(22, 163, 74, 0.12);
+}
+
 .conversation-timeline {
   display: grid;
   align-content: start;

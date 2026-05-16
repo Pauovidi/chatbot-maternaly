@@ -64,6 +64,51 @@ async function checkProcessEndpoint() {
   console.log(`[ok] status=${json.status} price=${json.pricing?.total ?? "n/a"}`);
 }
 
+async function checkTwilioWebhookEndpoint() {
+  const sid = `SM_SMOKE_HTTP_${Date.now()}`;
+  const params = new URLSearchParams({
+    From: "whatsapp:+34600000901",
+    To: "whatsapp:+14155238886",
+    Body: "Hola, quiero hablar con una persona",
+    MessageSid: sid,
+  });
+  const token = process.env.TWILIO_WEBHOOK_AUTH_TOKEN;
+  const path = token
+    ? `/api/twilio/whatsapp?token=${encodeURIComponent(token)}`
+    : "/api/twilio/whatsapp";
+  const { response, text } = await request(path, {
+    method: "POST",
+    headers: {
+      "content-type": "application/x-www-form-urlencoded",
+    },
+    body: params,
+  });
+
+  assert(response.ok, `/api/twilio/whatsapp devolvió ${response.status}: ${text}`);
+  assert(text.startsWith('<?xml version="1.0" encoding="UTF-8"?>'), "Twilio no devolvió XML");
+  assert(text.includes("<Response>") && text.includes("</Response>"), "Twilio no devolvió TwiML Response");
+  assert(text.includes("<Message>"), "Twilio no devolvió respuesta de handoff");
+  console.log("[ok] POST /api/twilio/whatsapp");
+
+  const { response: listResponse, text: listText } = await request(
+    "/api/conversations?query=34600000901",
+  );
+  assert(listResponse.ok, `/api/conversations devolvió ${listResponse.status}: ${listText}`);
+
+  const json = JSON.parse(listText);
+  assert(json.ok === true, "/api/conversations no devolvió ok=true");
+  assert(
+    json.conversations?.some(
+      (conversation) =>
+        conversation.phoneNormalized === "34600000901" &&
+        conversation.mode === "human" &&
+        conversation.events?.some((event) => event.eventType === "human_requested"),
+    ),
+    "La conversación Twilio smoke no aparece como handoff humano",
+  );
+  console.log("[ok] GET /api/conversations Twilio handoff");
+}
+
 async function main() {
   console.log(`Smoke HTTP contra ${baseUrl}`);
 
@@ -75,6 +120,7 @@ async function main() {
   await checkGet("/reservas-demo");
   await checkGet("/admin");
   await checkProcessEndpoint();
+  await checkTwilioWebhookEndpoint();
 
   console.log("[ok] Smoke HTTP completado");
 }
