@@ -32,6 +32,24 @@ function getInboundBody(raw: Record<string, string>): string {
   return "";
 }
 
+function sanitizeTwilioPayload(raw: Record<string, string>): Record<string, string> {
+  const allowedKeys = [
+    "From",
+    "To",
+    "Body",
+    "MessageSid",
+    "SmsMessageSid",
+    "ProfileName",
+    "NumMedia",
+    "WaId",
+  ];
+  return Object.fromEntries(
+    allowedKeys
+      .filter((key) => raw[key] !== undefined)
+      .map((key) => [key, raw[key].slice(0, key === "Body" ? 1000 : 240)]),
+  );
+}
+
 export async function POST(request: Request) {
   if (!validateWebhookToken(request)) {
     return new NextResponse(buildTwilioMessageResponse(), {
@@ -71,7 +89,7 @@ export async function POST(request: Request) {
     body,
     messageSid,
     displayName: String(raw.ProfileName ?? raw.profileName ?? ""),
-    rawPayload: raw,
+    rawPayload: sanitizeTwilioPayload(raw),
   });
 
   return new NextResponse(result.twiml ?? buildTwilioMessageResponse(), {

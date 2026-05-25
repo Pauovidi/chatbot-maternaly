@@ -90,6 +90,35 @@ describe("conversations security", () => {
     }
   });
 
+  it("keeps operational API routes behind panel auth", () => {
+    const routeFiles = [
+      "src/app/api/ops/email/poll/route.ts",
+      "src/app/api/ops/reminders/dispatch/route.ts",
+      "src/app/api/ops/reservations/[reservationId]/confirm/route.ts",
+      "src/app/api/ops/reservations/[reservationId]/send-reply/route.ts",
+      "src/app/api/ops/reservations/[reservationId]/cancel-request/route.ts",
+    ];
+
+    for (const routeFile of routeFiles) {
+      const source = readFileSync(path.join(process.cwd(), routeFile), "utf8");
+      expect(source, routeFile).toContain("requirePanelAuth");
+      expect(source, routeFile).toContain("if (!auth.ok)");
+    }
+  });
+
+  it("protects admin, internal and ops pages with page access checks and proxy matcher", () => {
+    for (const routeFile of ["src/app/admin/page.tsx", "src/app/internal/page.tsx", "src/app/ops/page.tsx"]) {
+      const source = readFileSync(path.join(process.cwd(), routeFile), "utf8");
+      expect(source, routeFile).toContain("verifyPanelPageAccess");
+      expect(source, routeFile).toContain("if (!auth.ok)");
+    }
+
+    const proxySource = readFileSync(path.join(process.cwd(), "src/proxy.ts"), "utf8");
+    expect(proxySource).toContain("/admin/:path*");
+    expect(proxySource).toContain("/internal/:path*");
+    expect(proxySource).toContain("/api/ops/:path*");
+  });
+
   it("rejects Twilio webhook calls with an invalid configured token", async () => {
     process.env.TWILIO_WEBHOOK_AUTH_TOKEN = "expected-token";
 

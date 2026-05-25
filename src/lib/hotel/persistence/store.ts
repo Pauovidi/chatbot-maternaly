@@ -1,6 +1,6 @@
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
+import { resolveJsonStorePath } from "./runtime";
 
 import type {
   DemoLogEntry,
@@ -26,17 +26,19 @@ const defaultState: DemoPersistenceState = {
 };
 
 function getStoreDirectory(): string {
-  if (process.env.HOTEL_DEMO_STORE_DIR?.trim()) {
-    return process.env.HOTEL_DEMO_STORE_DIR.trim();
-  }
-
-  return process.env.VERCEL
-    ? path.join(os.tmpdir(), "hotel-canino-demo")
-    : path.join(process.cwd(), ".demo-state");
+  return path.dirname(getStorePath());
 }
 
 function getStorePath(storeName = "hotel-demo-state.json"): string {
-  return path.join(getStoreDirectory(), storeName);
+  if (process.env.HOTEL_REMINDERS_STORE_PATH?.trim() && storeName.includes("reminder")) {
+    return process.env.HOTEL_REMINDERS_STORE_PATH.trim();
+  }
+
+  return resolveJsonStorePath({
+    fileName: storeName,
+    pathEnv: "HOTEL_DEMO_STORE_PATH",
+    dirEnv: "HOTEL_DEMO_STORE_DIR",
+  });
 }
 
 async function ensureDirectory(): Promise<void> {

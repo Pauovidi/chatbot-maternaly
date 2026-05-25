@@ -1,9 +1,29 @@
 import { AdminDashboard } from "@/components/admin-dashboard";
 import { SiteShell } from "@/components/site-shell";
-import { getDemoDashboardData } from "@/lib/hotel/application";
+import { verifyPanelPageAccess } from "@/lib/hotel/conversations/auth";
+import { getDemoDashboardData } from "@/lib/hotel/application/dashboard";
 import Link from "next/link";
 
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
+
 export default async function AdminPage() {
+  const auth = await verifyPanelPageAccess();
+  if (!auth.ok) {
+    return (
+      <SiteShell>
+        <section className="page-intro">
+          <p className="demo-kicker">Panel protegido</p>
+          <h1 className="page-title">Panel admin de seguimiento</h1>
+          <p className="page-description">
+            Configura HOTEL_PANEL_USERNAME y HOTEL_PANEL_PASSWORD para acceder al
+            panel operativo en produccion.
+          </p>
+        </section>
+      </SiteShell>
+    );
+  }
+
   const dashboard = await getDemoDashboardData();
 
   return (

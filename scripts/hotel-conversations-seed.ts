@@ -8,6 +8,7 @@ import {
   buildConversationSeed,
   redactConversationText,
 } from "@/lib/hotel/conversations/demo-seed";
+import { resolveJsonStorePath } from "@/lib/hotel/persistence/runtime";
 
 export {
   assertNoSecretLikeValues,
@@ -22,6 +23,10 @@ function getStoreDirectory(): string {
 
   if (process.env.HOTEL_CONVERSATIONS_STORE_PATH?.trim()) {
     return path.dirname(process.env.HOTEL_CONVERSATIONS_STORE_PATH.trim());
+  }
+
+  if (process.env.NODE_ENV === "production") {
+    return path.dirname(resolveJsonStorePath({ fileName: "hotel-conversations.json" }));
   }
 
   return os.tmpdir();

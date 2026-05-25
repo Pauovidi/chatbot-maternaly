@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import type { ProcessReservationResult } from "@/lib/hotel/application";
+import type { ProcessReservationResult } from "@/lib/hotel/application/types";
 import type { GoogleSheetsConfigStatus } from "@/lib/hotel/config";
 import {
   demoSampleEmails,

@@ -1,6 +1,6 @@
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
+import { resolveJsonStorePath } from "../persistence/runtime";
 
 import {
   DEMO_REMINDER_QUEUE,
@@ -11,17 +11,15 @@ import type { ReminderJob, ReservationRecord } from "../domain/contracts";
 import type { DemoLogEntry, DemoStoreState } from "./types";
 
 function getStoreDirectory(): string {
-  if (process.env.HOTEL_DEMO_STORE_DIR?.trim()) {
-    return process.env.HOTEL_DEMO_STORE_DIR.trim();
-  }
-
-  return process.env.VERCEL
-    ? path.join(os.tmpdir(), "hotel-canino-demo")
-    : path.join(process.cwd(), ".demo-state");
+  return path.dirname(getStoreFile());
 }
 
 function getStoreFile(): string {
-  return path.join(getStoreDirectory(), "hotel-canino-domain.json");
+  return resolveJsonStorePath({
+    fileName: "hotel-canino-domain.json",
+    pathEnv: "HOTEL_DOMAIN_STORE_PATH",
+    dirEnv: "HOTEL_DEMO_STORE_DIR",
+  });
 }
 
 const initialState: DemoStoreState = {

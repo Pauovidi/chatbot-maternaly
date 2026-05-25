@@ -72,9 +72,11 @@ export async function getGoogleSheetsLiveStatus(): Promise<GoogleSheetsConfigSta
       ...baseStatus,
       connectionStatus: "error",
       connectionReason:
-        error instanceof Error
-          ? error.message
-          : "No se ha podido validar el acceso real al spreadsheet configurado.",
+        process.env.NODE_ENV === "production"
+          ? "No se ha podido validar el acceso real al spreadsheet configurado."
+          : error instanceof Error
+            ? error.message
+            : "No se ha podido validar el acceso real al spreadsheet configurado.",
     };
   }
 }

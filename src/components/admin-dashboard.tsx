@@ -1,4 +1,4 @@
-import type { DemoDashboardData } from "@/lib/hotel/application";
+import type { DemoDashboardData } from "@/lib/hotel/application/types";
 import {
   formatSpanishDate,
   formatSpanishDateTime,

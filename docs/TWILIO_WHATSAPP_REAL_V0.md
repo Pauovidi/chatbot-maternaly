@@ -47,7 +47,7 @@ POST /api/twilio/whatsapp
 Produccion recomendada para numero real:
 
 ```text
-https://hotel-canino-demo.vercel.app/api/twilio/whatsapp?token=<TWILIO_WEBHOOK_AUTH_TOKEN>
+https://<dominio>/api/twilio/whatsapp?token=<TWILIO_WEBHOOK_AUTH_TOKEN>
 ```
 
 Preview protegida:
@@ -120,3 +120,46 @@ Plantillas futuras:
 - Twilio rechaza sender: confirmar que el numero esta como WhatsApp Sender activo.
 - Fuera de ventana 24 h: usar plantilla aprobada.
 - Produccion sin panel protegido: definir `HOTEL_PANEL_USERNAME` y `HOTEL_PANEL_PASSWORD` antes de exponer.
+
+## EasyPanel produccion
+
+Webhook final:
+
+```text
+https://<dominio>/api/twilio/whatsapp?token=<TWILIO_WEBHOOK_AUTH_TOKEN>
+```
+
+En Twilio:
+
+1. `Messaging` -> `Senders` -> `WhatsApp Senders`.
+2. Abrir el numero real.
+3. `When a message comes in`: webhook anterior.
+4. Metodo: `POST`.
+
+Variables de produccion:
+
+- `TWILIO_ACCOUNT_SID`
+- `TWILIO_AUTH_TOKEN`
+- `TWILIO_WHATSAPP_FROM=whatsapp:+34682621177` o `TWILIO_MESSAGING_SERVICE_SID`
+- `TWILIO_WEBHOOK_AUTH_TOKEN`
+- `HOTEL_CONVERSATIONS_MOCK_TWILIO=false`
+- `TWILIO_WHATSAPP_PROVIDER_MODE=real`
+- `TWILIO_STATUS_CALLBACK_URL` opcional
+
+Comprobar:
+
+- el numero real esta registrado como WhatsApp Sender activo
+- el webhook apunta al dominio HTTPS de EasyPanel
+- inbound crea conversacion
+- reply manual sale por Twilio real
+- no existe `/api/meta/whatsapp`
+- no se usa `graph.facebook.com`
+
+Plantillas futuras:
+
+- confirmacion: `TWILIO_CONTENT_SID_CONFIRMACION`
+- recordatorio: `TWILIO_CONTENT_SID_RECORDATORIO`
+- cancelacion: `TWILIO_CONTENT_SID_CANCELACION`
+- fuera de ventana 24 h: usar Content Template aprobado y enviar con `ContentSid`/`ContentVariables`
+
+Estado actual: el mensaje libre usa `Body`. La validacion criptografica de `X-Twilio-Signature` y el endpoint `/api/twilio/status` quedan como hardening posterior.

@@ -3,7 +3,8 @@ import { AdminDashboard } from "@/components/admin-dashboard";
 import { ReservationLab } from "@/components/reservation-lab";
 import { SiteShell } from "@/components/site-shell";
 import { demoFormUrl, demoSampleEmails } from "@/components/demo-data";
-import { getDemoDashboardData } from "@/lib/hotel/application";
+import { verifyPanelPageAccess } from "@/lib/hotel/conversations/auth";
+import { getDemoDashboardData } from "@/lib/hotel/application/dashboard";
 
 const realForwardSample = demoSampleEmails.find(
   (sample) => sample.id === "real-forward",
@@ -14,7 +15,25 @@ const realForwardHighlights = realForwardSample.content
   .map((line) => line.trim())
   .filter((line) => line.startsWith("Fecha entrada:") || line.startsWith("Fecha salida:"));
 
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
+
 export default async function InternalOpsPage() {
+  const auth = await verifyPanelPageAccess();
+  if (!auth.ok) {
+    return (
+      <SiteShell>
+        <section className="page-intro">
+          <p className="demo-kicker">Zona protegida</p>
+          <h1 className="page-title">Operaciones internas</h1>
+          <p className="page-description">
+            Configura credenciales de panel para acceder a esta vista en produccion.
+          </p>
+        </section>
+      </SiteShell>
+    );
+  }
+
   const dashboard = await getDemoDashboardData();
 
   return (

@@ -42,12 +42,13 @@ El panel es aditivo y no toca la store demo de reservas. Las conversaciones vive
 
 - `src/lib/hotel/conversations/types.ts`: `Conversation`, `Message`, `ConversationEvent`.
 - `src/lib/hotel/conversations/store.ts`: interfaz `ConversationStore`.
-- `src/lib/hotel/conversations/file-store.ts`: store demo no durable en `/tmp/hotel-conversations.json`.
+- `src/lib/hotel/conversations/file-store.ts`: store JSON con fallback durable `/data` en produccion.
+- `src/lib/hotel/conversations/postgres-store.ts`: store Postgres para produccion con `DATABASE_URL`.
 - `src/lib/hotel/conversations/service.ts`: inbound, handoff, modo bot/human, reply manual y mark-read.
 - `src/lib/hotel/conversations/auth.ts`: Basic Auth del panel y APIs admin.
 - `src/lib/hotel/twilio/client.ts`: outbound WhatsApp por Twilio REST o mock.
 
-La persistencia es intencionadamente demo/no durable. Para produccion real debe sustituirse `ConversationStore` por DB/KV sin mezclarla con reservas.
+La persistencia de conversaciones ya soporta Postgres mediante `HOTEL_PERSISTENCE_PROVIDER=postgres`. El fallback por fichero debe apuntar a `/data` y solo sirve para produccion single-instance transitoria.
 
 ## Rutas UI
 
@@ -79,11 +80,14 @@ Panel:
 - `HOTEL_PANEL_PASSWORD`
 - `HOTEL_PANEL_ALLOW_LOCAL_AUTH_BYPASS=true` solo para local si hace falta.
 
-Sin credenciales, local/test y Vercel preview permiten acceso practico para revision de demo. En produccion sin credenciales, el panel y las APIs admin quedan bloqueados.
+Sin credenciales, solo local/test o `HOTEL_PANEL_ALLOW_LOCAL_AUTH_BYPASS=true` permiten bypass. En produccion sin credenciales, el panel y las APIs admin quedan bloqueados.
 
 Conversaciones:
 
-- `HOTEL_CONVERSATIONS_STORE_PATH` opcional. Por defecto usa `/tmp/hotel-conversations.json`.
+- `HOTEL_PERSISTENCE_PROVIDER=postgres|file-volume|file-local`
+- `DATABASE_URL` requerido si `HOTEL_PERSISTENCE_PROVIDER=postgres`
+- `HOTEL_CONVERSATIONS_STORE_PATH` opcional para fallback fichero.
+- `HOTEL_FILE_STORE_DIR=/data` recomendado para fallback fichero.
 - `HOTEL_CONVERSATIONS_DEMO_SEED=true` fuerza seed demo si la store esta vacia.
 
 Auto-seed:
@@ -192,9 +196,18 @@ Cobertura especifica preparada por `subagente_tests_security`:
 
 Queda como `it.todo` convertir en test activo que `/admin/conversations` invoque `verifyPanelPageAccess` cuando el panel server-side pueda responder con challenge/redirect sin romper el render.
 
+## EasyPanel / produccion
+
+- Docker usa Next standalone y arranca con `node server.js`.
+- Healthcheck: `GET /api/health`.
+- `/admin`, `/admin/conversations`, `/internal`, `/ops` y `/api/ops/*` quedan protegidos por Basic Auth en produccion.
+- Twilio inbound requiere `TWILIO_WEBHOOK_AUTH_TOKEN` en produccion.
+- El payload Twilio persistido se reduce a campos whitelisted.
+- Postgres es la via recomendada; `/data` es solo fallback single-instance.
+
 ## Limitaciones
 
-- `/tmp` no es durable en serverless y puede perder datos entre instancias o despliegues.
+- La migracion Postgres completa de reservas/email/reminders esta preparada en SQL, pero el codigo heredado todavia usa JSON durable `/data` como fase transitoria.
 - No hay validacion criptografica de firma Twilio todavia; `TWILIO_WEBHOOK_AUTH_TOKEN` es una proteccion alternativa simple.
 - El bot inbound usa FAQ/handoff seguro; no crea ni cancela reservas desde WhatsApp.
-- La store de reservas en `/tmp` queda aparcada hasta aprobacion de la demo, como estaba decidido.
+- El fallback `/data` no es multi-instancia ni transaccional.

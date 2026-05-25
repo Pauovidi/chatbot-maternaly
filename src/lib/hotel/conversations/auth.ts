@@ -52,7 +52,6 @@ function canBypassMissingCredentials(env: PanelAuthEnv = process.env): boolean {
   return (
     env.NODE_ENV === "test" ||
     env.NODE_ENV === "development" ||
-    env.VERCEL_ENV === "preview" ||
     env.HOTEL_PANEL_ALLOW_LOCAL_AUTH_BYPASS === "true"
   );
 }
@@ -111,4 +110,13 @@ export function requirePanelAuth(request: Request): PanelAuthResult {
 export async function verifyPanelPageAccess(): Promise<PanelAuthResult> {
   const headerList = await nextHeaders();
   return verifyPanelAuthorization(headerList.get("authorization"));
+}
+
+export function buildBasicAuthChallengeResponse(): Response {
+  return new Response("Authentication required", {
+    status: 401,
+    headers: {
+      "WWW-Authenticate": 'Basic realm="Somos Muy Perros operaciones"',
+    },
+  });
 }

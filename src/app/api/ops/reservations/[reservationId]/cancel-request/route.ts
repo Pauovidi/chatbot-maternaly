@@ -1,9 +1,18 @@
-import { requestReservationCancellation } from "@/lib/hotel/application";
+import { requestReservationCancellation } from "@/lib/hotel/application/operations";
+import { requirePanelAuth } from "@/lib/hotel/conversations/auth";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 export async function POST(
-  _request: Request,
+  request: Request,
   context: { params: Promise<{ reservationId: string }> },
 ) {
+  const auth = requirePanelAuth(request);
+  if (!auth.ok) {
+    return auth.response;
+  }
+
   const { reservationId } = await context.params;
 
   try {

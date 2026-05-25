@@ -1,6 +1,7 @@
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
-import { tmpdir } from "node:os";
+import { dirname } from "node:path";
+import { readHotelPersistenceConfig, resolveJsonStorePath } from "@/lib/hotel/persistence/runtime";
+import { PostgresConversationStore } from "./postgres-store";
 import type {
   Conversation,
   ConversationEvent,
@@ -15,18 +16,12 @@ import {
   type ConversationStore,
 } from "./store";
 
-const DEFAULT_STORE_PATH = join(tmpdir(), "hotel-conversations.json");
-
 function getStorePath() {
-  if (process.env.HOTEL_CONVERSATIONS_STORE_PATH?.trim()) {
-    return process.env.HOTEL_CONVERSATIONS_STORE_PATH.trim();
-  }
-
-  if (process.env.HOTEL_CONVERSATIONS_STORE_DIR?.trim()) {
-    return join(process.env.HOTEL_CONVERSATIONS_STORE_DIR.trim(), "hotel-conversations.json");
-  }
-
-  return DEFAULT_STORE_PATH;
+  return resolveJsonStorePath({
+    fileName: "hotel-conversations.json",
+    pathEnv: "HOTEL_CONVERSATIONS_STORE_PATH",
+    dirEnv: "HOTEL_CONVERSATIONS_STORE_DIR",
+  });
 }
 
 function normalizeMessage(
@@ -310,11 +305,15 @@ export class FileConversationStore implements ConversationStore {
   }
 }
 
-let storeSingleton: FileConversationStore | undefined;
+let storeSingleton: ConversationStore | undefined;
 
-export function getConversationStore(): FileConversationStore {
+export function getConversationStore(): ConversationStore {
   if (!storeSingleton) {
-    storeSingleton = new FileConversationStore();
+    const persistence = readHotelPersistenceConfig();
+    storeSingleton =
+      persistence.provider === "postgres"
+        ? new PostgresConversationStore()
+        : new FileConversationStore();
   }
 
   return storeSingleton;

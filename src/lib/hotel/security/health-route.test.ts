@@ -1,0 +1,38 @@
+import { afterEach, describe, expect, it } from "vitest";
+import { GET } from "@/app/api/health/route";
+
+describe("health route", () => {
+  const previousEnv = { ...process.env };
+
+  afterEach(() => {
+    process.env = { ...previousEnv };
+  });
+
+  it("returns app, Twilio and persistence status without secrets", async () => {
+    process.env.NODE_ENV = "production";
+    process.env.HOTEL_CONVERSATIONS_MOCK_TWILIO = "false";
+    process.env.TWILIO_ACCOUNT_SID = "AC_test";
+    process.env.TWILIO_AUTH_TOKEN = "super-secret-token";
+    process.env.TWILIO_WHATSAPP_FROM = "whatsapp:+34600111222";
+    process.env.TWILIO_WHATSAPP_PROVIDER_MODE = "real";
+    process.env.DATABASE_URL = "postgres://user:password@example.test/db";
+    process.env.HOTEL_PERSISTENCE_PROVIDER = "postgres";
+
+    const response = await GET();
+    const json = await response.json();
+    const serialized = JSON.stringify(json);
+
+    expect(response.status).toBe(200);
+    expect(json.ok).toBe(true);
+    expect(json.whatsapp).toEqual(
+      expect.objectContaining({
+        provider: "twilio",
+        mode: "real",
+        mock: false,
+      }),
+    );
+    expect(json.persistence.provider).toBe("postgres");
+    expect(serialized).not.toContain("super-secret-token");
+    expect(serialized).not.toContain("password@example");
+  });
+});

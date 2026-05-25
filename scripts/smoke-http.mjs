@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 const baseUrl = (process.env.SMOKE_BASE_URL ?? "http://127.0.0.1:3000").replace(/\/$/, "");
+const basicAuth = process.env.SMOKE_BASIC_AUTH;
 
 const sampleEmail = `Asunto: Solicitud de reserva web
 
@@ -20,7 +21,11 @@ function assert(condition, message) {
 }
 
 async function request(path, init) {
-  const response = await fetch(`${baseUrl}${path}`, init);
+  const headers = new Headers(init?.headers);
+  if (basicAuth && !headers.has("authorization")) {
+    headers.set("authorization", `Basic ${basicAuth}`);
+  }
+  const response = await fetch(`${baseUrl}${path}`, { ...init, headers });
   const text = await response.text();
   return { response, text };
 }

@@ -396,3 +396,39 @@ Resultado:
 ### Ruido preexistente detectado
 
 - `npx tsc --noEmit` sigue fallando por dos errores ya existentes en `src/lib/hotel/faq/routing.test.ts`, fuera del alcance del bootstrap y del adapter de Sheets
+
+## 14) Migracion EasyPanel produccion
+
+### Cambio de infraestructura
+
+- Rama de trabajo: `codex/smp-easypanel-production-migration-v0`.
+- Objetivo: EasyPanel App Service desde GitHub con Dockerfile y Next standalone.
+- Puerto: `3000`.
+- Healthcheck: `GET /api/health`.
+- Dominio: HTTPS publico en EasyPanel, por ejemplo `app.somosmuyperros.com`.
+
+### Persistencia
+
+- Conversaciones: `ConversationStore` puede usar Postgres con `HOTEL_PERSISTENCE_PROVIDER=postgres` y `DATABASE_URL`.
+- Migraciones SQL: `db/migrations/001_init.sql`, `002_conversations.sql`, `003_operational_state.sql`.
+- Fallback transitorio: volumen `/data` con `HOTEL_CONVERSATIONS_STORE_PATH`, `HOTEL_DEMO_STORE_PATH`, `HOTEL_DOMAIN_STORE_PATH`, `HOTEL_REMINDERS_STORE_PATH` y `HOTEL_EMAIL_STATE_STORE_PATH`.
+- Produccion no debe depender de `/tmp`.
+
+### Seguridad
+
+- `/admin`, `/admin/conversations`, `/internal`, `/ops` y `/api/ops/*` quedan detras de Basic Auth.
+- En produccion ya no hay bypass automatico por preview sin credenciales.
+- Twilio inbound exige `TWILIO_WEBHOOK_AUTH_TOKEN` en produccion.
+- Se anaden headers basicos: `X-Frame-Options`, `X-Content-Type-Options`, `Referrer-Policy`.
+
+### Twilio
+
+- Proveedor unico: Twilio WhatsApp.
+- No hay Meta Cloud API directa.
+- Webhook EasyPanel: `https://<dominio>/api/twilio/whatsapp?token=<TWILIO_WEBHOOK_AUTH_TOKEN>`.
+- Outbound manual real depende de `HOTEL_CONVERSATIONS_MOCK_TWILIO=false` y credenciales Twilio.
+
+### Validacion nueva
+
+- Tests de readiness cubren Dockerfile, `.dockerignore`, standalone, health, auth operativa, persistencia sin `/tmp`, guardrail Meta y Twilio real visible.
+- Guia operativa: `docs/EASYPANEL_PRODUCTION_DEPLOY.md`.

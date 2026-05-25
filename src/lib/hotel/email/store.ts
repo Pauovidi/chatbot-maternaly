@@ -1,16 +1,21 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { resolveJsonStorePath } from "@/lib/hotel/persistence/runtime";
 
 import type { EmailIngestionRecord, EmailIngestionState } from "./types";
 
 const DEFAULT_STORE_NAME = "hotel-email-ingestion-state.json";
 
 function getStorePath(storeName = DEFAULT_STORE_NAME) {
-  return path.join(process.cwd(), ".demo-state", storeName);
+  return resolveJsonStorePath({
+    fileName: storeName,
+    pathEnv: "HOTEL_EMAIL_STATE_STORE_PATH",
+    dirEnv: "HOTEL_EMAIL_STATE_STORE_DIR",
+  });
 }
 
 async function ensureDirectory() {
-  await mkdir(path.join(process.cwd(), ".demo-state"), { recursive: true });
+  await mkdir(path.dirname(getStorePath()), { recursive: true });
 }
 
 function createDefaultState(): EmailIngestionState {

@@ -2,8 +2,31 @@ import Link from "next/link";
 import { ProductShell } from "@/components/product-shell";
 import { ReservationLab } from "@/components/reservation-lab";
 import { getGoogleSheetsLiveStatus } from "@/lib/hotel/config/google-sheets-live";
+import { verifyPanelPageAccess } from "@/lib/hotel/conversations/auth";
+
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 
 export default async function OpsPage() {
+  const auth = await verifyPanelPageAccess();
+  if (!auth.ok) {
+    return (
+      <ProductShell>
+        <section className="mx-auto max-w-6xl px-6 py-16 lg:px-10">
+          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-[#8d6b51]">
+            Zona protegida
+          </p>
+          <h1 className="mt-4 font-serif text-5xl leading-[0.95] md:text-6xl">
+            Operativa interna
+          </h1>
+          <p className="mt-5 max-w-2xl text-base leading-8 text-[#5d4a3a]">
+            Configura credenciales de panel para acceder a esta vista en produccion.
+          </p>
+        </section>
+      </ProductShell>
+    );
+  }
+
   const sheetsStatus = await getGoogleSheetsLiveStatus();
 
   return (

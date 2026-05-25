@@ -31,7 +31,7 @@ export const REMINDER_DEFAULT_CONFIG: ReminderRuntimeConfig = {
   defaultLeadHours: 120,
   defaultChannel: "whatsapp",
   defaultMode: "mock",
-  defaultStoreName: "hotel-demo-state.json",
+  defaultStoreName: "reminders.json",
   fallbackToPreview: true,
   webhookUrl: process.env.HOTEL_REMINDER_WEBHOOK_URL?.trim() || undefined,
 };
