@@ -91,6 +91,14 @@ El import CSV/TSV imprime solo métricas agregadas. En `--apply`, primero duplic
 
 El import PDF es solo preflight sin OCR: intenta extraer texto con `pdftotext` y no aplica cambios.
 
+Actualización Plan B PDF:
+
+- si `pdftotext` no existe, usa Python/PyMuPDF por coordenadas;
+- `clients:import:pdf` nunca aplica directo a Sheets;
+- puede exportar un CSV local ignorado con `--export-csv`;
+- el CSV se valida luego con `clients:import --dry-run`;
+- `clients:import --apply --staging` crea una pestaña `CLIENTES_IMPORT_STAGING_<fecha>` cuando hay credenciales Google disponibles.
+
 ## REGISTRO_ENTRADA
 
 No se ha encontrado una pestaña equivalente consolidada. Diseño pendiente para una siguiente pieza ligera:

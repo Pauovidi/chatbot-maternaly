@@ -6,6 +6,7 @@ import {
   createClientsSheetsContext,
   ensureClientsSheet,
   quoteSheetRange,
+  timestampSuffix,
 } from "./hotel-clients-sheet";
 import {
   CLIENTS_SHEET_HEADERS,
@@ -19,10 +20,11 @@ import {
 interface CliOptions {
   file?: string;
   apply: boolean;
+  staging: boolean;
 }
 
 function parseArgs(argv: string[]): CliOptions {
-  const options: CliOptions = { apply: false };
+  const options: CliOptions = { apply: false, staging: false };
   for (let index = 0; index < argv.length; index += 1) {
     const value = argv[index];
     if (value === "--file" || value === "--source") {
@@ -30,6 +32,8 @@ function parseArgs(argv: string[]): CliOptions {
       index += 1;
     } else if (value === "--apply") {
       options.apply = true;
+    } else if (value === "--staging") {
+      options.staging = true;
     } else if (value === "--dry-run") {
       options.apply = false;
     }
@@ -179,6 +183,35 @@ async function main() {
   }
 
   const context = await createClientsSheetsContext();
+  if (options.staging) {
+    const stagingSheetName = `${CLIENTS_SHEET_NAME}_IMPORT_STAGING_${timestampSuffix()}`;
+    await context.client.spreadsheets.batchUpdate({
+      spreadsheetId: context.spreadsheetId,
+      requestBody: {
+        requests: [{ addSheet: { properties: { title: stagingSheetName } } }],
+      },
+    });
+    await context.client.spreadsheets.values.update({
+      spreadsheetId: context.spreadsheetId,
+      range: quoteSheetRange(stagingSheetName, "A1:M"),
+      valueInputOption: "RAW",
+      requestBody: { values: [[...CLIENTS_SHEET_HEADERS], ...rows] },
+    });
+    console.log(
+      JSON.stringify(
+        {
+          ok: true,
+          mode: "staging",
+          stagingSheetName,
+          report,
+        },
+        null,
+        2,
+      ),
+    );
+    return;
+  }
+
   const backupSheetName = await backupClientsSheet(context);
   await ensureClientsSheet(context);
   await context.client.spreadsheets.values.clear({

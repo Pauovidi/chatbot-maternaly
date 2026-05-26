@@ -3,6 +3,7 @@ const DANGEROUS_NOTE_PATTERNS = [
   /NO\s+COGER\s+RESERVAS?/i,
   /\bINFORMAL\b/i,
   /NO\s+VINO/i,
+  /NO\s+ES\s+FORM/i,
 ];
 
 export function stripDiacritics(input: string): string {

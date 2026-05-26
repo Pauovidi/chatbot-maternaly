@@ -485,3 +485,4 @@ Resultado:
 - WhatsApp inbound reconoce clientes por teléfono y deriva a humano si `CLIENTES` marca bloqueo o notas tipo `NO COGER RESERVA`.
 - Panel de conversaciones muestra badges de cliente habitual/nuevo/revisión manual sin exponer NIF.
 - Importación real pendiente de ejecutar desde CSV/TSV local validado; PDF solo sirve como fuente/preflight, no como artefacto versionado.
+- Plan B PDF validado con PyMuPDF: dry-run real detecta 3392 filas válidas y genera CSV local ignorado, pero no se ha escrito en Google Sheets porque falta `HOTEL_GOOGLE_SHEETS_SPREADSHEET_ID` en el entorno de scripts.
