@@ -15,7 +15,7 @@ export default async function ConversationsAdminPage() {
       <SiteShell>
         <section className="page-intro">
           <p className="demo-kicker">Panel protegido</p>
-          <h1 className="page-title">Conversaciones</h1>
+          <h1 className="page-title">Panel de conversaciones</h1>
           <p className="page-description">
             Configura HOTEL_PANEL_USERNAME y HOTEL_PANEL_PASSWORD para acceder al
             panel de conversaciones en producción.
@@ -34,8 +34,7 @@ export default async function ConversationsAdminPage() {
         <p className="demo-kicker">Operaciones</p>
         <h1 className="page-title">Panel de conversaciones</h1>
         <p className="page-description">
-          Centraliza WhatsApp, handoffs del bot y contexto de reservas en un
-          único inbox operativo del equipo Somos Muy Perros.
+          Centraliza WhatsApp, handoffs del bot y contexto de reservas en un único inbox operativo.
         </p>
       </section>
       <ConversationsPanel

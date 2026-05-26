@@ -4,6 +4,9 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { demoNavItems } from "@/components/demo-data";
 import { ConversationsPanel } from "@/app/admin/conversations/panel";
+import { PublicChatWidget } from "@/components/public-chat-widget";
+import { PublicSiteHeader } from "@/components/public-site-header";
+import { SiteShell } from "@/components/site-shell";
 import { buildConversationSeed } from "./demo-seed";
 import type { ConversationDashboard } from "./types";
 
@@ -28,7 +31,7 @@ describe("conversations panel visible demo copy", () => {
   it("exposes the conversations panel from demo navigation data", () => {
     expect(demoNavItems).toContainEqual({
       href: "/admin/conversations",
-      label: "Conversaciones",
+      label: "Panel conversaciones",
     });
     expect(readSurface("src/components/public-site-header.tsx")).toContain(
       "Panel conversaciones",
@@ -36,6 +39,28 @@ describe("conversations panel visible demo copy", () => {
     expect(readSurface("src/app/admin/page.tsx")).toContain(
       "Abrir panel de conversaciones",
     );
+  });
+
+  it("renders the shared Somos Muy Perros header with official navigation", () => {
+    const headerHtml = renderToStaticMarkup(<PublicSiteHeader />);
+    const shellHtml = renderToStaticMarkup(
+      <SiteShell>
+        <section>
+          <h1>Panel de conversaciones</h1>
+        </section>
+      </SiteShell>,
+    );
+
+    expect(headerHtml).toContain("Somos Muy Perros");
+    expect(headerHtml).toContain("Panel conversaciones");
+    expect(headerHtml).toContain("Formulario oficial");
+    expect(headerHtml).toContain("somos-muy-perros-logo.png");
+    expect(shellHtml).toContain("Somos Muy Perros");
+    expect(shellHtml).toContain("Panel conversaciones");
+    expect(shellHtml).toContain("Formulario oficial");
+    expect(shellHtml).not.toContain("Demo hotel canino");
+    expect(shellHtml).not.toContain("Formulario real");
+    expect(shellHtml).not.toMatch(/>SM</);
   });
 
   it("renders a non-empty Somos Muy Perros inbox with mock WhatsApp notice", () => {
@@ -59,8 +84,6 @@ describe("conversations panel visible demo copy", () => {
       <ConversationsPanel initialDashboard={dashboard} twilioProviderMode="mock" />,
     );
 
-    expect(html).toContain("Somos Muy Perros");
-    expect(html).toContain("Panel conversaciones");
     expect(html).toContain("Inbox WhatsApp");
     expect(html).toContain("Proveedor: Twilio WhatsApp");
     expect(html).toContain("Mock");
@@ -71,7 +94,12 @@ describe("conversations panel visible demo copy", () => {
     expect(html).toContain("Mascota: Luna");
     expect(html).toContain("Respuesta manual del equipo");
     expect(html).toContain("Modo demo: los mensajes no se envían por WhatsApp real.");
+    expect(html).toContain("Actualizar");
     expect(html).not.toContain("No hay conversaciones para este filtro");
+    expect(html).not.toContain("Demo clínica");
+    expect(html).not.toContain("Demo hotel canino");
+    expect(html).not.toMatch(/>Ops</);
+    expect(html).not.toMatch(/>SM</);
   });
 
   it("renders sandbox and real Twilio provider states without changing provider", () => {
@@ -142,6 +170,49 @@ describe("conversations panel visible demo copy", () => {
     expect(html).toContain("cliente@example.com");
     expect(html).not.toContain("NIF");
     expect(html.toLowerCase()).not.toContain("dni");
+  });
+
+  it("keeps the conversations page copy presentable", () => {
+    const surfaces = [
+      "src/app/admin/conversations/page.tsx",
+      "src/app/admin/conversations/panel.tsx",
+      "src/components/demo-data.ts",
+      "src/components/public-site-header.tsx",
+      "src/components/site-shell.tsx",
+    ]
+      .map(readSurface)
+      .join("\n");
+
+    expect(surfaces).toContain("Panel de conversaciones");
+    expect(surfaces).toContain("Centraliza WhatsApp, handoffs del bot y contexto de reservas en un único inbox operativo.");
+    expect(surfaces).toContain("Proveedor: Twilio WhatsApp");
+    expect(surfaces).toContain("Formulario oficial");
+    expect(surfaces).not.toContain("Demo clínica");
+    expect(surfaces).not.toContain("Demo hotel canino");
+    expect(surfaces).not.toContain("Formulario real");
+    expect(surfaces).not.toMatch(/label:\s*"Ops"/);
+    expect(surfaces).not.toMatch(/>SM</);
+  });
+
+  it("renders dark action buttons with visible text in SSR surfaces", () => {
+    const conversations = buildConversationSeed("2026-05-06T08:00:00.000Z").conversations;
+    const dashboard: ConversationDashboard = {
+      conversations,
+      stats: {
+        total: conversations.length,
+        pending: 0,
+        human: 0,
+        unread: 0,
+        read: conversations.length,
+      },
+    };
+    const panelHtml = renderToStaticMarkup(
+      <ConversationsPanel initialDashboard={dashboard} twilioProviderMode="mock" />,
+    );
+    const chatHtml = renderToStaticMarkup(<PublicChatWidget />);
+
+    expect(panelHtml).toContain("Actualizar");
+    expect(chatHtml).toContain("Enviar");
   });
 
 

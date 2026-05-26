@@ -8,7 +8,6 @@ import {
   Circle,
   ExternalLink,
   MessageSquareText,
-  PawPrint,
   RefreshCcw,
   Search,
   Send,
@@ -225,42 +224,29 @@ export function ConversationsPanel({
 
   return (
     <section className="conversations-panel" aria-busy={isPending}>
-      <header className="conversation-panel-hero">
-        <div className="conversation-panel-title">
-          <span className="conversation-brand-mark conversation-brand-mark-large">
-            <PawPrint size={22} />
-          </span>
-          <div>
-            <p className="demo-kicker">Somos Muy Perros</p>
-            <h2>Panel de conversaciones</h2>
-            <span>Inbox WhatsApp para reservas, estancias y handoffs del equipo.</span>
-          </div>
-        </div>
+      <div className="conversation-panel-toolbar">
+        <span className={`conversation-transport conversation-transport-${twilioProviderMode}`}>
+          <Circle size={10} fill="currentColor" />
+          Proveedor: Twilio WhatsApp · {formatProviderMode(twilioProviderMode)}
+        </span>
         <div className="conversation-panel-actions">
-          <span className={`conversation-transport conversation-transport-${twilioProviderMode}`}>
-            <Circle size={10} fill="currentColor" />
-            Proveedor: Twilio WhatsApp · {formatProviderMode(twilioProviderMode)}
-          </span>
           <Link href="/" className="conversation-top-link">
             Chat web
             <ExternalLink size={14} />
           </Link>
           <Link href="/admin" className="conversation-top-link">
-            Admin reservas
+            Panel reservas
             <ExternalLink size={14} />
           </Link>
         </div>
-      </header>
+      </div>
 
       <div className="conversation-workspace">
         <aside className="conversation-sidebar">
           <div className="conversation-sidebar-brand">
-            <span className="conversation-brand-mark">
-              <PawPrint size={18} />
-            </span>
             <div>
-              <strong>Somos Muy Perros</strong>
-              <small>Panel conversaciones</small>
+              <strong>Inbox WhatsApp</strong>
+              <small>Reservas y handoffs</small>
             </div>
           </div>
 
@@ -281,7 +267,7 @@ export function ConversationsPanel({
               />
             </label>
             <button
-              className="conversation-icon-button"
+              className="conversation-refresh-button"
               type="button"
               onClick={() => run(() => refresh())}
               title="Actualizar"
@@ -289,6 +275,7 @@ export function ConversationsPanel({
               disabled={isPending}
             >
               <RefreshCcw size={17} />
+              Actualizar
             </button>
           </div>
 

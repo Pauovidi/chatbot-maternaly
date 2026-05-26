@@ -222,11 +222,11 @@ export function PublicChatWidget({
           />
           <button
             type="submit"
-            className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-[#201911] text-[#fffaf1] transition-transform hover:-translate-y-0.5 disabled:opacity-60"
+            className="inline-flex h-12 items-center justify-center gap-2 rounded-2xl bg-[#201911] px-4 text-sm font-semibold text-[#fffaf1] transition-transform hover:-translate-y-0.5 disabled:opacity-60"
             disabled={loading}
-            aria-label="Enviar mensaje"
           >
             <Send size={16} />
+            Enviar
           </button>
         </form>
       </div>

@@ -4,23 +4,23 @@ import { DEMO_SAMPLE_EMAILS } from "@/lib/hotel/parser";
 export const demoFormUrl = "https://somosmuyperros.com/hotel-canino/";
 
 export const demoOperationalBanner =
-  "Demo con FAQ comercial, procesamiento de emails, disponibilidad por turnos y recordatorios 48 h.";
+  "Chat web, recepción de emails, panel de conversaciones y seguimiento operativo.";
 
 export const demoNavItems = [
-  { href: "/", label: "Demo pública" },
-  { href: "/ops", label: "Ops" },
-  { href: "/admin/conversations", label: "Conversaciones" },
+  { href: "/", label: "Inicio" },
+  { href: "/ops", label: "Recepción emails" },
+  { href: "/admin/conversations", label: "Panel conversaciones" },
 ];
 
 export const demoRoutes = [
   {
     href: "/",
-    label: "Demo pública",
-    description: "Chatbot protagonista, quick replies y CTA directo al formulario real.",
+    label: "Inicio",
+    description: "Chatbot protagonista, respuestas rápidas y CTA directo al formulario oficial.",
   },
   {
     href: "/ops",
-    label: "Ops",
+    label: "Recepción emails",
     description: "Zona secundaria con parser, disponibilidad, precio, recordatorios y admin.",
   },
   {

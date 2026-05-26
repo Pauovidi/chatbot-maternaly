@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { PawPrint } from "lucide-react";
+import Image from "next/image";
 import { demoFormUrl } from "@/components/demo-data";
 
 export function PublicSiteHeader() {
@@ -7,15 +7,20 @@ export function PublicSiteHeader() {
     <header className="sticky top-0 z-40 border-b border-black/8 bg-[#fffaf1]/95 backdrop-blur-sm">
       <div className="mx-auto flex h-[4.5rem] max-w-6xl items-center justify-between gap-6 px-6 py-4 lg:px-10">
         <Link href="/" className="flex items-center gap-3">
-          <span className="flex h-12 w-12 items-center justify-center rounded-full bg-[#201911] text-white">
-            <PawPrint size={20} />
-          </span>
+          <Image
+            src="/brand/somos-muy-perros-logo.png"
+            alt="Somos Muy Perros"
+            width={118}
+            height={76}
+            priority
+            className="h-12 w-auto object-contain"
+          />
           <span>
             <strong className="block font-serif text-lg text-[#201911]">
               Somos Muy Perros
             </strong>
             <small className="text-xs uppercase tracking-[0.2em] text-[#8d6b51]">
-              Chat web
+              Hotel canino
             </small>
           </span>
         </Link>
@@ -53,9 +58,9 @@ export function PublicSiteHeader() {
         <div className="flex items-center gap-2">
           <Link
             href="/admin/conversations"
-            className="rounded-full border border-[#201911]/15 bg-[#201911] px-4 py-2.5 text-xs font-bold uppercase tracking-[0.14em] text-white transition-colors hover:bg-[#4c3a2d] md:hidden lg:inline-flex"
+            className="rounded-full border border-[#201911]/15 bg-[#201911] px-4 py-2.5 text-xs font-bold uppercase tracking-[0.14em] text-white transition-colors hover:bg-[#4c3a2d] md:hidden"
           >
-            Conversaciones
+            Panel conversaciones
           </Link>
           <a
             href={demoFormUrl}
