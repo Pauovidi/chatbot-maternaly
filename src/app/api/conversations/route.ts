@@ -9,6 +9,21 @@ import type { ConversationListFilters } from "@/lib/hotel/conversations/types";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+function sanitizeDemoInboundPayload(body: {
+  from?: string;
+  body?: string;
+  messageSid?: string;
+  displayName?: string;
+}) {
+  return {
+    from: body.from?.slice(0, 240),
+    body: body.body?.slice(0, 1000),
+    messageSid: body.messageSid?.slice(0, 240),
+    displayName: body.displayName?.slice(0, 240),
+    source: "admin_conversations_demo",
+  };
+}
+
 export async function GET(request: Request) {
   const auth = requirePanelAuth(request);
   if (!auth.ok) {
@@ -57,7 +72,7 @@ export async function POST(request: Request) {
     body: body.body,
     messageSid: body.messageSid,
     displayName: body.displayName,
-    rawPayload: body,
+    rawPayload: sanitizeDemoInboundPayload(body),
   });
 
   return NextResponse.json({ ok: true, ...result });

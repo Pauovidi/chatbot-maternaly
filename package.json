@@ -25,6 +25,12 @@
     "hotel:conversations:seed": "tsx scripts/hotel-conversations-seed.ts",
     "hotel:email:poll": "tsx scripts/hotel-email-poll.ts",
     "hotel:sheet:init": "tsx scripts/hotel-sheet-init.ts",
+    "hotel:clients:ensure": "tsx scripts/hotel-clients-ensure.ts",
+    "hotel:clients:import": "tsx scripts/hotel-clients-import.ts",
+    "hotel:clients:import:pdf": "tsx scripts/hotel-clients-import-pdf.ts",
+    "clients:ensure-sheet": "tsx scripts/hotel-clients-ensure.ts",
+    "clients:import": "tsx scripts/hotel-clients-import.ts",
+    "clients:import:pdf": "tsx scripts/hotel-clients-import-pdf.ts",
     "hotel:reminders:dispatch": "tsx scripts/hotel-reminders-dispatch.ts",
     "hotel:worker": "tsx scripts/hotel-worker.ts"
   },

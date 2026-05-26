@@ -10,6 +10,8 @@ export type ConversationSourceType =
 export type MessageDirection = "inbound" | "outbound";
 export type MessageSenderType = "user" | "bot" | "human" | "system";
 export type MessageTransport = "whatsapp";
+export type ConversationClientStatus = "known" | "unknown" | "ambiguous" | "blocked";
+export type ConversationClientConfidence = "strong" | "medium" | "weak" | "none";
 
 export interface Conversation {
   id: string;
@@ -25,6 +27,15 @@ export interface Conversation {
   sourceType: ConversationSourceType;
   sourceRecordId?: string;
   reservationId?: string;
+  clientStatus?: ConversationClientStatus;
+  clientConfidence?: ConversationClientConfidence;
+  clientName?: string;
+  clientEmail?: string;
+  clientWarnings?: string[];
+  clientSource?: "google_sheets_client_directory";
+  clientSheetName?: string;
+  clientSheetRow?: number;
+  requiresManualReview?: boolean;
   mode: ConversationMode;
   humanRequested: boolean;
   assignedAgent?: string;

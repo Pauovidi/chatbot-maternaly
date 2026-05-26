@@ -101,6 +101,50 @@ describe("conversations panel visible demo copy", () => {
     expect(real).toContain("Twilio real activo para respuestas manuales.");
   });
 
+  it("renders client directory badges without exposing NIF", () => {
+    const conversations = buildConversationSeed("2026-05-06T08:00:00.000Z").conversations;
+    conversations[0] = {
+      ...conversations[0],
+      clientStatus: "known",
+      clientConfidence: "strong",
+      clientName: "Cliente Habitual",
+      clientEmail: "cliente@example.com",
+      clientSource: "google_sheets_client_directory",
+      clientSheetName: "CLIENTES",
+      clientSheetRow: 2,
+      clientWarnings: [],
+    };
+    conversations[1] = {
+      ...conversations[1],
+      clientStatus: "blocked",
+      clientWarnings: ["NO COGER RESERVA"],
+      requiresManualReview: true,
+    };
+    const dashboard: ConversationDashboard = {
+      conversations,
+      stats: {
+        total: conversations.length,
+        pending: 1,
+        human: 1,
+        unread: 1,
+        read: conversations.length - 1,
+      },
+    };
+
+    const html = renderToStaticMarkup(
+      <ConversationsPanel initialDashboard={dashboard} twilioProviderMode="mock" />,
+    );
+
+    expect(html).toContain("Cliente habitual");
+    expect(html).toContain("Nuevo contacto");
+    expect(html).toContain("Directorio");
+    expect(html).toContain("CLIENTES · fila 2");
+    expect(html).toContain("cliente@example.com");
+    expect(html).not.toContain("NIF");
+    expect(html.toLowerCase()).not.toContain("dni");
+  });
+
+
   it("does not expose reference moving-company copy in user-facing panel surfaces", () => {
     const surfaces = [
       "src/app/admin/conversations/page.tsx",

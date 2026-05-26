@@ -33,6 +33,12 @@
 .venv/
 .cache/
 logs/
+local-data/
+exports/
+imports/
+*.pdf
+*clientes*.csv
+*clientes*.tsv
 bot-somos-muy-perros-*.json
 *credentials*.json
 *service-account*.json

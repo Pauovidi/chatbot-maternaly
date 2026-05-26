@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { createStaticClientDirectory } from "@/lib/hotel/clients";
 import {
   ensureDemoConversationSeed,
   handleInboundWhatsApp,
@@ -179,6 +180,61 @@ describe("conversation service", () => {
 
     expect(first.conversation.id).toBe(second.conversation.id);
     expect(second.conversation.messages).toHaveLength(4);
+  });
+
+  it("marks strong phone matches as recurring clients without exposing document ids", async () => {
+    const store = new MemoryConversationStore();
+    const directory = createStaticClientDirectory([
+      {
+        nombre: "Cliente Habitual",
+        telefonoMovil: "+34 682 62 11 77",
+        telefonoNormalizado: "34682621177",
+        email: "cliente@example.com",
+        rowNumber: 2,
+        sheetName: "CLIENTES",
+      },
+    ]);
+
+    const result = await handleInboundWhatsApp(
+      { from: "whatsapp:+34682621177", body: "Hola, queria consultar horario" },
+      store,
+      directory,
+    );
+    const serialized = JSON.stringify(result.conversation);
+
+    expect(result.conversation.clientStatus).toBe("known");
+    expect(result.conversation.clientName).toBe("Cliente Habitual");
+    expect(result.conversation.events.some((event) => event.eventType === "client_directory_match")).toBe(true);
+    expect(serialized.toLowerCase()).not.toContain("nif");
+  });
+
+  it("routes blocked directory clients to human review and skips automatic confirmation copy", async () => {
+    const store = new MemoryConversationStore();
+    const directory = createStaticClientDirectory([
+      {
+        nombre: "Cliente Bloqueado",
+        telefonoMovil: "682621177",
+        telefonoNormalizado: "34682621177",
+        notas: "NO COGER RESERVA",
+        rowNumber: 5,
+        sheetName: "CLIENTES",
+      },
+    ]);
+
+    const result = await handleInboundWhatsApp(
+      { from: "whatsapp:+34682621177", body: "Quiero reservar" },
+      store,
+      directory,
+    );
+
+    expect(result.conversation.clientStatus).toBe("blocked");
+    expect(result.conversation.mode).toBe("human");
+    expect(result.conversation.humanRequested).toBe(true);
+    expect(result.conversation.requiresManualReview).toBe(true);
+    expect(result.conversation.clientWarnings).toContain("NO COGER RESERVA");
+    expect(result.conversation.events.some((event) => event.eventType === "client_directory_blocked")).toBe(true);
+    expect(result.twiml).toContain("Gracias, revisamos tu solicitud");
+    expect(result.twiml).not.toContain("formulario");
   });
 
   it("keeps human mode silent for bot replies", async () => {

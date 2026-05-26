@@ -55,6 +55,9 @@ function formatEventType(value: string) {
     bot_reply_sent: "Respuesta automática enviada",
     conversation_created: "Conversación creada",
     human_requested: "Handoff solicitado",
+    client_directory_ambiguous: "Match ambiguo de cliente",
+    client_directory_blocked: "Cliente bloqueado en directorio",
+    client_directory_match: "Cliente habitual detectado",
     manual_reply_failed: "Respuesta manual fallida",
     manual_reply_sent: "Respuesta manual enviada",
     marked_read: "Marcada como leída",
@@ -77,12 +80,13 @@ function formatSender(value: string) {
 }
 
 function conversationTitle(conversation: ConversationRecord) {
-  return conversation.customerName ?? conversation.displayName ?? conversation.phoneE164;
+  return conversation.clientName ?? conversation.customerName ?? conversation.displayName ?? conversation.phoneE164;
 }
 
 function conversationSubtitle(conversation: ConversationRecord) {
   const parts = [
     conversation.phoneE164,
+    conversation.clientEmail,
     conversation.petName ? `Mascota: ${conversation.petName}` : undefined,
   ].filter(Boolean);
 
@@ -333,6 +337,7 @@ export function ConversationsPanel({
                     <span className="conversation-list-subtitle">
                       {conversationSubtitle(conversation)}
                     </span>
+                    <ClientBadges conversation={conversation} compact />
                     <small>{conversation.lastMessagePreview ?? "Sin mensajes todavía"}</small>
                   </span>
                   <span className="conversation-list-meta">
@@ -356,6 +361,7 @@ export function ConversationsPanel({
                   <h2>{conversationTitle(selected)}</h2>
                   <span>
                     {selected.phoneE164}
+                    {selected.clientEmail ? ` · ${selected.clientEmail}` : ""}
                     {selected.petName ? ` · Mascota: ${selected.petName}` : ""}
                     {selected.reservationId ? ` · Reserva: ${selected.reservationId}` : ""}
                     {selected.assignedAgent ? ` · ${selected.assignedAgent}` : ""}
@@ -394,6 +400,7 @@ export function ConversationsPanel({
                 <span>{selected.humanRequested ? "Handoff solicitado" : "Sin handoff"}</span>
                 <span>{selected.unreadCount} no leídos</span>
                 <span>{selected.channel ?? selected.sourceType}</span>
+                <ClientBadges conversation={selected} />
                 <span>{selected.messages.length} mensajes</span>
                 <span>{selected.events.length} eventos</span>
                 <span>Última actividad {formatDate(selected.updatedAt)}</span>
@@ -408,6 +415,18 @@ export function ConversationsPanel({
                     ? "Twilio Sandbox activo para pruebas de WhatsApp."
                     : "Twilio real activo para respuestas manuales."}
               </div>
+              {selected.clientWarnings?.length ? (
+                <div className="conversation-client-alerts">
+                  {selected.clientWarnings.map((warning) => (
+                    <span key={warning}>{warning}</span>
+                  ))}
+                </div>
+              ) : null}
+              {selected.clientSheetName && selected.clientSheetRow ? (
+                <div className="conversation-client-sheet">
+                  CLIENTES · fila {selected.clientSheetRow}
+                </div>
+              ) : null}
 
               <div className="conversation-timeline">
                 {[...selected.messages, ...selected.events]
@@ -497,6 +516,35 @@ function ModeBadge({ mode }: { mode: ConversationMode }) {
   return (
     <span className={`conversation-mode conversation-mode-${mode}`}>
       {mode === "human" ? "Humano" : "Bot"}
+    </span>
+  );
+}
+
+function ClientBadges({
+  conversation,
+  compact = false,
+}: {
+  conversation: ConversationRecord;
+  compact?: boolean;
+}) {
+  const status = conversation.clientStatus ?? "unknown";
+  const labels: Record<typeof status, string> = {
+    ambiguous: "Revisión manual",
+    blocked: "Revisión manual",
+    known: "Cliente habitual",
+    unknown: "Nuevo contacto",
+  };
+
+  return (
+    <span className={`conversation-client-badges ${compact ? "is-compact" : ""}`}>
+      <span className={`conversation-client-badge conversation-client-${status}`}>
+        {labels[status]}
+      </span>
+      {conversation.clientSource ? (
+        <span className="conversation-client-badge conversation-client-source">
+          Directorio
+        </span>
+      ) : null}
     </span>
   );
 }

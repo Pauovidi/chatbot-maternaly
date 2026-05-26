@@ -211,3 +211,13 @@ Queda como `it.todo` convertir en test activo que `/admin/conversations` invoque
 - No hay validacion criptografica de firma Twilio todavia; `TWILIO_WEBHOOK_AUTH_TOKEN` es una proteccion alternativa simple.
 - El bot inbound usa FAQ/handoff seguro; no crea ni cancela reservas desde WhatsApp.
 - El fallback `/data` no es multi-instancia ni transaccional.
+# Actualización Client Directory V0
+
+El panel de conversaciones ya muestra contexto seguro del directorio `CLIENTES`:
+
+- `Cliente habitual` para match fuerte por teléfono/email.
+- `Nuevo contacto` cuando no hay match o la pestaña no existe.
+- `Revisión manual` para bloqueados o matches ambiguos.
+- Alertas operativas como `NO COGER RESERVA`.
+
+No se muestra NIF/DNI por defecto. La proyección al panel se limita a nombre, teléfono, email, estado, avisos y fila de `CLIENTES` si existe.

@@ -14,6 +14,10 @@ describe("secret hygiene", () => {
     expect(gitignore).toMatch(/^\.tokens\/$/m);
     expect(gitignore).toMatch(/^\.demo-state\/$/m);
     expect(gitignore).toMatch(/^\.vercel$/m);
+    expect(gitignore).toMatch(/^local-data\/$/m);
+    expect(gitignore).toMatch(/^\*\.pdf$/m);
+    expect(gitignore).toMatch(/^\*clientes\*\.csv$/m);
+    expect(gitignore).toMatch(/^\*clientes\*\.tsv$/m);
     expect(gitignore).toMatch(/^bot-somos-muy-perros-\*\.json$/m);
     expect(gitignore).toMatch(/^\*.pem$/m);
   });

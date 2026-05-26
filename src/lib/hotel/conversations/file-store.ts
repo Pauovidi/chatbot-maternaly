@@ -114,6 +114,36 @@ function normalizeRecord(value: unknown): ConversationRecord | undefined {
           : undefined,
     reservationId:
       typeof record.reservationId === "string" ? record.reservationId : undefined,
+    clientStatus:
+      record.clientStatus === "known" ||
+      record.clientStatus === "unknown" ||
+      record.clientStatus === "ambiguous" ||
+      record.clientStatus === "blocked"
+        ? record.clientStatus
+        : undefined,
+    clientConfidence:
+      record.clientConfidence === "strong" ||
+      record.clientConfidence === "medium" ||
+      record.clientConfidence === "weak" ||
+      record.clientConfidence === "none"
+        ? record.clientConfidence
+        : undefined,
+    clientName: typeof record.clientName === "string" ? record.clientName : undefined,
+    clientEmail: typeof record.clientEmail === "string" ? record.clientEmail : undefined,
+    clientWarnings: Array.isArray(record.clientWarnings)
+      ? record.clientWarnings.filter((warning): warning is string => typeof warning === "string")
+      : [],
+    clientSource:
+      record.clientSource === "google_sheets_client_directory"
+        ? record.clientSource
+        : undefined,
+    clientSheetName:
+      typeof record.clientSheetName === "string" ? record.clientSheetName : undefined,
+    clientSheetRow:
+      typeof record.clientSheetRow === "number" && Number.isFinite(record.clientSheetRow)
+        ? record.clientSheetRow
+        : undefined,
+    requiresManualReview: Boolean(record.requiresManualReview),
     mode: record.mode === "human" ? "human" : "bot",
     humanRequested: Boolean(record.humanRequested),
     assignedAgent:

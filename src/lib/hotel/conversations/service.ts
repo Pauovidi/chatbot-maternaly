@@ -1,5 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { buildConversationSeed } from "./demo-seed";
+import {
+  ClientDirectoryService,
+  getClientDirectory,
+  type ClientDirectory,
+  type ClientIdentityResult,
+} from "@/lib/hotel/clients";
 import { resolvePublicChatReply } from "@/lib/hotel/faq/public-chat";
 import { getConversationStore } from "./file-store";
 import type { ConversationStore } from "./store";
@@ -142,6 +148,80 @@ function createEvent(conversationId: string, eventType: string, payload?: unknow
   };
 }
 
+function sanitizeClientIdentityPayload(identity: ClientIdentityResult): Record<string, unknown> {
+  return {
+    status: identity.status,
+    confidence: identity.confidence,
+    source: identity.source,
+    matchCount: identity.matches?.length ?? (identity.client ? 1 : 0),
+    warnings: identity.warnings ?? [],
+    rowNumber: identity.client?.rowNumber,
+    sheetName: identity.client?.sheetName,
+  };
+}
+
+function applyClientIdentity(
+  record: ConversationRecord,
+  identity: ClientIdentityResult,
+): ConversationRecord {
+  const strongIdentity = identity.confidence === "strong";
+  const client = identity.client;
+  const warnings = Array.from(new Set(identity.warnings ?? []));
+
+  return {
+    ...record,
+    customerName: strongIdentity && client?.nombre ? client.nombre : record.customerName,
+    clientStatus: identity.status,
+    clientConfidence: identity.confidence,
+    clientName: strongIdentity && client?.nombre ? client.nombre : undefined,
+    clientEmail: strongIdentity ? client?.email : undefined,
+    clientWarnings: warnings,
+    clientSource: identity.source,
+    clientSheetName: client?.sheetName,
+    clientSheetRow: client?.rowNumber,
+    requiresManualReview:
+      record.requiresManualReview ||
+      identity.status === "blocked" ||
+      identity.status === "ambiguous",
+    tags: Array.from(
+      new Set([
+        ...(record.tags ?? []),
+        identity.status === "known" ? "cliente_habitual" : undefined,
+        identity.status === "blocked" ? "revision_manual" : undefined,
+        identity.status === "ambiguous" ? "cliente_ambiguo" : undefined,
+      ].filter((tag): tag is string => Boolean(tag))),
+    ),
+    updatedAt: nowIso(),
+  };
+}
+
+async function resolveAndPersistClientIdentity(
+  store: ConversationStore,
+  record: ConversationRecord,
+  payload: InboundWhatsAppPayload,
+  clientDirectory: ClientDirectory,
+): Promise<{ conversation: ConversationRecord; identity: ClientIdentityResult }> {
+  const identity = await new ClientDirectoryService(clientDirectory).resolveClientIdentity({
+    phone: payload.from,
+    name: payload.displayName,
+  });
+  const next = applyClientIdentity(record, identity);
+  const conversation = await store.replaceConversation(next);
+
+  if (identity.status === "known") {
+    await store.addEvent(createEvent(record.id, "client_directory_match", sanitizeClientIdentityPayload(identity)));
+  } else if (identity.status === "blocked") {
+    await store.addEvent(createEvent(record.id, "client_directory_blocked", sanitizeClientIdentityPayload(identity)));
+  } else if (identity.status === "ambiguous") {
+    await store.addEvent(createEvent(record.id, "client_directory_ambiguous", sanitizeClientIdentityPayload(identity)));
+  }
+
+  return {
+    conversation: (await store.getById(record.id)) ?? conversation,
+    identity,
+  };
+}
+
 function createMessage(input: Omit<Message, "id" | "createdAt" | "transport">): Message {
   return {
     ...input,
@@ -248,6 +328,7 @@ export async function getConversation(
 export async function handleInboundWhatsApp(
   payload: InboundWhatsAppPayload,
   store: ConversationStore = getConversationStore(),
+  clientDirectory: ClientDirectory = getClientDirectory(),
 ): Promise<InboundResult> {
   const conversation = await getOrCreateConversation(store, payload.from, payload.displayName);
   if (payload.messageSid) {
@@ -276,11 +357,47 @@ export async function handleInboundWhatsApp(
   );
 
   const fresh = (await store.getById(conversation.id)) ?? conversation;
+  const clientIdentity = await resolveAndPersistClientIdentity(
+    store,
+    fresh,
+    payload,
+    clientDirectory,
+  );
+  const freshWithClient = clientIdentity.conversation;
 
-  if (fresh.mode === "human") {
-    await store.addEvent(createEvent(fresh.id, "auto_reply_skipped_human_mode"));
+  if (clientIdentity.identity.status === "blocked") {
+    const replyBody =
+      "Gracias, revisamos tu solicitud con el equipo y te contestamos por aqui.";
+    const humanRecord: ConversationRecord = {
+      ...freshWithClient,
+      mode: "human",
+      humanRequested: true,
+      priority: "urgent",
+      requiresManualReview: true,
+      updatedAt: nowIso(),
+    };
+    await store.replaceConversation(humanRecord);
+    const botReply = await store.addMessage(
+      createMessage({
+        conversationId: freshWithClient.id,
+        direction: "outbound",
+        senderType: "bot",
+        body: replyBody,
+      }),
+    );
+
     return {
-      conversation: (await store.getById(fresh.id)) ?? fresh,
+      conversation: (await store.getById(freshWithClient.id)) ?? humanRecord,
+      inbound,
+      botReply,
+      twiml: buildTwilioMessageResponse(replyBody),
+    };
+  }
+
+  if (freshWithClient.mode === "human") {
+    await store.addEvent(createEvent(freshWithClient.id, "auto_reply_skipped_human_mode"));
+    return {
+      conversation: (await store.getById(freshWithClient.id)) ?? freshWithClient,
       inbound,
     };
   }
@@ -289,16 +406,16 @@ export async function handleInboundWhatsApp(
     const replyBody =
       "Perfecto, te paso con una persona del equipo. En cuanto puedan te responderan por aqui.";
     const humanRecord: ConversationRecord = {
-      ...fresh,
+      ...freshWithClient,
       mode: "human",
       humanRequested: true,
       updatedAt: nowIso(),
     };
     await store.replaceConversation(humanRecord);
-    await store.addEvent(createEvent(fresh.id, "human_requested", { matchedFrom: "inbound" }));
+    await store.addEvent(createEvent(freshWithClient.id, "human_requested", { matchedFrom: "inbound" }));
     const botReply = await store.addMessage(
       createMessage({
-        conversationId: fresh.id,
+        conversationId: freshWithClient.id,
         direction: "outbound",
         senderType: "bot",
         body: replyBody,
@@ -316,16 +433,16 @@ export async function handleInboundWhatsApp(
   const reply = resolvePublicChatReply(payload.body).text;
   const botReply = await store.addMessage(
     createMessage({
-      conversationId: fresh.id,
+      conversationId: freshWithClient.id,
       direction: "outbound",
       senderType: "bot",
       body: reply,
     }),
   );
-  await store.addEvent(createEvent(fresh.id, "bot_reply_sent", { source: "faq_public_chat" }));
+  await store.addEvent(createEvent(freshWithClient.id, "bot_reply_sent", { source: "faq_public_chat" }));
 
   return {
-    conversation: (await store.getById(fresh.id)) ?? fresh,
+    conversation: (await store.getById(freshWithClient.id)) ?? freshWithClient,
     inbound,
     botReply,
     twiml: buildTwilioMessageResponse(reply),

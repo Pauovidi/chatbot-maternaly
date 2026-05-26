@@ -476,3 +476,12 @@ Resultado:
 
 - `docs/PRE_EASYPANEL_ROLLBACK_AND_BACKUP.md`.
 - `docs/PRE_EASYPANEL_READINESS_REPORT.md`.
+# Actualización Client Directory Google Sheets V0
+
+- Producto sigue en Vercel antes de EasyPanel.
+- EasyPanel queda como último paso; no se cambia infraestructura ni webhook real de Twilio en esta tarea.
+- Fuente viva de clientes: Google Sheets, pestaña `CLIENTES`.
+- Supabase/Postgres no se usan como directorio de clientes.
+- WhatsApp inbound reconoce clientes por teléfono y deriva a humano si `CLIENTES` marca bloqueo o notas tipo `NO COGER RESERVA`.
+- Panel de conversaciones muestra badges de cliente habitual/nuevo/revisión manual sin exponer NIF.
+- Importación real pendiente de ejecutar desde CSV/TSV local validado; PDF solo sirve como fuente/preflight, no como artefacto versionado.

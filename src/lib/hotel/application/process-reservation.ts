@@ -6,6 +6,7 @@ import { getHotelFeatureFlags, getHotelRuntimeConfig, HOTEL_COLOR_MAPPING } from
 import {
   buildWhatsAppAvailabilityMessage,
 } from "../content/whatsapp-templates";
+import { ClientDirectoryService, getClientDirectory } from "../clients";
 import { buildGoogleSheetAdapter } from "../sheets";
 import type {
   AvailabilityDaySnapshot,
@@ -492,6 +493,27 @@ export async function processReservationEmail(input: {
   const integrationNotes: string[] = [];
 
   if (reservation) {
+    const clientIdentity = await new ClientDirectoryService(
+      getClientDirectory(),
+    ).resolveClientIdentity({
+      phone: reservation.phone,
+      email: reservation.ownerEmail,
+      name: reservation.ownerName,
+    });
+
+    integrationNotes.push(...(clientIdentity.warnings ?? []).map((warning) => `Directorio clientes: ${warning}`));
+    if (clientIdentity.status === "known") {
+      integrationNotes.push("Directorio clientes: cliente habitual detectado.");
+    }
+    if (clientIdentity.status === "ambiguous") {
+      integrationReviewFlags.add("requiere_revision_manual");
+      integrationNotes.push("Directorio clientes: match ambiguo, revisar manualmente.");
+    }
+    if (clientIdentity.status === "blocked") {
+      integrationReviewFlags.add("requiere_revision_manual");
+      integrationNotes.push("Directorio clientes: reserva bloqueada para revision manual.");
+    }
+
     if (flags.useGoogleSheetsReal) {
       try {
         const sheetAdapter = await buildGoogleSheetAdapter();

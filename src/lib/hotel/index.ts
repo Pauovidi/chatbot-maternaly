@@ -42,6 +42,7 @@ export * from "./domain/states";
 export * from "./parser";
 export * from "./pricing";
 export * from "./mock-data";
+export * from "./clients";
 export {
   createHotelIntegrationBundle,
   getSheetNameFromDate,
