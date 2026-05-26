@@ -432,3 +432,47 @@ Resultado:
 
 - Tests de readiness cubren Dockerfile, `.dockerignore`, standalone, health, auth operativa, persistencia sin `/tmp`, guardrail Meta y Twilio real visible.
 - Guia operativa: `docs/EASYPANEL_PRODUCTION_DEPLOY.md`.
+
+## 15) Fase cero pre-migracion Vercel
+
+### Alcance
+
+- Rama de auditoria: `codex/smp-pre-easypanel-vercel-readiness-audit-v0`.
+- Objetivo: validar production Vercel actual y preparar rollback antes de mover trafico a EasyPanel.
+- No se hizo deploy a EasyPanel.
+- No se cambio DNS.
+- No se cambio el webhook real de Twilio.
+- No se apago Vercel.
+
+### Production Vercel observado
+
+- URL publica: `https://hotel-canino-demo.vercel.app`.
+- Deployment production: `hotel-canino-demo-5wgbt8yos-devestial.vercel.app`.
+- Deployment ID: `dpl_bg2MvsCrFpLNbKgbNwLdZnoUyJRM`.
+- Commit production inferido: `3d2c13a5b2ced84097d6e5139b0b4ffd7ac84ef3`.
+- Rama production inferida: `codex/hotel-canino-demo-finalize`.
+- La production actual es anterior a la rama EasyPanel: no tiene `/api/health`, `/admin/conversations` ni `/api/twilio/whatsapp`.
+
+### Smoke real Google Sheets
+
+- Test sintetico: `SMP Smoke Pre EasyPanel` / `Luna Smoke`.
+- Fechas: `2026-12-21` a `2026-12-23`.
+- Hoja: `DICIEMBRE 2026`.
+- `reservationId`: `34600000999::smoke-pre-easypanel-example-test__luna__2026-12-21__morning`.
+- Resultado: Vercel production creo una reserva `confirmada` con `sheetPrepared=true`.
+- Cancelacion: OK por endpoint operativo, `status=cancelada`.
+- Verificacion posterior: disponibilidad OK y sin `blockingDates`.
+
+### Semaforo antes de EasyPanel
+
+- Google Sheets: GREEN.
+- Emails/IMAP: YELLOW; fixture/tests OK, falta prueba real con buzon/carpeta test.
+- Recordatorios: YELLOW; logica e idempotencia OK, falta canal real si se activa envio externo.
+- Rollback/backup: YELLOW; plan creado, falta ejecutar backup real y validar restore/copia.
+- Seguridad/secrets: YELLOW; no se imprimieron secretos, se anonimizo un fixture historico con PII, pero production Vercel heredado mantiene endpoints operativos abiertos.
+- Listo para migrar EasyPanel: NO.
+
+### Artefactos nuevos
+
+- `docs/PRE_EASYPANEL_ROLLBACK_AND_BACKUP.md`.
+- `docs/PRE_EASYPANEL_READINESS_REPORT.md`.

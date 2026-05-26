@@ -4,13 +4,13 @@ Este es un email automático, por favor, no responda a este email.
 Un usuario ha solicitado hacer una reserva online a través de tu web. Estos son los datos:
 
 Reserva de hotel
-Cliente: carolina rodriguez lopez
+Cliente: Cliente Demo Smoke
 
-Email: carolinarolopez381@gmail.com
+Email: cliente.demo.smoke@example.test
 
-Teléfono: 646376965
+Teléfono: 600000123
 
-WhatsApp: +34646376965
+WhatsApp: +34600000123
 
 Fecha entrada: 2026-08-17 13:00
 
@@ -50,8 +50,8 @@ Serían 3 perros.
 export const DEMO_SAMPLE_EMAILS = [
   {
     id: "real-forward",
-    label: "Email real reenviado",
-    description: "Caso real con hora 13:00 interpretada como turno de tarde.",
+    label: "Email reenviado anonimizado",
+    description: "Caso anonimizado con hora 13:00 interpretada como turno de tarde.",
     content: REAL_SAMPLE_EMAIL,
   },
   {

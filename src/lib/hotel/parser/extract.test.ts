@@ -6,17 +6,17 @@ import {
 import { parseReservationEmail } from "./extract";
 
 describe("reservation email parser", () => {
-  it("parsea el email real y normaliza las 13:00 a la hora operativa mas cercana", () => {
+  it("parsea el email reenviado anonimizado y normaliza las 13:00 a la hora operativa mas cercana", () => {
     const result = parseReservationEmail({
-      subject: "Reserva real",
+      subject: "Reserva reenviada",
       rawText: REAL_SAMPLE_EMAIL,
     });
 
     expect(result.draft.reservationType).toBe("hotel");
-    expect(result.draft.ownerName).toBe("carolina rodriguez lopez");
-    expect(result.draft.ownerEmail).toBe("carolinarolopez381@gmail.com");
-    expect(result.draft.phone).toBe("646376965");
-    expect(result.draft.whatsapp).toBe("+34646376965");
+    expect(result.draft.ownerName).toBe("Cliente Demo Smoke");
+    expect(result.draft.ownerEmail).toBe("cliente.demo.smoke@example.test");
+    expect(result.draft.phone).toBe("600000123");
+    expect(result.draft.whatsapp).toBe("+34600000123");
     expect(result.draft.petName).toBe("luca");
     expect(result.draft.petSex).toBe("macho");
     expect(result.draft.petBreed).toBe("perro de agua");
