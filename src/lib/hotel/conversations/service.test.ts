@@ -255,6 +255,75 @@ describe("conversation service", () => {
     expect(inbound.conversation.events.some((event) => event.eventType === "auto_reply_skipped_human_mode")).toBe(true);
   });
 
+  it("answers general information without human handoff", async () => {
+    const store = new MemoryConversationStore();
+
+    const result = await handleInboundWhatsApp(
+      { from: "+34612345678", body: "Hola, quiero información" },
+      store,
+    );
+
+    expect(result.conversation.mode).toBe("bot");
+    expect(result.conversation.humanRequested).toBe(false);
+    expect(result.botReply?.body).toContain("horarios");
+    expect(result.botReply?.body).toContain("visitas");
+    expect(result.botReply?.body).not.toContain("Ese caso prefiero");
+    expect(result.botReply?.body).not.toContain("por aqui");
+    expect(result.conversation.events.some((event) => event.eventType === "nlu_classified")).toBe(true);
+    expect(result.conversation.events.some((event) => event.eventType === "human_requested")).toBe(false);
+  });
+
+  it("routes live stay status questions to human review without inventing", async () => {
+    const store = new MemoryConversationStore();
+
+    const result = await handleInboundWhatsApp(
+      { from: "+34612345678", body: "¿Ha comido mi perro?" },
+      store,
+    );
+
+    expect(result.conversation.mode).toBe("human");
+    expect(result.conversation.humanRequested).toBe(true);
+    expect(result.botReply?.body).toContain("respuesta real");
+    expect(result.botReply?.body).toContain("persona del equipo");
+    expect(result.conversation.events.some((event) => event.eventType === "human_requested")).toBe(true);
+  });
+
+  it("keeps known directory clients in bot mode by default", async () => {
+    const store = new MemoryConversationStore();
+    const directory = createStaticClientDirectory([
+      {
+        nombre: "Cliente Habitual",
+        telefonoMovil: "+34 612 345 678",
+        telefonoNormalizado: "34612345678",
+        rowNumber: 2,
+        sheetName: "CLIENTES",
+      },
+    ]);
+
+    const result = await handleInboundWhatsApp(
+      { from: "whatsapp:+34612345678", body: "Hola, quiero información" },
+      store,
+      directory,
+    );
+
+    expect(result.conversation.clientStatus).toBe("known");
+    expect(result.conversation.mode).toBe("bot");
+    expect(result.conversation.events.some((event) => event.eventType === "client_directory_match")).toBe(true);
+  });
+
+  it("asks for cancellation details without confirming destructive actions", async () => {
+    const store = new MemoryConversationStore();
+
+    const result = await handleInboundWhatsApp(
+      { from: "+34612345678", body: "Quiero cancelar mi reserva" },
+      store,
+    );
+
+    expect(result.conversation.mode).toBe("human");
+    expect(result.botReply?.body).toContain("localizarla");
+    expect(result.botReply?.body).not.toContain("cancelada correctamente");
+  });
+
   it("detects reception handoff language and deduplicates Twilio retries by MessageSid", async () => {
     const store = new MemoryConversationStore();
 
@@ -290,7 +359,7 @@ describe("conversation service", () => {
 
     const result = await sendManualReply(
       inbound.conversation.id,
-      "Te respondemos por aqui.",
+      "Te respondemos por aquí.",
       {
         async sendText(input) {
           sentMessages.push(input.body);
@@ -302,7 +371,7 @@ describe("conversation service", () => {
     );
 
     expect(result.ok).toBe(true);
-    expect(sentMessages).toEqual(["Te respondemos por aqui."]);
+    expect(sentMessages).toEqual(["Te respondemos por aquí."]);
     expect(result.conversation.unreadCount).toBe(0);
     expect(result.conversation.messages.at(-1)?.senderType).toBe("human");
   });

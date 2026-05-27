@@ -749,7 +749,7 @@ export const FAQ_KNOWLEDGE_ENTRIES: readonly FaqKnowledgeEntry[] = [
     label: "Derivación humana",
     question: "Tengo un caso especial",
     answer:
-      "Ese caso prefiero que lo revise una persona del equipo antes de darte una respuesta cerrada. Escríbenos o llámanos y te orientamos contigo en detalle.",
+      "Para este caso prefiero que lo revise una persona del equipo, así te damos una respuesta segura. Escríbenos o llámanos y lo vemos contigo.",
     examples: [
       "mi perro es muy especial te puedo llamar y contarte",
       "os tengo que explicar una cosa importante",

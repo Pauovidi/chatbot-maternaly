@@ -61,7 +61,9 @@ function formatEventType(value: string) {
     manual_reply_failed: "Respuesta manual fallida",
     manual_reply_sent: "Respuesta manual enviada",
     marked_read: "Marcada como leída",
+    media_attachment_mock_requested: "Vídeo mock solicitado",
     mode_changed: "Modo actualizado",
+    nlu_classified: "Intent detectado",
     reservation_context_detected: "Reserva detectada",
   };
 
@@ -105,7 +107,6 @@ export function ConversationsPanel({
   const [mode, setMode] = useState<FilterMode>("all");
   const [reply, setReply] = useState("");
   const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
   const [isPending, setIsPending] = useState(false);
 
   const selected = useMemo(
@@ -146,7 +147,6 @@ export function ConversationsPanel({
 
   function run(action: () => Promise<void>) {
     setError("");
-    setNotice("");
     setIsPending(true);
     void action()
       .catch((caught) => {
@@ -230,9 +230,6 @@ export function ConversationsPanel({
       await postAction(
         `/api/conversations/${encodeURIComponent(conversation.id)}/media-mock`,
         { kind: "video" },
-      );
-      setNotice(
-        "Vídeo mock solicitado. El uso real estará disponible al activar almacenamiento de archivos.",
       );
       await refresh();
     });
@@ -354,66 +351,69 @@ export function ConversationsPanel({
           {selected ? (
             <>
               <header className="conversation-detail-header">
-                <div>
-                  <p className="demo-kicker">Conversación WhatsApp</p>
-                  <h2>{conversationTitle(selected)}</h2>
+                <div className="conversation-contact-summary">
+                  <div className="conversation-contact-title-row">
+                    <h2>{conversationTitle(selected)}</h2>
+                    <ModeBadge mode={selected.mode} />
+                    <ClientBadges conversation={selected} compact />
+                  </div>
                   <span>
                     {selected.phoneE164}
-                    {selected.clientEmail ? ` · ${selected.clientEmail}` : ""}
                     {selected.petName ? ` · Mascota: ${selected.petName}` : ""}
-                    {selected.reservationId ? ` · Reserva: ${selected.reservationId}` : ""}
-                    {selected.assignedAgent ? ` · ${selected.assignedAgent}` : ""}
                   </span>
                 </div>
                 <div className="conversation-actions">
-                  <ModeBadge mode={selected.mode} />
-                  <button
-                    type="button"
-                    onClick={() => markRead(selected)}
-                    disabled={isPending || (selected.unreadCount === 0 && !selected.humanRequested)}
-                  >
-                    <CheckCheck size={16} />
-                    Marcar como leído
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setConversationMode(selected, "human")}
-                    disabled={isPending || selected.mode === "human"}
-                  >
-                    <UserRound size={16} />
-                    Tomar conversación
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setConversationMode(selected, "bot")}
-                    disabled={isPending || selected.mode === "bot"}
-                  >
-                    <Bot size={16} />
-                    Devolver al bot
-                  </button>
+                  {selected.unreadCount > 0 || selected.humanRequested ? (
+                    <button
+                      type="button"
+                      onClick={() => markRead(selected)}
+                      disabled={isPending}
+                    >
+                      <CheckCheck size={16} />
+                      Marcar como leído
+                    </button>
+                  ) : null}
+                  {selected.mode === "bot" ? (
+                    <button
+                      type="button"
+                      onClick={() => setConversationMode(selected, "human")}
+                      disabled={isPending}
+                    >
+                      <UserRound size={16} />
+                      Tomar conversación
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setConversationMode(selected, "bot")}
+                      disabled={isPending}
+                    >
+                      <Bot size={16} />
+                      Devolver al bot
+                    </button>
+                  )}
                 </div>
               </header>
 
-              <div className="conversation-status-row">
-                <span>{selected.humanRequested ? "Handoff solicitado" : "Sin handoff"}</span>
-                <span>{selected.unreadCount} no leídos</span>
-                <span>{selected.channel ?? selected.sourceType}</span>
-                <ClientBadges conversation={selected} />
-                <span>{selected.messages.length} mensajes</span>
-                <span>{selected.events.length} eventos</span>
-                <span>Última actividad {formatDate(selected.updatedAt)}</span>
-              </div>
+              <details className="conversation-context-details">
+                <summary>Contexto</summary>
+                <div className="conversation-status-row">
+                  <span>{selected.humanRequested ? "Handoff solicitado" : "Sin handoff"}</span>
+                  <span>{selected.unreadCount} no leídos</span>
+                  <span>{selected.channel ?? selected.sourceType}</span>
+                  <span>{selected.messages.length} mensajes</span>
+                  <span>{selected.events.length} eventos</span>
+                  <span>Última actividad {formatDate(selected.updatedAt)}</span>
+                  {selected.clientEmail ? <span>{selected.clientEmail}</span> : null}
+                  {selected.reservationId ? <span>Reserva: {selected.reservationId}</span> : null}
+                  {selected.assignedAgent ? <span>{selected.assignedAgent}</span> : null}
+                  {selected.clientSheetName && selected.clientSheetRow ? (
+                    <span>CLIENTES · fila {selected.clientSheetRow}</span>
+                  ) : null}
+                </div>
+              </details>
 
               {error ? <div className="conversation-error">{error}</div> : null}
-              {notice ? <div className="conversation-notice">{notice}</div> : null}
-              <div className={`conversation-transport conversation-transport-${twilioProviderMode}`}>
-                <Circle size={10} fill="currentColor" />
-                {twilioProviderMode === "mock"
-                  ? "Modo demo: los mensajes no se envían por WhatsApp real."
-                  : twilioProviderMode === "sandbox"
-                    ? "Twilio Sandbox activo para pruebas de WhatsApp."
-                    : "Twilio real activo para respuestas manuales."}
-              </div>
               {selected.clientWarnings?.length ? (
                 <div className="conversation-client-alerts">
                   {selected.clientWarnings.map((warning) => (
@@ -421,14 +421,9 @@ export function ConversationsPanel({
                   ))}
                 </div>
               ) : null}
-              {selected.clientSheetName && selected.clientSheetRow ? (
-                <div className="conversation-client-sheet">
-                  CLIENTES · fila {selected.clientSheetRow}
-                </div>
-              ) : null}
-
               <div className="conversation-timeline">
                 {[...selected.messages, ...selected.events]
+                  .filter((item) => !("eventType" in item) || item.eventType !== "nlu_classified")
                   .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
                   .map((item) =>
                     "body" in item ? (
@@ -467,7 +462,7 @@ export function ConversationsPanel({
                     {twilioProviderMode === "mock"
                       ? "Modo demo: se guarda en el timeline, no sale por WhatsApp real."
                       : twilioProviderMode === "sandbox"
-                        ? "Twilio Sandbox activo: revisa que el destinatario sea participante del Sandbox."
+                        ? "Sandbox: el destinatario debe haberse unido antes de responder."
                         : "Twilio real activo: revisa el mensaje antes de enviarlo."}
                   </small>
                 </label>

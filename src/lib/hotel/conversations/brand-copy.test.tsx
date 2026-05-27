@@ -102,8 +102,9 @@ describe("conversations panel visible demo copy", () => {
     expect(html).toContain("Mascota: Luna");
     expect(html).toContain("Respuesta manual del equipo");
     expect(html).toContain("Adjuntar vídeo");
-    expect(html).toContain("Modo demo: los mensajes no se envían por WhatsApp real.");
+    expect(html).toContain("Modo demo: se guarda en el timeline, no sale por WhatsApp real.");
     expect(html).toContain("Actualizar");
+    expect(html).not.toContain("conversation-notice");
     expect(html).not.toContain("No hay conversaciones para este filtro");
     expect(html).not.toContain("Panel reservas");
     expect(html).not.toContain("Panel de reservas");
@@ -135,10 +136,10 @@ describe("conversations panel visible demo copy", () => {
 
     expect(sandbox).toContain("Proveedor: Twilio WhatsApp");
     expect(sandbox).toContain("Sandbox");
-    expect(sandbox).toContain("Twilio Sandbox activo para pruebas de WhatsApp.");
+    expect(sandbox).toContain("Sandbox: el destinatario debe haberse unido antes de responder.");
     expect(real).toContain("Proveedor: Twilio WhatsApp");
     expect(real).toContain("Real");
-    expect(real).toContain("Twilio real activo para respuestas manuales.");
+    expect(real).toContain("Twilio real activo: revisa el mensaje antes de enviarlo.");
   });
 
   it("renders client directory badges without exposing NIF", () => {

@@ -63,7 +63,7 @@ Si está bloqueado:
 - se marca `mode=human`
 - se activa `humanRequested` y `requiresManualReview`
 - se crea evento `client_directory_blocked`
-- el bot responde: `Gracias, revisamos tu solicitud con el equipo y te contestamos por aqui.`
+- el bot responde: `Gracias, revisamos tu solicitud con el equipo y te contestamos por aquí.`
 
 Si no existe la pestaña o está vacía, el flujo no rompe: el resultado es `unknown` y el panel muestra `Nuevo contacto`.
 

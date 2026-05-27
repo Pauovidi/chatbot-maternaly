@@ -22,4 +22,14 @@ describe("public chat FAQ replies", () => {
       "Ir al formulario de reserva",
     ]);
   });
+
+  it("responde a saludos e información general sin fallback a persona", () => {
+    const reply = resolvePublicChatReply("Hola, quiero información");
+
+    expect(reply.text).toContain("horarios");
+    expect(reply.text).toContain("reservas");
+    expect(reply.text).toContain("¿Sobre qué necesitas información?");
+    expect(reply.text).not.toContain("Ese caso prefiero");
+    expect(reply.text).not.toContain("por aqui");
+  });
 });

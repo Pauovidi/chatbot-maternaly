@@ -16,6 +16,9 @@ export interface PublicChatReply {
   resolution: FaqResolution;
 }
 
+const GENERAL_INFORMATION_REPLY =
+  "¡Hola! Claro, puedo ayudarte con información sobre horarios, visitas, reservas, vacunas, comida, qué traer o funcionamiento del hotel. ¿Sobre qué necesitas información?";
+
 const DEFAULT_RUNTIME_LINKS: FaqRuntimeLinks = {
   bookingFormUrl: HOTEL_DEMO_CONFIG.bookingFormUrl,
   lodgingInfoUrl: HOTEL_DEMO_CONFIG.bookingFormUrl,
@@ -29,6 +32,25 @@ export function getPublicChatWelcomeMessage() {
   return "Hola, soy el chat web del hotel canino. Puedo resolver preguntas frecuentes y, si quieres reservar, te llevaré al formulario web para que el equipo confirme disponibilidad y precio.";
 }
 
+function isGeneralInformationMessage(message: string): boolean {
+  const normalized = message
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .toLowerCase()
+    .replace(/[¿?¡!,.;:()[\]{}]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return (
+    /^(hola|buenas|buenos dias|buenas tardes|buenas noches)$/.test(normalized) ||
+    normalized.includes("quiero informacion") ||
+    normalized.includes("necesito informacion") ||
+    normalized.includes("me das informacion") ||
+    normalized.includes("informacion del hotel") ||
+    normalized.includes("como funciona")
+  );
+}
+
 export function resolvePublicChatReply(
   message: string,
   runtimeOverrides: Partial<FaqRuntimeLinks> = {},
@@ -37,10 +59,13 @@ export function resolvePublicChatReply(
     ...DEFAULT_RUNTIME_LINKS,
     ...runtimeOverrides,
   });
+  const generalInformation = isGeneralInformationMessage(message);
 
   return {
     text:
-      resolution.intent === "workflow_disponibilidad"
+      generalInformation
+        ? GENERAL_INFORMATION_REPLY
+        : resolution.intent === "workflow_disponibilidad"
         ? "Para comprobar disponibilidad real necesitamos que nos envíes la solicitud por el formulario con fechas y turnos. Cuando la revisemos, te confirmamos si hay hueco y el precio."
         : resolution.intent === "workflow_reserva"
           ? "Si ya quieres reservar una plaza, hazlo desde el formulario. En cuanto nos llegue, revisamos la solicitud y te confirmamos disponibilidad y precio."

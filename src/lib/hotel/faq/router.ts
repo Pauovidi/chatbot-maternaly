@@ -100,7 +100,7 @@ function buildActions(intent: FaqIntentId, runtime: FaqRuntimeLinks) {
 function buildReply(intent: FaqIntentId, text: string) {
   const entry = getFaqEntry(intent);
   if (!entry) {
-    return "Ese caso prefiero que lo revise una persona del equipo para no darte una respuesta incorrecta.";
+    return "No estoy seguro de haberlo entendido del todo. ¿Quieres información general, consultar disponibilidad o hablar con una persona del equipo?";
   }
 
   if (intent === "faq_precio_hotel") {
@@ -116,7 +116,7 @@ function buildReply(intent: FaqIntentId, text: string) {
   }
 
   if (intent === "handoff_humano") {
-    return "Ese caso prefiero que lo revise una persona del equipo antes de darte una respuesta cerrada. Escríbenos o llámanos y te orientamos contigo en detalle.";
+    return "Para este caso prefiero que lo revise una persona del equipo, así te damos una respuesta segura. Escríbenos o llámanos y lo vemos contigo.";
   }
 
   return entry.answer;

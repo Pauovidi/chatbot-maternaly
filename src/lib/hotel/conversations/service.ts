@@ -6,7 +6,7 @@ import {
   type ClientDirectory,
   type ClientIdentityResult,
 } from "@/lib/hotel/clients";
-import { resolvePublicChatReply } from "@/lib/hotel/faq/public-chat";
+import { buildConversationReplyPlan, classifyConversationIntent } from "./nlu";
 import { getConversationStore } from "./file-store";
 import type { ConversationStore } from "./store";
 import type {
@@ -90,27 +90,7 @@ export function normalizePhone(input: string): { phoneE164: string; phoneNormali
 }
 
 export function isHumanRequest(body: string): boolean {
-  const normalized = body
-    .normalize("NFD")
-    .replace(/\p{Diacritic}/gu, "")
-    .toLowerCase();
-
-  return [
-    "persona",
-    "agente",
-    "humano",
-    "operador",
-    "recepcion",
-    "hablar con alguien",
-    "que me llamen",
-    "telefono",
-    "llamada",
-    "atencion",
-    "responsable",
-    "urgente",
-    "emergencia",
-    "asesor",
-  ].some((phrase) => normalized.includes(phrase));
+  return classifyConversationIntent(body).intent === "human_handoff";
 }
 
 export function shouldAutoSeedConversations(
@@ -373,7 +353,7 @@ export async function handleInboundWhatsApp(
 
   if (clientIdentity.identity.status === "blocked") {
     const replyBody =
-      "Gracias, revisamos tu solicitud con el equipo y te contestamos por aqui.";
+      "Gracias, revisamos tu solicitud con el equipo y te contestamos por aquí.";
     const humanRecord: ConversationRecord = {
       ...freshWithClient,
       mode: "human",
@@ -408,9 +388,20 @@ export async function handleInboundWhatsApp(
     };
   }
 
-  if (isHumanRequest(payload.body)) {
-    const replyBody =
-      "Perfecto, te paso con una persona del equipo. En cuanto puedan te responderan por aqui.";
+  const replyPlan = buildConversationReplyPlan(payload.body);
+  await store.addEvent(
+    createEvent(freshWithClient.id, "nlu_classified", {
+      intent: replyPlan.intent,
+      confidence: replyPlan.confidence,
+      matchedSignals: replyPlan.matchedSignals,
+      slots: replyPlan.slots,
+      source: replyPlan.source,
+      handoff: replyPlan.handoff,
+    }),
+  );
+
+  if (replyPlan.handoff) {
+    const replyBody = replyPlan.reply;
     const humanRecord: ConversationRecord = {
       ...freshWithClient,
       mode: "human",
@@ -418,7 +409,12 @@ export async function handleInboundWhatsApp(
       updatedAt: nowIso(),
     };
     await store.replaceConversation(humanRecord);
-    await store.addEvent(createEvent(freshWithClient.id, "human_requested", { matchedFrom: "inbound" }));
+    await store.addEvent(
+      createEvent(freshWithClient.id, "human_requested", {
+        matchedFrom: "nlu",
+        intent: replyPlan.intent,
+      }),
+    );
     const botReply = await store.addMessage(
       createMessage({
         conversationId: freshWithClient.id,
@@ -436,7 +432,7 @@ export async function handleInboundWhatsApp(
     };
   }
 
-  const reply = resolvePublicChatReply(payload.body).text;
+  const reply = replyPlan.reply;
   const botReply = await store.addMessage(
     createMessage({
       conversationId: freshWithClient.id,
@@ -445,7 +441,12 @@ export async function handleInboundWhatsApp(
       body: reply,
     }),
   );
-  await store.addEvent(createEvent(freshWithClient.id, "bot_reply_sent", { source: "faq_public_chat" }));
+  await store.addEvent(
+    createEvent(freshWithClient.id, "bot_reply_sent", {
+      source: replyPlan.source,
+      intent: replyPlan.intent,
+    }),
+  );
 
   return {
     conversation: (await store.getById(freshWithClient.id)) ?? freshWithClient,

@@ -70,9 +70,11 @@ async function checkProcessEndpoint() {
 }
 
 async function checkTwilioWebhookEndpoint() {
+  const suffix = String(Date.now()).slice(-8);
+  const phoneNormalized = `346${suffix}`;
   const sid = `SM_SMOKE_HTTP_${Date.now()}`;
   const params = new URLSearchParams({
-    From: "whatsapp:+34600000901",
+    From: `whatsapp:+${phoneNormalized}`,
     To: "whatsapp:+14155238886",
     Body: "Hola, quiero hablar con una persona",
     MessageSid: sid,
@@ -96,7 +98,7 @@ async function checkTwilioWebhookEndpoint() {
   console.log("[ok] POST /api/twilio/whatsapp");
 
   const { response: listResponse, text: listText } = await request(
-    "/api/conversations?query=34600000901",
+    `/api/conversations?query=${phoneNormalized}`,
   );
   assert(listResponse.ok, `/api/conversations devolvió ${listResponse.status}: ${listText}`);
 
@@ -105,7 +107,7 @@ async function checkTwilioWebhookEndpoint() {
   assert(
     json.conversations?.some(
       (conversation) =>
-        conversation.phoneNormalized === "34600000901" &&
+        conversation.phoneNormalized === phoneNormalized &&
         conversation.mode === "human" &&
         conversation.events?.some((event) => event.eventType === "human_requested"),
     ),

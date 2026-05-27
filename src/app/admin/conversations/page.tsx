@@ -30,7 +30,7 @@ export default async function ConversationsAdminPage() {
 
   return (
     <SiteShell compact>
-      <section className="page-intro">
+      <section className="page-intro conversation-page-intro">
         <p className="demo-kicker">Operaciones</p>
         <h1 className="page-title">Panel de conversaciones</h1>
         <p className="page-description">

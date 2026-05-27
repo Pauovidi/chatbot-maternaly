@@ -176,7 +176,7 @@ export function buildConversationSeed(
           "2026-04-08T09:30:00.000Z",
           "outbound",
           "bot",
-          "Perfecto, te paso con una persona del equipo. En cuanto puedan te responderan por aqui.",
+          "Perfecto, te paso con una persona del equipo. En cuanto puedan te responderán por aquí.",
         ),
         message(
           "conv-demo-002",

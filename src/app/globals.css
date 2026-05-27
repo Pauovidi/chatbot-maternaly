@@ -845,9 +845,22 @@ input {
 
 .conversation-workspace {
   display: grid;
-  grid-template-columns: minmax(340px, 0.76fr) minmax(0, 1.6fr);
-  gap: 1rem;
-  min-height: min(760px, calc(100vh - 14rem));
+  grid-template-columns: minmax(300px, 340px) minmax(0, 1fr);
+  gap: 0.75rem;
+  height: min(780px, calc(100vh - 9.5rem));
+  min-height: 620px;
+}
+
+.conversation-page-intro {
+  margin-bottom: 0.65rem;
+}
+
+.conversation-page-intro .page-title {
+  font-size: clamp(1.7rem, 3vw, 2.35rem);
+}
+
+.conversation-page-intro .page-description {
+  max-width: 760px;
 }
 
 .conversation-sidebar,
@@ -858,9 +871,9 @@ input {
 
 .conversation-sidebar {
   display: grid;
-  grid-template-rows: auto auto auto auto auto 1fr;
-  gap: 0.9rem;
-  padding: 1rem;
+  grid-template-rows: auto auto auto 1fr;
+  gap: 0.65rem;
+  padding: 0.8rem;
 }
 
 .conversation-sidebar-brand {
@@ -1095,7 +1108,7 @@ input {
 
 .conversation-client-unknown {
   background: rgba(255, 255, 255, 0.7);
-  color: var(--muted);
+  color: var(--ink-700);
 }
 
 .conversation-client-ambiguous,
@@ -1334,15 +1347,6 @@ input {
   margin-top: 0.45rem;
 }
 
-.conversation-notice {
-  border: 1px solid rgba(76, 93, 57, 0.18);
-  border-radius: 14px;
-  background: rgba(76, 93, 57, 0.08);
-  color: var(--olive-900);
-  padding: 0.7rem 0.85rem;
-  font-weight: 800;
-}
-
 .conversation-video-mock-button {
   max-width: 11rem;
   flex-wrap: wrap;
@@ -1400,6 +1404,238 @@ input {
   font-size: 0.78rem;
 }
 
+/* Conversation-first production overrides. Keep this after the legacy panel block. */
+.conversation-workspace {
+  grid-template-columns: minmax(300px, 340px) minmax(0, 1fr);
+  gap: 0.75rem;
+  height: min(780px, calc(100vh - 9.5rem));
+  min-height: 620px;
+}
+
+.conversation-page-intro {
+  margin-bottom: 0.65rem;
+}
+
+.conversation-page-intro .page-title {
+  font-size: clamp(1.7rem, 3vw, 2.35rem);
+}
+
+.conversation-page-intro .page-description {
+  max-width: 760px;
+}
+
+.conversation-sidebar {
+  grid-template-rows: auto auto auto 1fr;
+  gap: 0.65rem;
+  padding: 0.8rem;
+}
+
+.conversation-metrics {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.35rem;
+}
+
+.conversation-metric {
+  padding: 0.55rem;
+  border-radius: 10px;
+}
+
+.conversation-metric span {
+  font-size: 0.72rem;
+}
+
+.conversation-metric strong {
+  font-size: 1.1rem;
+}
+
+.conversation-toolbar {
+  gap: 0.45rem;
+}
+
+.conversation-search {
+  padding: 0.5rem 0.7rem;
+}
+
+.conversation-refresh-button {
+  min-height: 2.45rem;
+  width: 2.45rem;
+  padding: 0;
+}
+
+.conversation-refresh-button:not(:focus-visible) {
+  font-size: 0;
+}
+
+.conversation-tabs button {
+  min-height: 2.1rem;
+  padding: 0.42rem 0.62rem;
+  font-size: 0.82rem;
+}
+
+.conversation-list-item {
+  gap: 0.55rem;
+  border-radius: 12px;
+  padding: 0.65rem;
+}
+
+.conversation-client-unknown {
+  color: var(--ink-700);
+}
+
+.conversation-client-badge {
+  padding: 0.18rem 0.42rem;
+  font-size: 0.68rem;
+}
+
+.conversation-detail {
+  grid-template-rows: auto auto auto minmax(0, 1fr) auto;
+  gap: 0.55rem;
+  padding: 0.75rem;
+}
+
+.conversation-detail-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.conversation-contact-summary {
+  min-width: 0;
+}
+
+.conversation-contact-title-row {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 0;
+}
+
+.conversation-contact-title-row h2 {
+  overflow: hidden;
+  margin: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-display), serif;
+  font-size: clamp(1.25rem, 2vw, 1.7rem);
+}
+
+.conversation-contact-summary > span {
+  display: block;
+  overflow: hidden;
+  margin-top: 0.15rem;
+  color: var(--ink-700);
+  font-size: 0.84rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.conversation-actions {
+  flex-wrap: nowrap;
+  gap: 0.4rem;
+}
+
+.conversation-actions button,
+.conversation-composer button {
+  min-height: 2.5rem;
+  border-radius: 999px;
+  padding: 0.55rem 0.8rem;
+  white-space: nowrap;
+}
+
+.conversation-context-details {
+  color: var(--ink-700);
+  font-size: 0.84rem;
+}
+
+.conversation-context-details summary {
+  width: fit-content;
+  cursor: pointer;
+  font-weight: 800;
+}
+
+.conversation-context-details .conversation-status-row {
+  margin-top: 0.45rem;
+}
+
+.conversation-status-row {
+  gap: 0.4rem;
+}
+
+.conversation-status-row > span:not(.conversation-mode) {
+  padding: 0.24rem 0.52rem;
+}
+
+.conversation-error {
+  border-radius: 10px;
+  padding: 0.6rem 0.75rem;
+}
+
+.conversation-client-alerts span {
+  padding: 0.38rem 0.55rem;
+  font-size: 0.8rem;
+}
+
+.conversation-timeline {
+  gap: 0.6rem;
+  border-radius: 14px;
+  padding: 0.75rem;
+}
+
+.conversation-message {
+  width: min(78%, 660px);
+  border-radius: 14px 14px 14px 5px;
+  padding: 0.7rem 0.78rem;
+}
+
+.conversation-message.is-outbound {
+  border-radius: 14px 14px 5px 14px;
+}
+
+.conversation-event {
+  padding: 0.45rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+}
+
+.conversation-composer {
+  gap: 0.5rem;
+  padding-top: 0.65rem;
+}
+
+.conversation-composer textarea {
+  min-height: 4.5rem;
+  max-height: 8.5rem;
+  border-radius: 12px;
+  padding: 0.7rem 0.85rem;
+}
+
+.conversation-composer-field > span {
+  font-size: 0.72rem;
+}
+
+.conversation-composer-field small {
+  color: var(--ink-700);
+  font-size: 0.76rem;
+}
+
+.conversation-video-mock-button {
+  max-width: none;
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--ink-900);
+}
+
+.conversation-video-mock-button small {
+  width: auto;
+  font-size: 0.64rem;
+}
+
+@media (max-width: 1100px) {
+  .conversation-workspace {
+    grid-template-columns: minmax(280px, 320px) minmax(0, 1fr);
+  }
+}
+
 @media (max-width: 960px) {
   .demo-grid-2,
   .demo-grid-3,
@@ -1409,8 +1645,31 @@ input {
   .demo-debug-grid,
   .ops-review-list,
   .conversation-workspace,
-  .conversation-metrics {
+  .conversation-composer {
     grid-template-columns: 1fr;
+  }
+
+  .conversation-workspace {
+    height: auto;
+    min-height: 0;
+  }
+
+  .conversation-sidebar,
+  .conversation-detail {
+    min-height: auto;
+  }
+
+  .conversation-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .conversation-detail-header {
+    grid-template-columns: 1fr;
+  }
+
+  .conversation-actions {
+    justify-content: flex-start;
+    flex-wrap: wrap;
   }
 
   .demo-header {
@@ -1438,15 +1697,6 @@ input {
 
   .conversation-technical-status {
     justify-self: start;
-  }
-
-  .conversation-workspace {
-    min-height: 0;
-  }
-
-  .conversation-sidebar,
-  .conversation-detail {
-    min-height: auto;
   }
 }
 
