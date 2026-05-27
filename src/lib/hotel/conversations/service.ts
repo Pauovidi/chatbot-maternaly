@@ -69,6 +69,11 @@ export interface DemoSeedDecisionEnv {
   HOTEL_CONVERSATIONS_DEMO_SEED?: string;
 }
 
+export const MANUAL_REPLY_MAX_CHARS = 1200;
+
+const SPANISH_DOCUMENT_ID_PATTERN =
+  /\b(?:dni|nif|nie)\s*(?:es|:)?\s*([XYZ]\d{7}[A-Z]|\d{8}[A-Z]|[A-Z]\d{7,8})\b|\b[XYZ]\d{7}[A-Z]\b|\b\d{8}[A-Z]\b/gi;
+
 function nowIso() {
   return new Date().toISOString();
 }
@@ -87,6 +92,31 @@ export function normalizePhone(input: string): { phoneE164: string; phoneNormali
     phoneE164: e164,
     phoneNormalized: normalized,
   };
+}
+
+export function redactConversationSensitiveText(value: string): string {
+  return value.replace(SPANISH_DOCUMENT_ID_PATTERN, "[identificador oculto]");
+}
+
+export function sanitizeConversationPayload(value: unknown): unknown {
+  if (typeof value === "string") {
+    return redactConversationSensitiveText(value);
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((entry) => sanitizeConversationPayload(entry));
+  }
+
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, entry]) => [
+        key,
+        sanitizeConversationPayload(entry),
+      ]),
+    );
+  }
+
+  return value;
 }
 
 export function isHumanRequest(body: string): boolean {
@@ -317,6 +347,7 @@ export async function handleInboundWhatsApp(
   clientDirectory: ClientDirectory = getClientDirectory(),
 ): Promise<InboundResult> {
   const conversation = await getOrCreateConversation(store, payload.from, payload.displayName);
+  const safeBody = redactConversationSensitiveText(payload.body);
   if (payload.messageSid) {
     const existing = conversation.messages.find(
       (message) => message.externalMessageSid === payload.messageSid,
@@ -337,8 +368,8 @@ export async function handleInboundWhatsApp(
       direction: "inbound",
       senderType: "user",
       externalMessageSid: payload.messageSid,
-      body: payload.body,
-      rawPayload: payload.rawPayload,
+      body: safeBody,
+      rawPayload: sanitizeConversationPayload(payload.rawPayload),
     }),
   );
 
@@ -388,7 +419,7 @@ export async function handleInboundWhatsApp(
     };
   }
 
-  const replyPlan = buildConversationReplyPlan(payload.body);
+  const replyPlan = buildConversationReplyPlan(safeBody);
   await store.addEvent(
     createEvent(freshWithClient.id, "nlu_classified", {
       intent: replyPlan.intent,

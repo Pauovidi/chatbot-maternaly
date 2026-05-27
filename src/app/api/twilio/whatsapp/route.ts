@@ -1,5 +1,9 @@
 import { NextResponse } from "next/server";
-import { buildTwilioMessageResponse, handleInboundWhatsApp } from "@/lib/hotel/conversations/service";
+import {
+  buildTwilioMessageResponse,
+  handleInboundWhatsApp,
+  redactConversationSensitiveText,
+} from "@/lib/hotel/conversations/service";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -46,7 +50,10 @@ function sanitizeTwilioPayload(raw: Record<string, string>): Record<string, stri
   return Object.fromEntries(
     allowedKeys
       .filter((key) => raw[key] !== undefined)
-      .map((key) => [key, raw[key].slice(0, key === "Body" ? 1000 : 240)]),
+      .map((key) => [
+        key,
+        redactConversationSensitiveText(raw[key]).slice(0, key === "Body" ? 1000 : 240),
+      ]),
   );
 }
 

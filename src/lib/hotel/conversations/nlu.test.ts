@@ -12,6 +12,7 @@ describe("conversation NLU", () => {
     ["¿Puedo visitar el hotel?", "faq_visits"],
     ["¿Qué vacunas necesita?", "faq_vaccines"],
     ["¿Mandáis fotos o vídeos?", "faq_photos_videos"],
+    ["¿Tenéis sitio del 14 al 18 de abril?", "availability_request"],
     ["Quiero reservar para Luna del 10 al 15 de agosto", "availability_request"],
     ["Sí, confirma", "reservation_confirm"],
     ["Quiero cancelar mi reserva", "reservation_cancel"],

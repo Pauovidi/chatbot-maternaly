@@ -2,6 +2,8 @@
 
 const baseUrl = (process.env.SMOKE_BASE_URL ?? "http://127.0.0.1:3000").replace(/\/$/, "");
 const basicAuth = process.env.SMOKE_BASIC_AUTH;
+const allowRealSheetsSmoke = process.env.SMOKE_ALLOW_REAL_SHEETS === "true";
+const productionAlias = "https://hotel-canino-demo.vercel.app";
 
 const sampleEmail = `Asunto: Solicitud de reserva web
 
@@ -38,6 +40,11 @@ async function checkGet(path) {
 }
 
 async function checkProcessEndpoint() {
+  if (baseUrl === productionAlias && !allowRealSheetsSmoke) {
+    console.log("[skip] POST /api/demo/process en production requiere SMOKE_ALLOW_REAL_SHEETS=true");
+    return;
+  }
+
   const { response, text } = await request("/api/demo/process", {
     method: "POST",
     headers: {

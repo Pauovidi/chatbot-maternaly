@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requirePanelAuth } from "@/lib/hotel/conversations/auth";
-import { sendManualReply } from "@/lib/hotel/conversations/service";
+import { MANUAL_REPLY_MAX_CHARS, sendManualReply } from "@/lib/hotel/conversations/service";
 import { createTwilioWhatsAppSender } from "@/lib/hotel/twilio/whatsapp";
 
 export const runtime = "nodejs";
@@ -22,6 +22,13 @@ export async function POST(
   if (!text) {
     return NextResponse.json(
       { ok: false, error: "Message text is required" },
+      { status: 400 },
+    );
+  }
+
+  if (text.length > MANUAL_REPLY_MAX_CHARS) {
+    return NextResponse.json(
+      { ok: false, error: `Message text must be ${MANUAL_REPLY_MAX_CHARS} characters or fewer` },
       { status: 400 },
     );
   }

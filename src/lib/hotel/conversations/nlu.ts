@@ -183,7 +183,21 @@ export function classifyConversationIntent(message: string): ConversationNluResu
     return result(slots.checkIn || slots.checkOut ? "availability_request" : "reservation_start");
   }
 
-  if (hasAny(normalized, ["disponibilidad", "hay sitio", "hay hueco", "teneis plaza", "tenéis plaza"])) {
+  if (
+    hasAny(normalized, [
+      "disponibilidad",
+      "hay sitio",
+      "hay hueco",
+      "hay plaza",
+      "hay plazas",
+      "teneis sitio",
+      "tenéis sitio",
+      "teneis hueco",
+      "tenéis hueco",
+      "teneis plaza",
+      "tenéis plaza",
+    ])
+  ) {
     matchedSignals.push("availability_request");
     return result("availability_request");
   }
@@ -240,7 +254,7 @@ export function classifyConversationIntent(message: string): ConversationNluResu
   }
 
   if (
-    hasAny(normalized, ["informacion", "información", "info", "dudas"]) ||
+    hasAny(normalized, ["informacion", "información", "info", "dudas", "como funciona"]) ||
     matchAny(normalized, [/^hola\s+(quiero|necesito|me gustaria)?\s*(informacion|info)$/])
   ) {
     matchedSignals.push("general_information");

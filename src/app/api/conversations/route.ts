@@ -3,6 +3,7 @@ import { requirePanelAuth } from "@/lib/hotel/conversations/auth";
 import {
   listConversationDashboard,
   handleInboundWhatsApp,
+  redactConversationSensitiveText,
 } from "@/lib/hotel/conversations/service";
 import type { ConversationListFilters } from "@/lib/hotel/conversations/types";
 
@@ -17,7 +18,7 @@ function sanitizeDemoInboundPayload(body: {
 }) {
   return {
     from: body.from?.slice(0, 240),
-    body: body.body?.slice(0, 1000),
+    body: body.body ? redactConversationSensitiveText(body.body).slice(0, 1000) : undefined,
     messageSid: body.messageSid?.slice(0, 240),
     displayName: body.displayName?.slice(0, 240),
     source: "admin_conversations_demo",
