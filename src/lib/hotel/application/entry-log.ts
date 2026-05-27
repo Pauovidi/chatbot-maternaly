@@ -93,7 +93,13 @@ export function buildEntryLogRecord(record: ReservationRecord): EntryLogRecord {
 }
 
 export async function listEntryLogRecords(): Promise<EntryLogRecord[]> {
-  const state = await loadDemoState();
+  let state: Awaited<ReturnType<typeof loadDemoState>>;
+
+  try {
+    state = await loadDemoState();
+  } catch {
+    return [];
+  }
 
   return state.reservations
     .filter((record) =>
