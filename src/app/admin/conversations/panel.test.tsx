@@ -62,4 +62,21 @@ describe("conversation panel operational UI", () => {
     expect(html.toLowerCase()).not.toContain("nif");
     expect(html.toLowerCase()).not.toContain("dni");
   });
+
+  it("renders a compact composer and short human metric label", () => {
+    const conversation = buildConversationSeed("2026-05-06T08:00:00.000Z").conversations[0];
+    const html = renderToStaticMarkup(
+      <ConversationsPanel initialDashboard={dashboardWith(conversation)} twilioProviderMode="mock" />,
+    );
+
+    expect(html).toContain(">Humano<");
+    expect(html).not.toContain("En humano");
+    expect(html).toContain("conversation-composer-field");
+    expect(html).toContain("conversation-composer-actions");
+    expect(html).toContain("conversation-send-button");
+    expect(html).toContain("conversation-video-mock-button");
+    expect(html).toContain("Respuesta manual del equipo");
+    expect(html).toContain("Enviar");
+    expect(html).toContain("Adjuntar vídeo");
+  });
 });

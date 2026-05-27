@@ -96,7 +96,8 @@ describe("conversations panel visible demo copy", () => {
     expect(html).toContain("Mock");
     expect(html).toContain("Registro de entrada");
     expect(html).toContain("Pendientes");
-    expect(html).toContain("En humano");
+    expect(html).toContain("Humano");
+    expect(html).not.toContain("En humano");
     expect(html).toContain("Todas");
     expect(html).toContain("Marta R.");
     expect(html).toContain("Mascota: Luna");

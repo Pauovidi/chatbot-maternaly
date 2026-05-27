@@ -264,7 +264,7 @@ export function ConversationsPanel({
 
           <div className="conversation-metrics">
             <Metric label="Pendientes" value={dashboard.stats.pending} />
-            <Metric label="En humano" value={dashboard.stats.human} />
+            <Metric label="Humano" value={dashboard.stats.human} />
             <Metric label="Activas" value={dashboard.stats.total} />
             <Metric label="Leídas" value={dashboard.stats.read} />
           </div>
@@ -458,33 +458,36 @@ export function ConversationsPanel({
                     maxLength={1200}
                     disabled={isPending}
                   />
-                  <small>
-                    {twilioProviderMode === "mock"
-                      ? "Modo demo: se guarda en el timeline, no sale por WhatsApp real."
-                      : twilioProviderMode === "sandbox"
-                        ? "Sandbox: el destinatario debe haberse unido antes de responder."
-                        : "Twilio real activo: revisa el mensaje antes de enviarlo."}
-                  </small>
                 </label>
-                <button
-                  type="button"
-                  onClick={() => sendReply(selected)}
-                  disabled={isPending || !reply.trim()}
-                >
-                  <Send size={17} />
-                  Enviar
-                </button>
-                <button
-                  className="conversation-video-mock-button"
-                  type="button"
-                  onClick={() => requestVideoMock(selected)}
-                  disabled={isPending}
-                  title="Mock: requiere almacenamiento de archivos"
-                >
-                  <Film size={17} />
-                  Adjuntar vídeo
-                  <small>Mock</small>
-                </button>
+                <div className="conversation-composer-actions">
+                  <button
+                    className="conversation-send-button"
+                    type="button"
+                    onClick={() => sendReply(selected)}
+                    disabled={isPending || !reply.trim()}
+                  >
+                    <Send size={17} />
+                    Enviar
+                  </button>
+                  <button
+                    className="conversation-video-mock-button"
+                    type="button"
+                    onClick={() => requestVideoMock(selected)}
+                    disabled={isPending}
+                    title="Mock: requiere almacenamiento de archivos"
+                  >
+                    <Film size={17} />
+                    Adjuntar vídeo
+                    <small>Mock</small>
+                  </button>
+                </div>
+                <small className="conversation-composer-hint">
+                  {twilioProviderMode === "mock"
+                    ? "Modo demo: se guarda en el timeline, no sale por WhatsApp real."
+                    : twilioProviderMode === "sandbox"
+                      ? "Sandbox: el destinatario debe haberse unido antes de responder."
+                      : "Twilio real activo: revisa el mensaje antes de enviarlo."}
+                </small>
               </div>
             </>
           ) : (

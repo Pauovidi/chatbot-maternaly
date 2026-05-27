@@ -849,6 +849,7 @@ input {
   gap: 0.75rem;
   height: min(780px, calc(100vh - 9.5rem));
   min-height: 620px;
+  overflow: hidden;
 }
 
 .conversation-page-intro {
@@ -874,6 +875,7 @@ input {
   grid-template-rows: auto auto auto 1fr;
   gap: 0.65rem;
   padding: 0.8rem;
+  overflow: hidden;
 }
 
 .conversation-sidebar-brand {
@@ -981,6 +983,7 @@ input {
   display: grid;
   align-content: start;
   gap: 0.6rem;
+  min-height: 0;
   overflow: auto;
   padding-right: 0.2rem;
 }
@@ -1142,11 +1145,12 @@ input {
 }
 
 .conversation-detail {
-  display: grid;
-  grid-template-rows: auto auto auto auto 1fr auto;
+  display: flex;
+  flex-direction: column;
   gap: 1rem;
   padding: 1rem;
   min-height: 0;
+  overflow: hidden;
 }
 
 .conversation-detail-header {
@@ -1231,6 +1235,7 @@ input {
   display: grid;
   align-content: start;
   gap: 0.75rem;
+  flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
   padding-right: 0.25rem;
@@ -1290,21 +1295,25 @@ input {
 
 .conversation-composer {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
-  gap: 0.75rem;
+  grid-template-areas:
+    "field actions"
+    "hint hint";
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: 0.6rem;
+  row-gap: 0.25rem;
   align-items: end;
-  position: sticky;
-  bottom: 0;
-  z-index: 1;
+  flex: 0 0 auto;
   border-top: 1px solid rgba(34, 49, 35, 0.08);
   background: rgba(255, 255, 255, 0.92);
-  padding-top: 0.85rem;
+  padding-top: 0.42rem;
   backdrop-filter: blur(16px);
 }
 
 .conversation-composer-field {
+  grid-area: field;
   display: grid;
-  gap: 0.4rem;
+  gap: 0.28rem;
+  min-width: 0;
 }
 
 .conversation-composer-field > span {
@@ -1323,6 +1332,18 @@ input {
   background: rgba(255, 255, 255, 0.74);
   padding: 0.85rem 1rem;
   outline: none;
+}
+
+.conversation-composer-actions {
+  grid-area: actions;
+  display: flex;
+  align-items: flex-end;
+  gap: 0.45rem;
+  min-width: max-content;
+}
+
+.conversation-composer-hint {
+  grid-area: hint;
 }
 
 .conversation-composer textarea:focus,
@@ -1408,8 +1429,9 @@ input {
 .conversation-workspace {
   grid-template-columns: minmax(300px, 340px) minmax(0, 1fr);
   gap: 0.75rem;
-  height: min(780px, calc(100vh - 9.5rem));
-  min-height: 620px;
+  height: min(760px, calc(100svh - 10rem));
+  min-height: 560px;
+  overflow: hidden;
 }
 
 .conversation-page-intro {
@@ -1428,6 +1450,7 @@ input {
   grid-template-rows: auto auto auto 1fr;
   gap: 0.65rem;
   padding: 0.8rem;
+  overflow: hidden;
 }
 
 .conversation-metrics {
@@ -1442,6 +1465,7 @@ input {
 
 .conversation-metric span {
   font-size: 0.72rem;
+  white-space: nowrap;
 }
 
 .conversation-metric strong {
@@ -1478,6 +1502,10 @@ input {
   padding: 0.65rem;
 }
 
+.conversation-list {
+  min-height: 0;
+}
+
 .conversation-client-unknown {
   color: var(--ink-700);
 }
@@ -1488,9 +1516,11 @@ input {
 }
 
 .conversation-detail {
-  grid-template-rows: auto auto auto minmax(0, 1fr) auto;
+  display: flex;
+  flex-direction: column;
   gap: 0.55rem;
   padding: 0.75rem;
+  overflow: hidden;
 }
 
 .conversation-detail-header {
@@ -1578,6 +1608,8 @@ input {
 
 .conversation-timeline {
   gap: 0.6rem;
+  flex: 1 1 auto;
+  min-height: 0;
   border-radius: 14px;
   padding: 0.75rem;
 }
@@ -1599,24 +1631,44 @@ input {
 }
 
 .conversation-composer {
-  gap: 0.5rem;
-  padding-top: 0.65rem;
+  grid-template-areas:
+    "field actions"
+    "hint hint";
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: 0.55rem;
+  row-gap: 0.22rem;
+  flex: 0 0 auto;
+  padding-top: 0.35rem;
 }
 
 .conversation-composer textarea {
-  min-height: 4.5rem;
-  max-height: 8.5rem;
+  min-height: 4rem;
+  max-height: 7rem;
   border-radius: 12px;
-  padding: 0.7rem 0.85rem;
+  padding: 0.62rem 0.75rem;
 }
 
 .conversation-composer-field > span {
-  font-size: 0.72rem;
+  font-size: 0.68rem;
 }
 
-.conversation-composer-field small {
+.conversation-composer-field {
+  grid-area: field;
+  gap: 0.22rem;
+}
+
+.conversation-composer-actions {
+  grid-area: actions;
+  display: flex;
+  align-items: flex-end;
+  gap: 0.42rem;
+  min-width: max-content;
+}
+
+.conversation-composer-hint {
+  grid-area: hint;
   color: var(--ink-700);
-  font-size: 0.76rem;
+  font-size: 0.72rem;
 }
 
 .conversation-video-mock-button {
@@ -1628,6 +1680,11 @@ input {
 .conversation-video-mock-button small {
   width: auto;
   font-size: 0.64rem;
+}
+
+.conversation-send-button,
+.conversation-video-mock-button {
+  height: 2.625rem;
 }
 
 @media (max-width: 1100px) {
@@ -1652,6 +1709,7 @@ input {
   .conversation-workspace {
     height: auto;
     min-height: 0;
+    overflow: visible;
   }
 
   .conversation-sidebar,
@@ -1669,6 +1727,18 @@ input {
 
   .conversation-actions {
     justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .conversation-composer {
+    grid-template-areas:
+      "field"
+      "actions"
+      "hint";
+  }
+
+  .conversation-composer-actions {
+    min-width: 0;
     flex-wrap: wrap;
   }
 
@@ -1735,7 +1805,9 @@ input {
 
   .conversation-actions,
   .conversation-actions button,
-  .conversation-top-link {
+  .conversation-top-link,
+  .conversation-composer-actions,
+  .conversation-composer-actions button {
     width: 100%;
   }
 
