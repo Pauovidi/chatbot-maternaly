@@ -1,8 +1,12 @@
 import { createStaticClientDirectory } from "@/lib/hotel/clients";
+import { buildEntryLogRecord } from "@/lib/hotel/application/entry-log";
 import {
   buildTwilioMessageResponse,
   handleInboundWhatsApp,
 } from "@/lib/hotel/conversations/service";
+import type { ReservationRecord } from "@/lib/hotel/domain/contracts";
+import type { DemoReservationRecord, SheetsAvailabilityResult } from "@/lib/hotel/integrations/types";
+import type { SheetAdapter, SheetsWriteResult } from "@/lib/hotel/sheets/types";
 import {
   createEmptyConversationSnapshot,
   filterConversationRecords,
@@ -138,8 +142,107 @@ function summarizeReply(value?: string) {
   return value.replace(/\s+/g, " ").slice(0, 120);
 }
 
+function makeAvailability(): SheetsAvailabilityResult {
+  return {
+    available: true,
+    conflicts: [],
+    monthKey: "2026-12",
+    sheetName: "DICIEMBRE 2026",
+    remainingByDate: {
+      "2026-12-29": { morning: 8, afternoon: 8 },
+      "2026-12-30": { morning: 8, afternoon: 8 },
+      "2026-12-31": { morning: 8, afternoon: 8 },
+    },
+  };
+}
+
+function makeBridgeDeps() {
+  const counters = {
+    checks: 0,
+    writes: 0,
+    reservations: [] as ReservationRecord[],
+  };
+  const adapter: SheetAdapter = {
+    async readMonth() {
+      return {
+        monthKey: "2026-12",
+        sheetName: "DICIEMBRE 2026",
+        capacityBySlot: { morning: 10, afternoon: 10 },
+        occupiedByDate: {},
+        reservations: [],
+        colorPlan: [],
+      };
+    },
+    async validateMonthStructure() {
+      return {
+        ok: true,
+        monthKey: "2026-12",
+        sheetName: "DICIEMBRE 2026",
+        layout: {} as never,
+        issues: [],
+        rowCount: 39,
+        dayHeaders: [29, 30, 31],
+        occupiedCells: 0,
+      };
+    },
+    async checkAvailability() {
+      counters.checks += 1;
+      return makeAvailability();
+    },
+    async buildWritePlan(reservation: DemoReservationRecord) {
+      return {
+        sheetName: "DICIEMBRE 2026",
+        reservationId: reservation.id,
+        petName: reservation.petName,
+        rowHint: 7,
+        colorPlan: [],
+        cellUpdates: [{ cell: "B7", value: reservation.petName }],
+        metadataUpdates: [],
+      };
+    },
+    async writeReservation(reservation: DemoReservationRecord): Promise<SheetsWriteResult> {
+      counters.writes += 1;
+      return {
+        ok: true,
+        reservationId: reservation.id,
+        sheetName: "DICIEMBRE 2026",
+        petName: reservation.petName,
+        rowHint: 7,
+        colorPlan: [],
+        cellUpdates: [{ cell: "B7", value: reservation.petName }],
+        metadataUpdates: [],
+        mode: "mock",
+      };
+    },
+    async cancelReservation(reservationId: string) {
+      return {
+        ok: true,
+        reservationId,
+        sheetName: "DICIEMBRE 2026",
+        clearedCells: ["B7"],
+        metadataUpdates: [],
+        mode: "mock",
+        cancelledAt: new Date().toISOString(),
+      };
+    },
+  };
+
+  return {
+    counters,
+    deps: {
+      async buildSheetAdapter() {
+        return adapter;
+      },
+      async upsertReservationRecord(reservation: ReservationRecord) {
+        counters.reservations.push(structuredClone(reservation));
+      },
+    },
+  };
+}
+
 async function runDirectSmoke() {
   const store = new MemoryConversationStore();
+  const { counters, deps } = makeBridgeDeps();
   const knownDirectory = createStaticClientDirectory([
     {
       nombre: "SMP QA Conversacional",
@@ -170,14 +273,14 @@ async function runDirectSmoke() {
       from: "whatsapp:+34600009993",
       body: "Quiero reservar para Kira QA del 29 al 31 de diciembre de 2026",
       expectMode: "bot",
-      expectReply: "revisar disponibilidad",
+      expectReply: "Tenemos disponibilidad",
     },
     {
       label: "confirm-without-proposal",
       from: "whatsapp:+34600009994",
       body: "Sí, confirma",
-      expectMode: "human",
-      expectReply: "propuesta válida revisada",
+      expectMode: "bot",
+      expectReply: "necesito primero comprobar",
     },
     {
       label: "stay-status",
@@ -212,6 +315,7 @@ async function runDirectSmoke() {
       },
       store,
       knownDirectory,
+      deps,
     );
     const nluEvent = result.conversation.events.findLast(
       (event) => event.eventType === "nlu_classified",
@@ -236,6 +340,42 @@ async function runDirectSmoke() {
       reply: summarizeReply(result.botReply?.body),
     });
   }
+
+  const confirmed = await handleInboundWhatsApp(
+    {
+      from: "whatsapp:+34600009993",
+      to: SANDBOX_TO,
+      body: "Sí, confirma",
+      messageSid: "SM_QA_bridge_confirm",
+      rawPayload: {
+        From: "whatsapp:+34600009993",
+        To: SANDBOX_TO,
+        Body: "Sí, confirma",
+        MessageSid: "SM_QA_bridge_confirm",
+      },
+    },
+    store,
+    knownDirectory,
+    deps,
+  );
+  const reservation = counters.reservations[0];
+  const entryLog = reservation ? buildEntryLogRecord(reservation) : undefined;
+  rows.push({
+    label: "proposal-confirmation-bridge",
+    status:
+      confirmed.conversation.pendingReservationProposal?.status === "confirmed" &&
+      Boolean(confirmed.conversation.reservationId) &&
+      counters.writes === 1 &&
+      entryLog?.source === "chatbot"
+        ? "OK"
+        : "FAIL",
+    intent: "reservation_confirm",
+    mode: confirmed.conversation.mode,
+    twiml: isTwiml(confirmed.twiml) ? "valid" : "invalid",
+    events: confirmed.conversation.events.map((event) => event.eventType).join(","),
+    entryLogAffected: entryLog ? "yes" : "no",
+    reply: summarizeReply(confirmed.botReply?.body),
+  });
 
   const humanFirst = await handleInboundWhatsApp(
     {

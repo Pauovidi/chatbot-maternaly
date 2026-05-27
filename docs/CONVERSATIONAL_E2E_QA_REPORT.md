@@ -9,7 +9,7 @@ Base: `codex/smp-panel-layout-polish-v0`
 
 La bateria de QA confirma que la capa conversacional V0 clasifica y responde correctamente a saludos, informacion general, FAQs, handoff humano, estado real del perro, cliente conocido/bloqueado/ambiguo y acciones criticas de reserva en modo seguro.
 
-El flujo WhatsApp/Twilio no escribe hoy reservas en Google Sheets ni alimenta automaticamente el Registro de entrada. La escritura real existe en flujos operativos de email/admin, pero no en el bot de conversaciones. Por seguridad, no se ejecuto escritura real en Sheets desde una ruta alternativa, porque no validaria el camino conversacional y podria tocar el cuadrante real.
+Actualizacion puente WhatsApp reserva: el flujo WhatsApp ya puede crear una propuesta pendiente, pedir confirmacion explicita, revalidar disponibilidad, escribir por `SheetAdapter`, crear `ReservationRecord` y proyectar la entrada en Registro de entrada. El smoke real contra Google Sheets queda como opt-in seguro.
 
 ## Auditoria
 
@@ -20,7 +20,7 @@ El flujo WhatsApp/Twilio no escribe hoy reservas en Google Sheets ni alimenta au
 - NLU: `src/lib/hotel/conversations/nlu.ts`
 - Store conversaciones: `src/lib/hotel/conversations/file-store.ts` / `postgres-store.ts`
 
-El webhook guarda inbound, resuelve ClientDirectory, aplica bloqueos, respeta modo humano y llama a `buildConversationReplyPlan`. Las acciones de confirmacion, cancelacion y modificacion derivan a humano o piden datos; no ejecutan cambios destructivos.
+El webhook guarda inbound, resuelve ClientDirectory, aplica bloqueos, respeta modo humano y llama a `buildConversationReplyPlan`. Para `availability_request`/`reservation_start` invoca el puente de reserva; para `reservation_confirm` solo confirma si hay propuesta pendiente vigente.
 
 ### Reservas y Sheets
 
@@ -28,14 +28,14 @@ El webhook guarda inbound, resuelve ClientDirectory, aplica bloqueos, respeta mo
 - Confirmacion/cancelacion admin: `src/lib/hotel/application/operations.ts`
 - Adaptador Sheets: `src/lib/hotel/sheets/google.ts`
 
-No hay llamada desde `handleInboundWhatsApp` a `processReservationEmail`, `confirmReservation`, `writeReservation` ni `cancelReservation`. Por tanto, WhatsApp no escribe en Sheets en esta version.
+El puente no duplica la logica de Sheets: usa `SheetAdapter.checkAvailability` y `SheetAdapter.writeReservation`. La implementacion real de Google Sheets ya revalida disponibilidad antes de escribir; el puente ademas revalida antes de invocar la escritura.
 
 ### Registro de entrada
 
 - Vista: `src/app/admin/registro-entrada/page.tsx`
 - Proyeccion: `src/lib/hotel/application/entry-log.ts`
 
-El registro se deriva de `ReservationRecord` en la store operativa. Las reservas con `source: "demo"` se muestran como `chatbot`, pero no existe todavia un puente productivo WhatsApp -> `ReservationRecord`.
+El registro se deriva de `ReservationRecord` en la store operativa. Las reservas confirmadas por WhatsApp se persisten como `source: "demo"` para mantener compatibilidad con el mapeo actual, que las muestra como `chatbot`.
 
 ### Panel
 
@@ -50,6 +50,9 @@ El panel mantiene conversaciones, filtros, modo bot/humano, respuesta manual, vi
 - Redaccion de DNI/NIF en mensajes y payloads de conversaciones.
 - Limite servidor de 1200 caracteres para respuesta manual.
 - Variante NLU de disponibilidad: "tenéis sitio/hueco/plaza".
+- Puente WhatsApp reserva: `src/lib/hotel/conversations/reservation-bridge.ts`.
+- Tests del puente: `src/lib/hotel/conversations/whatsapp-reservation-bridge.test.ts`.
+- Smoke real opt-in: `npm run smoke:conversation:sheets-real`.
 
 ## Resultados esperados por area
 
@@ -61,11 +64,11 @@ El panel mantiene conversaciones, filtros, modo bot/humano, respuesta manual, vi
 | Handoff humano | Verde | Modo humano y autorespuesta pausada |
 | Cliente bloqueado | Verde | Modo humano y revision manual |
 | Cliente conocido | Verde | Evento `client_directory_match` |
-| Reserva desde WhatsApp | Amarillo | Detecta intención y no confirma sin propuesta; no escribe Sheets |
+| Reserva desde WhatsApp | Verde | Crea propuesta, confirma con explicitud, escribe por adapter y crea ReservationRecord |
 | Cancelacion | Amarillo | Deriva/pide datos; no cancela real desde WhatsApp |
 | Modificacion | Amarillo | Deriva/pide datos; no existe modificacion Sheets directa |
-| Sheets real | Amarillo | No ejecutado; no hay puente conversacional seguro |
-| Registro entrada | Amarillo | Vista funciona; no se alimenta desde WhatsApp automaticamente |
+| Sheets real | Amarillo | Script opt-in creado; no ejecutado en esta pasada sin permiso de escritura real |
+| Registro entrada | Verde | ReservationRecord confirmado desde WhatsApp se proyecta como origen chatbot |
 | Panel | Verde | Conversacion visible, acciones por modo, NIF/DNI oculto |
 
 ## Ejecucion local
@@ -81,21 +84,29 @@ Comandos ejecutados:
 
 ## Google Sheets
 
-Touched: No.  
-Datos sinteticos previstos si se habilita el flujo real: `SMP QA Conversacional`, `Kira QA`, `qa-conversacional@example.test`, fechas diciembre 2026.  
-ReservationId real de QA: no generado por Sheets en esta pasada.  
-Celdas tocadas: ninguna.  
-Cleanup: no requerido.
+Touched en real: No.  
+Datos sinteticos previstos si se habilita el flujo real: `SMP QA Conversacional`, `Kira QA <timestamp>`, teléfono QA, fechas diciembre 2026.  
+ReservationId real de QA: no generado por Sheets real en esta pasada.  
+Celdas reales tocadas: ninguna.  
+Cleanup real: no requerido.
 
-Motivo: ejecutar `/api/demo/process` o rutas admin validaria el flujo email/admin, no el flujo WhatsApp. Además puede escribir en el cuadrante real si las flags de Sheets estan activas.
+Comando opt-in:
+
+```powershell
+$env:HOTEL_QA_ALLOW_REAL_SHEETS_WRITE="true"
+$env:HOTEL_QA_CLEANUP_REAL_SHEETS="true"
+npm run smoke:conversation:sheets-real
+```
+
+Sin `HOTEL_QA_ALLOW_REAL_SHEETS_WRITE=true`, el script no escribe y sale en modo skip. El script valida datos sinteticos, exige cleanup o keep explicito y no imprime `reservationId` completo.
 
 ## Registro de entrada
 
-Entrada creada por WhatsApp: No.  
+Entrada creada por WhatsApp en mock: Si.  
 Proyeccion sintetica validada en test: Si.  
 Campos validados: cliente, estado cliente, telefono/identificador, mascota, entrada, salida, accion, origen, reservationId, estado Gestet.  
 Estado Gestet: pendiente cuando no hay `sheetRegistration`.  
-Demo cliente lista: parcialmente. La vista existe y puede mostrar reservas derivadas de la store operativa; falta conectar reservas confirmadas por chatbot real.
+Demo cliente lista: Si en modo mock/preview; para cuadrante real, ejecutar el smoke opt-in en entorno seguro.
 
 ## Seguridad y privacidad
 
@@ -107,8 +118,7 @@ Demo cliente lista: parcialmente. La vista existe y puede mostrar reservas deriv
 
 ## Pendientes reales
 
-1. Implementar puente conversacional seguro WhatsApp -> reserva propuesta -> confirmacion explicita -> Sheets -> Registro de entrada.
-2. Definir si la confirmacion final del bot puede escribir en Sheets o si siempre debe quedar en revision humana.
-3. Implementar modificacion real de reserva si se necesita; hoy solo cancelacion/escritura.
-4. Ejecutar smoke real Sheets con datos sinteticos una vez exista el puente.
-5. Meta directa/Twilio real, storage de video y EasyPanel quedan fuera de esta tarea.
+1. Ejecutar smoke real Sheets con datos sinteticos y cleanup cuando se decida validar contra cuadrante real.
+2. Implementar cancelacion/modificacion conversacional real si se quiere abrir ese canal al bot.
+3. Evaluar `source: "whatsapp"` como valor de dominio propio en vez de compatibilidad `source: "demo"`.
+4. Meta directa/Twilio real, storage de video y EasyPanel quedan fuera de esta tarea.

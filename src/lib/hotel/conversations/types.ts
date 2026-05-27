@@ -13,6 +13,28 @@ export type MessageTransport = "whatsapp";
 export type ConversationClientStatus = "known" | "unknown" | "ambiguous" | "blocked";
 export type ConversationClientConfidence = "strong" | "medium" | "weak" | "none";
 
+export interface PendingReservationProposal {
+  proposalId: string;
+  conversationId: string;
+  phoneNormalized: string;
+  clientStatus: ConversationClientStatus;
+  clientName?: string;
+  petName: string;
+  checkIn: string;
+  checkOut: string;
+  checkInSlot: "morning" | "afternoon";
+  checkOutSlot: "morning" | "afternoon";
+  petCount: number;
+  requestedAt: string;
+  expiresAt: string;
+  availabilitySnapshot?: unknown;
+  status: "proposed" | "confirmed" | "expired" | "cancelled" | "failed";
+  source: "whatsapp";
+  createdFromMessageId: string;
+  reservationId?: string;
+  failureReason?: string;
+}
+
 export interface Conversation {
   id: string;
   phoneE164: string;
@@ -35,6 +57,7 @@ export interface Conversation {
   clientSource?: "google_sheets_client_directory";
   clientSheetName?: string;
   clientSheetRow?: number;
+  pendingReservationProposal?: PendingReservationProposal;
   requiresManualReview?: boolean;
   mode: ConversationMode;
   humanRequested: boolean;

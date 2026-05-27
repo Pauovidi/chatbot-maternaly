@@ -14,9 +14,9 @@ Datos: solo fixtures sinteticos. No contiene secretos ni PII real.
 | 6 | ¿Qué vacunas necesita? | faq_vaccines | FAQ | Requisitos sanitarios | No | No | No | Medio |
 | 7 | ¿Mandáis fotos o vídeos? | faq_photos_videos | FAQ | Respuesta segura de fotos/videos | No | No | No | Bajo |
 | 8 | ¿Puedo llevar su comida? | faq_food | FAQ | Indicar comida/pienso | No | No | No | Bajo |
-| 9 | Quiero reservar para Kira QA del 29 al 31 de diciembre de 2026 | availability_request | Pedir/revisar disponibilidad | No confirma ni escribe | No | No | No | Alto |
+| 9 | Quiero reservar para Kira QA del 29 al 31 de diciembre de 2026 | availability_request | Comprobar disponibilidad y crear propuesta | Pide confirmación explícita; no escribe todavía | No | No | No | Alto |
 | 10 | Tengo un perro, se llama Kira QA | unknown/reservation_start | Pedir contexto o fechas | No confirma | No | No | No | Medio |
-| 11 | Sí, confirma | reservation_confirm | No ejecutar sin propuesta revisada | Derivar a humano seguro | No | No | Sí | Alto |
+| 11 | Sí, confirma | reservation_confirm | Confirmar solo si existe propuesta vigente | Sin propuesta pide fechas; con propuesta escribe Sheets y crea registro | Sí, solo con propuesta | Sí, solo con propuesta | No | Alto |
 | 12 | No, mejor no | unknown | Aclarar intención | Sin cambios | No | No | No | Bajo |
 | 13 | ¿Hay hueco para dos perros? | availability_request | Pedir datos completos | No escribe | No | No | No | Medio |
 | 14 | Quiero cancelar mi reserva | reservation_cancel | Pedir identificador/contexto | No cancela sin datos | No | No | Sí | Alto |
@@ -43,4 +43,6 @@ Datos: solo fixtures sinteticos. No contiene secretos ni PII real.
 - El bot no debe confirmar, cancelar ni modificar reservas sin contexto valido y confirmación segura.
 - Un cliente bloqueado pasa a modo humano.
 - El modo humano bloquea la autorespuesta.
-- Las pruebas con Google Sheets real solo deben usar datos sinteticos y rutas que validen el flujo real; en V0 no hay puente WhatsApp -> Sheets.
+- La reserva conversacional crea primero una propuesta persistida en la conversación.
+- La confirmación explícita revalida disponibilidad antes de escribir.
+- Las pruebas con Google Sheets real solo deben usar datos sinteticos y el smoke opt-in `smoke:conversation:sheets-real`.

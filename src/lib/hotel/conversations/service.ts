@@ -7,6 +7,11 @@ import {
   type ClientIdentityResult,
 } from "@/lib/hotel/clients";
 import { buildConversationReplyPlan, classifyConversationIntent } from "./nlu";
+import {
+  confirmPendingReservationProposal,
+  createPendingReservationProposal,
+  type WhatsAppReservationBridgeDeps,
+} from "./reservation-bridge";
 import { getConversationStore } from "./file-store";
 import type { ConversationStore } from "./store";
 import type {
@@ -174,6 +179,14 @@ function sanitizeClientIdentityPayload(identity: ClientIdentityResult): Record<s
     rowNumber: identity.client?.rowNumber,
     sheetName: identity.client?.sheetName,
   };
+}
+
+function summarizeReservationId(value?: string): string | undefined {
+  if (!value) {
+    return undefined;
+  }
+
+  return value.length <= 8 ? "[reservation-id]" : `[reservation-id:${value.slice(-8)}]`;
 }
 
 function applyClientIdentity(
@@ -345,6 +358,7 @@ export async function handleInboundWhatsApp(
   payload: InboundWhatsAppPayload,
   store: ConversationStore = getConversationStore(),
   clientDirectory: ClientDirectory = getClientDirectory(),
+  reservationBridgeDeps?: WhatsAppReservationBridgeDeps,
 ): Promise<InboundResult> {
   const conversation = await getOrCreateConversation(store, payload.from, payload.displayName);
   const safeBody = redactConversationSensitiveText(payload.body);
@@ -430,6 +444,150 @@ export async function handleInboundWhatsApp(
       handoff: replyPlan.handoff,
     }),
   );
+
+  if (
+    replyPlan.intent === "availability_request" ||
+    replyPlan.intent === "reservation_start"
+  ) {
+    const proposalOutcome = await createPendingReservationProposal({
+      conversation: freshWithClient,
+      inboundMessageId: inbound.id,
+      message: safeBody,
+      nlu: replyPlan,
+      deps: reservationBridgeDeps,
+    });
+    await store.addEvent(
+      createEvent(freshWithClient.id, "reservation_proposal_checked", {
+        kind: proposalOutcome.kind,
+        ...proposalOutcome.eventPayload,
+      }),
+    );
+
+    const proposalRecord: ConversationRecord = {
+      ...((await store.getById(freshWithClient.id)) ?? freshWithClient),
+      pendingReservationProposal:
+        proposalOutcome.proposal ??
+        ((await store.getById(freshWithClient.id)) ?? freshWithClient).pendingReservationProposal,
+      petName:
+        proposalOutcome.proposal?.petName ??
+        ((await store.getById(freshWithClient.id)) ?? freshWithClient).petName,
+      mode: proposalOutcome.handoff ? "human" : freshWithClient.mode,
+      humanRequested: proposalOutcome.handoff ? true : freshWithClient.humanRequested,
+      requiresManualReview:
+        ((await store.getById(freshWithClient.id)) ?? freshWithClient).requiresManualReview ||
+        Boolean(proposalOutcome.handoff),
+      updatedAt: nowIso(),
+    };
+    await store.replaceConversation(proposalRecord);
+
+    if (proposalOutcome.proposal) {
+      await store.addEvent(
+        createEvent(freshWithClient.id, "reservation_proposal_created", {
+          proposalId: proposalOutcome.proposal.proposalId,
+          petName: proposalOutcome.proposal.petName,
+          checkIn: proposalOutcome.proposal.checkIn,
+          checkOut: proposalOutcome.proposal.checkOut,
+          expiresAt: proposalOutcome.proposal.expiresAt,
+        }),
+      );
+    }
+
+    if (proposalOutcome.handoff) {
+      await store.addEvent(
+        createEvent(freshWithClient.id, "human_requested", {
+          matchedFrom: "reservation_bridge",
+          reason: proposalOutcome.kind,
+        }),
+      );
+    }
+
+    const botReply = await store.addMessage(
+      createMessage({
+        conversationId: freshWithClient.id,
+        direction: "outbound",
+        senderType: "bot",
+        body: proposalOutcome.reply,
+      }),
+    );
+
+    return {
+      conversation: (await store.getById(freshWithClient.id)) ?? proposalRecord,
+      inbound,
+      botReply,
+      twiml: buildTwilioMessageResponse(proposalOutcome.reply),
+    };
+  }
+
+  if (replyPlan.intent === "reservation_confirm") {
+    const latest = (await store.getById(freshWithClient.id)) ?? freshWithClient;
+    const confirmation = await confirmPendingReservationProposal({
+      conversation: latest,
+      deps: reservationBridgeDeps,
+    });
+    await store.addEvent(
+      createEvent(freshWithClient.id, "reservation_confirmation_checked", {
+        kind: confirmation.kind,
+        ...confirmation.eventPayload,
+      }),
+    );
+
+    const updatedRecord: ConversationRecord = {
+      ...((await store.getById(freshWithClient.id)) ?? latest),
+      pendingReservationProposal:
+        confirmation.proposal ??
+        ((await store.getById(freshWithClient.id)) ?? latest).pendingReservationProposal,
+      reservationId:
+        confirmation.reservation?.reservationId ??
+        ((await store.getById(freshWithClient.id)) ?? latest).reservationId,
+      sourceRecordId:
+        confirmation.reservation?.reservationId ??
+        ((await store.getById(freshWithClient.id)) ?? latest).sourceRecordId,
+      petName:
+        confirmation.reservation?.petName ??
+        ((await store.getById(freshWithClient.id)) ?? latest).petName,
+      mode: confirmation.handoff ? "human" : latest.mode,
+      humanRequested: confirmation.handoff ? true : latest.humanRequested,
+      requiresManualReview:
+        ((await store.getById(freshWithClient.id)) ?? latest).requiresManualReview ||
+        Boolean(confirmation.handoff),
+      updatedAt: nowIso(),
+    };
+    await store.replaceConversation(updatedRecord);
+
+    if (confirmation.kind === "confirmed" && confirmation.reservation) {
+      await store.addEvent(
+        createEvent(freshWithClient.id, "reservation_confirmed_from_whatsapp", {
+          reservationIdSummary: summarizeReservationId(confirmation.reservation.reservationId),
+          proposalId: confirmation.proposal?.proposalId,
+        }),
+      );
+    }
+
+    if (confirmation.handoff) {
+      await store.addEvent(
+        createEvent(freshWithClient.id, "human_requested", {
+          matchedFrom: "reservation_bridge",
+          reason: confirmation.kind,
+        }),
+      );
+    }
+
+    const botReply = await store.addMessage(
+      createMessage({
+        conversationId: freshWithClient.id,
+        direction: "outbound",
+        senderType: "bot",
+        body: confirmation.reply,
+      }),
+    );
+
+    return {
+      conversation: (await store.getById(freshWithClient.id)) ?? updatedRecord,
+      inbound,
+      botReply,
+      twiml: buildTwilioMessageResponse(confirmation.reply),
+    };
+  }
 
   if (replyPlan.handoff) {
     const replyBody = replyPlan.reply;

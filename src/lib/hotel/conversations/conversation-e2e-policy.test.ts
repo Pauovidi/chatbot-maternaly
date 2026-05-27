@@ -167,7 +167,7 @@ describe("conversation end-to-end policy QA", () => {
     }
   });
 
-  it("does not write or attach a reservationId from WhatsApp reservation copy without a reviewed proposal", async () => {
+  it("creates a reviewed proposal without attaching a confirmed reservationId from reservation copy", async () => {
     const store = new MemoryConversationStore();
 
     const result = await handleInboundWhatsApp(
@@ -183,7 +183,13 @@ describe("conversation end-to-end policy QA", () => {
 
     expect(result.conversation.mode).toBe("bot");
     expect(result.conversation.reservationId).toBeUndefined();
-    expect(result.botReply?.body).toContain("revisar disponibilidad");
+    expect(result.conversation.pendingReservationProposal).toMatchObject({
+      status: "proposed",
+      petName: "Kira QA",
+      checkIn: "2026-12-29",
+      checkOut: "2026-12-31",
+    });
+    expect(result.botReply?.body).toContain("Tenemos disponibilidad");
     expect(
       result.conversation.events.some(
         (event) =>

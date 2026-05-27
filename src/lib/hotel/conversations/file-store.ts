@@ -83,6 +83,11 @@ function normalizeRecord(value: unknown): ConversationRecord | undefined {
   const updatedAt = String(
     record.updatedAt ?? record.lastMessageAt ?? lastMessage?.createdAt ?? createdAt,
   );
+  const pendingReservationProposal =
+    record.pendingReservationProposal &&
+    typeof record.pendingReservationProposal === "object"
+      ? (record.pendingReservationProposal as ConversationRecord["pendingReservationProposal"])
+      : undefined;
 
   return {
     id: conversationId,
@@ -143,6 +148,7 @@ function normalizeRecord(value: unknown): ConversationRecord | undefined {
       typeof record.clientSheetRow === "number" && Number.isFinite(record.clientSheetRow)
         ? record.clientSheetRow
         : undefined,
+    pendingReservationProposal,
     requiresManualReview: Boolean(record.requiresManualReview),
     mode: record.mode === "human" ? "human" : "bot",
     humanRequested: Boolean(record.humanRequested),
