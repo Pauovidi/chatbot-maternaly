@@ -872,7 +872,7 @@ export const HOTEL_FAQ_KNOWLEDGE_PACK: FaqKnowledgePack = {
     "Cuando una pregunta requiere un dato operativo vivo de la estancia o disponibilidad, se deriva al flujo operativo o al equipo humano sin inventar estados.",
   ],
   fallbackAnswer:
-    "Puedo orientarte con precios, horarios, requisitos y reservas. Si quieres cerrar una estancia, lo correcto es usar el formulario oficial para revisar disponibilidad y precio.",
+    "Puedo orientarte con precios, horarios, requisitos y reservas. Si quieres cerrar una estancia, lo correcto es usar el formulario web para revisar disponibilidad y precio.",
   bookingFormUrl: HOTEL_DEMO_CONFIG.bookingFormUrl,
   categories: FAQ_CATEGORY_DEFINITIONS,
   entries: FAQ_KNOWLEDGE_ENTRIES,

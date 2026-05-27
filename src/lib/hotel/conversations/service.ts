@@ -57,6 +57,12 @@ export interface ManualReplyResult {
   error?: string;
 }
 
+export interface ManualVideoMockResult {
+  conversation: ConversationRecord;
+  ok: true;
+  mode: "mock";
+}
+
 export interface DemoSeedDecisionEnv {
   NODE_ENV?: string;
   VERCEL_ENV?: string;
@@ -512,6 +518,40 @@ export async function sendManualReply(
     ok: true,
     mode: sent.mode,
     providerSid: sent.sid,
+  };
+}
+
+export async function requestManualVideoMock(
+  id: string,
+  agent = "admin",
+  store: ConversationStore = getConversationStore(),
+): Promise<ManualVideoMockResult> {
+  const record = await store.getById(id);
+
+  if (!record) {
+    throw new Error("Conversation not found");
+  }
+
+  await store.addEvent(
+    createEvent(id, "media_attachment_mock_requested", {
+      agent,
+      mediaKind: "video",
+      storage: "pending_object_storage",
+      outbound: "not_sent",
+    }),
+  );
+
+  const updated = await store.replaceConversation({
+    ...((await store.getById(id)) ?? record),
+    mode: "human",
+    assignedAgent: agent,
+    updatedAt: nowIso(),
+  });
+
+  return {
+    conversation: (await store.getById(id)) ?? updated,
+    ok: true,
+    mode: "mock",
   };
 }
 

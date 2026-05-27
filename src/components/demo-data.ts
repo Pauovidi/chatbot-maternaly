@@ -4,7 +4,7 @@ import { DEMO_SAMPLE_EMAILS } from "@/lib/hotel/parser";
 export const demoFormUrl = "https://somosmuyperros.com/hotel-canino/";
 
 export const demoOperationalBanner =
-  "Chat web, recepción de emails, panel de conversaciones y seguimiento operativo.";
+  "Operativa conectada: emails, conversaciones y registro de entrada.";
 
 export const demoNavItems = [
   { href: "/", label: "Inicio" },
@@ -16,7 +16,7 @@ export const demoRoutes = [
   {
     href: "/",
     label: "Inicio",
-    description: "Chatbot protagonista, respuestas rápidas y CTA directo al formulario oficial.",
+    description: "Chatbot protagonista, respuestas rápidas y CTA directo al formulario web.",
   },
   {
     href: "/ops",

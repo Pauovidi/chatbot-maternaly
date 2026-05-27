@@ -27,7 +27,7 @@ export function PublicDemoHome() {
                   Chat web para el hotel canino
                 </h1>
                 <p className="max-w-2xl text-base leading-8 text-[#5d4a3a] md:text-lg">
-                  Resuelve preguntas frecuentes, deriva al formulario oficial y
+                  Resuelve preguntas frecuentes, deriva al formulario web y
                   deja preparada la revisión operativa de la reserva.
                 </p>
               </div>
@@ -41,7 +41,7 @@ export function PublicDemoHome() {
                 </Link>
                 <p className="text-sm leading-7 text-[#6a5746]">
                   Si el cliente quiere reservar, el chat lo dirige al
-                  formulario oficial.
+                  formulario web.
                 </p>
               </div>
 
@@ -61,7 +61,7 @@ export function PublicDemoHome() {
                     Reserva
                   </p>
                   <strong className="mt-2 block text-base">
-                    El chat encauza la solicitud al formulario oficial
+                    El chat encauza la solicitud al formulario web
                   </strong>
                 </article>
                 <article className="rounded-[24px] border border-black/8 bg-white p-5 shadow-[0_10px_32px_rgba(34,49,35,0.08)]">
@@ -105,9 +105,9 @@ export function PublicDemoHome() {
             <h2 className="mt-3 font-serif text-3xl tracking-[-0.03em]">
               La solicitud entra por el canal correcto
             </h2>
-            <p className="mt-4 leading-7 text-[#5d4a3a]">
-              Si alguien quiere reservar o consultar fechas, el chat lo dirige
-              al formulario oficial para que el equipo lo revise.
+              <p className="mt-4 leading-7 text-[#5d4a3a]">
+                Si alguien quiere reservar o consultar fechas, el chat lo dirige
+              al formulario web para que el equipo lo revise.
             </p>
           </article>
           <article className="rounded-[28px] border border-black/8 bg-white p-7 shadow-[0_12px_36px_rgba(34,49,35,0.08)]">

@@ -41,7 +41,7 @@ describe("conversations panel visible demo copy", () => {
     );
   });
 
-  it("renders the shared Somos Muy Perros header with official navigation", () => {
+  it("renders the shared Somos Muy Perros header with final navigation", () => {
     const headerHtml = renderToStaticMarkup(<PublicSiteHeader />);
     const shellHtml = renderToStaticMarkup(
       <SiteShell>
@@ -52,12 +52,18 @@ describe("conversations panel visible demo copy", () => {
     );
 
     expect(headerHtml).toContain("Somos Muy Perros");
-    expect(headerHtml).toContain("Panel conversaciones");
-    expect(headerHtml).toContain("Formulario oficial");
     expect(headerHtml).toContain("somos-muy-perros-logo.png");
+    expect(headerHtml).toContain("Inicio");
+    expect(headerHtml).toContain("Recepción emails");
+    expect(headerHtml).toContain("Panel conversaciones");
+    expect(headerHtml).toContain("Formulario web");
+    expect(headerHtml).not.toContain("Formulario oficial");
+    expect(headerHtml).not.toMatch(/>Chat</);
+    expect(headerHtml).not.toContain("Hotel canino");
+    expect(headerHtml).not.toMatch(/<strong>Somos Muy Perros<\/strong>/);
     expect(shellHtml).toContain("Somos Muy Perros");
     expect(shellHtml).toContain("Panel conversaciones");
-    expect(shellHtml).toContain("Formulario oficial");
+    expect(shellHtml).toContain("Formulario web");
     expect(shellHtml).not.toContain("Demo hotel canino");
     expect(shellHtml).not.toContain("Formulario real");
     expect(shellHtml).not.toMatch(/>SM</);
@@ -86,16 +92,22 @@ describe("conversations panel visible demo copy", () => {
 
     expect(html).toContain("Inbox WhatsApp");
     expect(html).toContain("Proveedor: Twilio WhatsApp");
+    expect(html).toContain("Estado técnico");
     expect(html).toContain("Mock");
+    expect(html).toContain("Registro de entrada");
     expect(html).toContain("Pendientes");
     expect(html).toContain("En humano");
     expect(html).toContain("Todas");
     expect(html).toContain("Marta R.");
     expect(html).toContain("Mascota: Luna");
     expect(html).toContain("Respuesta manual del equipo");
+    expect(html).toContain("Adjuntar vídeo");
     expect(html).toContain("Modo demo: los mensajes no se envían por WhatsApp real.");
     expect(html).toContain("Actualizar");
     expect(html).not.toContain("No hay conversaciones para este filtro");
+    expect(html).not.toContain("Panel reservas");
+    expect(html).not.toContain("Panel de reservas");
+    expect(html).not.toContain("Ver panel operativo");
     expect(html).not.toContain("Demo clínica");
     expect(html).not.toContain("Demo hotel canino");
     expect(html).not.toMatch(/>Ops</);
@@ -186,7 +198,13 @@ describe("conversations panel visible demo copy", () => {
     expect(surfaces).toContain("Panel de conversaciones");
     expect(surfaces).toContain("Centraliza WhatsApp, handoffs del bot y contexto de reservas en un único inbox operativo.");
     expect(surfaces).toContain("Proveedor: Twilio WhatsApp");
-    expect(surfaces).toContain("Formulario oficial");
+    expect(surfaces).toContain("Registro de entrada");
+    expect(surfaces).toContain("Adjuntar vídeo");
+    expect(surfaces).toContain("media-mock");
+    expect(surfaces).toContain("Formulario web");
+    expect(surfaces).not.toContain("Panel reservas");
+    expect(surfaces).not.toContain("Panel de reservas");
+    expect(surfaces).not.toContain("Formulario oficial");
     expect(surfaces).not.toContain("Demo clínica");
     expect(surfaces).not.toContain("Demo hotel canino");
     expect(surfaces).not.toContain("Formulario real");
@@ -215,6 +233,44 @@ describe("conversations panel visible demo copy", () => {
     expect(chatHtml).toContain("Enviar");
   });
 
+  it("keeps entry log route protected and free of document identifiers", () => {
+    const page = readSurface("src/app/admin/registro-entrada/page.tsx");
+    const entryLog = readSurface("src/lib/hotel/application/entry-log.ts");
+
+    expect(page).toContain("verifyPanelPageAccess");
+    expect(page).toContain("Registro de entrada");
+    expect(page).toContain("Aún no hay reservas confirmadas registradas por el chatbot.");
+    expect(page).toContain("Creación");
+    expect(page).toContain("Origen");
+    expect(page).toContain("Acción");
+    expect(page).toContain("Cliente");
+    expect(page).toContain("Estado cliente");
+    expect(page).toContain("Identificador");
+    expect(page).toContain("Mascota");
+    expect(page).toContain("Entrada");
+    expect(page).toContain("Salida");
+    expect(page).toContain("Gestet");
+    expect(entryLog).toContain("pendiente Gestet");
+    expect(page.toLowerCase()).not.toContain("nif");
+    expect(page.toLowerCase()).not.toContain("dni");
+    expect(entryLog.toLowerCase()).not.toContain("nif");
+    expect(entryLog.toLowerCase()).not.toContain("dni");
+  });
+
+  it("documents the media attachment mock without enabling real uploads", () => {
+    const doc = readSurface("docs/CONVERSATION_MEDIA_ATTACHMENTS_V0.md");
+    const panel = readSurface("src/app/admin/conversations/panel.tsx");
+
+    expect(doc).toContain("Estado actual");
+    expect(doc).toContain("No guardar videos en DB");
+    expect(doc).toContain("Cloudflare R2");
+    expect(doc).toContain("MinIO");
+    expect(panel).toContain("Adjuntar vídeo");
+    expect(panel).toContain("Mock");
+    expect(panel).not.toContain('type="file"');
+    expect(panel).not.toContain("MediaUrl");
+  });
+
 
   it("does not expose reference moving-company copy in user-facing panel surfaces", () => {
     const surfaces = [
@@ -229,6 +285,9 @@ describe("conversations panel visible demo copy", () => {
     ]
       .map(readSurface)
       .join("\n");
+
+    expect(surfaces).not.toContain("Formulario oficial");
+    expect(surfaces).toContain("Formulario web");
 
     for (const pattern of forbiddenReferenceCopyPatterns()) {
       expect(surfaces).not.toMatch(pattern);

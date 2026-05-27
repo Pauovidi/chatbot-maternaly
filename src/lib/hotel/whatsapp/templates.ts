@@ -81,7 +81,7 @@ export function buildAvailabilityConfirmationMessage(
     `Tenemos hueco para ${reservation.petName}.`,
     `Importe estimado: ${price.toFixed(2).replace(".", ",")} EUR`,
     "",
-    `Para cerrar la reserva, use el formulario oficial: ${formUrl}`,
+    `Para cerrar la reserva, use el formulario web: ${formUrl}`,
   ].join("\n");
 }
 
@@ -94,12 +94,12 @@ export function buildNoAvailabilityMessage(
     "",
     `Ahora mismo no tenemos disponibilidad para ${reservation.petName} en esas fechas.`,
     "",
-    `Si quiere, puede probar otra combinacion desde el formulario oficial: ${formUrl}`,
+    `Si quiere, puede probar otra combinacion desde el formulario web: ${formUrl}`,
   ].join("\n");
 }
 
 export function buildFAQRedirectMessage(formUrl: string): string {
-  return `Para reservar, siempre hay que completar el formulario oficial: ${formUrl}`;
+  return `Para reservar, siempre hay que completar el formulario web: ${formUrl}`;
 }
 
 export function describeAvailabilityResult(

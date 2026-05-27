@@ -123,7 +123,7 @@ export function buildConversationSeed(
           "2026-04-07T17:19:00.000Z",
           "outbound",
           "bot",
-          "Para comprobar disponibilidad real, envia la solicitud por el formulario oficial con fechas de entrada y salida. El equipo revisa plazas y te confirma.",
+          "Para comprobar disponibilidad real, envia la solicitud por el formulario web con fechas de entrada y salida. El equipo revisa plazas y te confirma.",
         ),
         message(
           "conv-demo-001",

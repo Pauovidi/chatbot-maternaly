@@ -7,6 +7,7 @@ import {
   CheckCheck,
   Circle,
   ExternalLink,
+  Film,
   MessageSquareText,
   RefreshCcw,
   Search,
@@ -104,6 +105,7 @@ export function ConversationsPanel({
   const [mode, setMode] = useState<FilterMode>("all");
   const [reply, setReply] = useState("");
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const [isPending, setIsPending] = useState(false);
 
   const selected = useMemo(
@@ -144,6 +146,7 @@ export function ConversationsPanel({
 
   function run(action: () => Promise<void>) {
     setError("");
+    setNotice("");
     setIsPending(true);
     void action()
       .catch((caught) => {
@@ -222,23 +225,35 @@ export function ConversationsPanel({
     });
   }
 
+  function requestVideoMock(conversation: ConversationRecord) {
+    run(async () => {
+      await postAction(
+        `/api/conversations/${encodeURIComponent(conversation.id)}/media-mock`,
+        { kind: "video" },
+      );
+      setNotice(
+        "Vídeo mock solicitado. El uso real estará disponible al activar almacenamiento de archivos.",
+      );
+      await refresh();
+    });
+  }
+
   return (
     <section className="conversations-panel" aria-busy={isPending}>
       <div className="conversation-panel-toolbar">
-        <span className={`conversation-transport conversation-transport-${twilioProviderMode}`}>
-          <Circle size={10} fill="currentColor" />
-          Proveedor: Twilio WhatsApp · {formatProviderMode(twilioProviderMode)}
-        </span>
         <div className="conversation-panel-actions">
-          <Link href="/" className="conversation-top-link">
-            Chat web
-            <ExternalLink size={14} />
-          </Link>
-          <Link href="/admin" className="conversation-top-link">
-            Panel reservas
+          <Link href="/admin/registro-entrada" className="conversation-top-link">
+            Registro de entrada
             <ExternalLink size={14} />
           </Link>
         </div>
+        <details className="conversation-technical-status">
+          <summary>Estado técnico</summary>
+          <span className={`conversation-transport conversation-transport-${twilioProviderMode}`}>
+            <Circle size={10} fill="currentColor" />
+            Proveedor: Twilio WhatsApp · {formatProviderMode(twilioProviderMode)}
+          </span>
+        </details>
       </div>
 
       <div className="conversation-workspace">
@@ -292,10 +307,6 @@ export function ConversationsPanel({
               </button>
             ))}
           </div>
-
-          <Link className="conversation-admin-link" href="/admin">
-            Ver panel operativo de reservas
-          </Link>
 
           <div className="conversation-list">
             {isPending ? (
@@ -394,6 +405,7 @@ export function ConversationsPanel({
               </div>
 
               {error ? <div className="conversation-error">{error}</div> : null}
+              {notice ? <div className="conversation-notice">{notice}</div> : null}
               <div className={`conversation-transport conversation-transport-${twilioProviderMode}`}>
                 <Circle size={10} fill="currentColor" />
                 {twilioProviderMode === "mock"
@@ -466,6 +478,17 @@ export function ConversationsPanel({
                 >
                   <Send size={17} />
                   Enviar
+                </button>
+                <button
+                  className="conversation-video-mock-button"
+                  type="button"
+                  onClick={() => requestVideoMock(selected)}
+                  disabled={isPending}
+                  title="Mock: requiere almacenamiento de archivos"
+                >
+                  <Film size={17} />
+                  Adjuntar vídeo
+                  <small>Mock</small>
                 </button>
               </div>
             </>

@@ -54,7 +54,7 @@ export default async function InternalOpsPage() {
             Ver panel admin
           </Link>
           <a className="demo-button demo-button-secondary" href={demoFormUrl}>
-            Formulario oficial
+            Formulario web
           </a>
         </div>
       </section>

@@ -15,11 +15,11 @@ const manrope = Manrope({
 export const metadata: Metadata = {
   title: "Chat web para el hotel canino | Somos Muy Perros",
   description:
-    "Resuelve preguntas frecuentes, deriva al formulario oficial y deja preparada la revisión operativa de la reserva.",
+    "Resuelve preguntas frecuentes, deriva al formulario web y deja preparada la revisión operativa de la reserva.",
   openGraph: {
     title: "Chat web para el hotel canino | Somos Muy Perros",
     description:
-      "Resuelve preguntas frecuentes, deriva al formulario oficial y deja preparada la revisión operativa de la reserva.",
+      "Resuelve preguntas frecuentes, deriva al formulario web y deja preparada la revisión operativa de la reserva.",
     type: "website",
   },
 };

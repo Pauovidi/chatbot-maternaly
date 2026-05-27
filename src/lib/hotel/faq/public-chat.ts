@@ -26,7 +26,7 @@ const DEFAULT_RUNTIME_LINKS: FaqRuntimeLinks = {
 };
 
 export function getPublicChatWelcomeMessage() {
-  return "Hola, soy el chat web del hotel canino. Puedo resolver preguntas frecuentes y, si quieres reservar, te llevaré al formulario oficial para que el equipo confirme disponibilidad y precio.";
+  return "Hola, soy el chat web del hotel canino. Puedo resolver preguntas frecuentes y, si quieres reservar, te llevaré al formulario web para que el equipo confirme disponibilidad y precio.";
 }
 
 export function resolvePublicChatReply(

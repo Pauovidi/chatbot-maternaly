@@ -964,18 +964,6 @@ input {
   color: #fff;
 }
 
-.conversation-admin-link {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 12px;
-  border: 1px solid rgba(34, 49, 35, 0.12);
-  background: rgba(248, 242, 232, 0.78);
-  color: var(--olive-900);
-  font-weight: 700;
-  padding: 0.65rem 0.8rem;
-}
-
 .conversation-list {
   display: grid;
   align-content: start;
@@ -1289,7 +1277,7 @@ input {
 
 .conversation-composer {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto auto;
   gap: 0.75rem;
   align-items: end;
   position: sticky;
@@ -1330,6 +1318,88 @@ input {
   outline-offset: 2px;
 }
 
+.conversation-technical-status {
+  justify-self: end;
+  color: var(--ink-700);
+  font-size: 0.86rem;
+}
+
+.conversation-technical-status summary {
+  cursor: pointer;
+  font-weight: 800;
+  list-style-position: inside;
+}
+
+.conversation-technical-status .conversation-transport {
+  margin-top: 0.45rem;
+}
+
+.conversation-notice {
+  border: 1px solid rgba(76, 93, 57, 0.18);
+  border-radius: 14px;
+  background: rgba(76, 93, 57, 0.08);
+  color: var(--olive-900);
+  padding: 0.7rem 0.85rem;
+  font-weight: 800;
+}
+
+.conversation-video-mock-button {
+  max-width: 11rem;
+  flex-wrap: wrap;
+  line-height: 1.1;
+}
+
+.conversation-video-mock-button small {
+  width: 100%;
+  font-size: 0.68rem;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  opacity: 0.82;
+}
+
+.entry-log-panel {
+  overflow: hidden;
+}
+
+.entry-log-table {
+  display: grid;
+  gap: 0.5rem;
+  overflow-x: auto;
+  padding-bottom: 0.25rem;
+}
+
+.entry-log-row {
+  display: grid;
+  grid-template-columns:
+    minmax(8.5rem, 0.9fr) minmax(7rem, 0.7fr) minmax(7rem, 0.7fr)
+    minmax(9rem, 1fr) minmax(9rem, 0.9fr) minmax(8rem, 0.8fr)
+    minmax(7rem, 0.8fr) minmax(8rem, 0.8fr) minmax(8rem, 0.8fr)
+    minmax(9rem, 0.9fr) minmax(14rem, 1.4fr) minmax(8rem, 0.8fr);
+  gap: 0.75rem;
+  min-width: 1180px;
+  align-items: center;
+  border: 1px solid rgba(34, 49, 35, 0.08);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.62);
+  padding: 0.75rem;
+}
+
+.entry-log-head {
+  border-color: transparent;
+  background: transparent;
+  color: var(--ink-700);
+  font-size: 0.76rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.entry-log-row code {
+  overflow-wrap: anywhere;
+  font-size: 0.78rem;
+}
+
 @media (max-width: 960px) {
   .demo-grid-2,
   .demo-grid-3,
@@ -1353,7 +1423,8 @@ input {
   }
 
   .conversation-panel-toolbar,
-  .conversation-panel-actions {
+  .conversation-panel-actions,
+  .conversation-technical-status {
     align-items: flex-start;
   }
 
@@ -1363,6 +1434,10 @@ input {
 
   .conversation-panel-actions {
     justify-content: flex-start;
+  }
+
+  .conversation-technical-status {
+    justify-self: start;
   }
 
   .conversation-workspace {

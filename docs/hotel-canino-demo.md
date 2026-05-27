@@ -2,7 +2,7 @@
 
 Proyecto Next.js App Router para `Somos Muy Perros` con dos capas:
 
-1. `FAQ / chatbot comercial` que responde preguntas frecuentes y deriva siempre al formulario oficial.
+1. `FAQ / chatbot comercial` que responde preguntas frecuentes y deriva siempre al formulario web.
 2. `Motor de reservas` que procesa solicitudes, extrae datos, comprueba hueco, calcula precio, prepara la respuesta al cliente y deja lista la operación.
 
 ## Estado actual
@@ -48,7 +48,7 @@ Archivos del hotel donde se integró:
 
 - Todo el copy, branding y CTA al dominio del hotel canino.
 - El widget ya no consulta lógica de pedidos: consume la capa FAQ cerrada del hotel.
-- La reserva por chat no se cierra en el widget: redirige al formulario oficial.
+- La reserva por chat no se cierra en el widget: redirige al formulario web.
 - La salida pública oculta cualquier JSON, debug o panel interno.
 
 ## Qué se recreó desde cero
@@ -92,7 +92,7 @@ Archivos del hotel donde se integró:
 | `confirmacion` | confirmáis por WhatsApp | FAQ pura | Explica que la confirmación llega por WhatsApp después del formulario |
 | `proceso` | qué pasa tras el formulario | Workflow ligero | Explica revisión de email, cálculo de hueco y respuesta al cliente |
 | `reglas` | fuera de horario, recogida, entregas | Handoff guiado | Explica la restricción operativa y vuelve al formulario si hace falta reservar |
-| `reserva` | reservar, formulario, WhatsApp, cerrar reserva | Handoff obligatorio | Deriva siempre al formulario oficial |
+| `reserva` | reservar, formulario, WhatsApp, cerrar reserva | Handoff obligatorio | Deriva siempre al formulario web |
 
 Regla de routing:
 

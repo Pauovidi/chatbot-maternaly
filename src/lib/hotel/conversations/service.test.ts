@@ -4,6 +4,7 @@ import {
   ensureDemoConversationSeed,
   handleInboundWhatsApp,
   markConversationRead,
+  requestManualVideoMock,
   sendManualReply,
   setConversationMode,
   shouldAutoSeedConversations,
@@ -328,6 +329,28 @@ describe("conversation service", () => {
     expect(result.ok).toBe(false);
     expect(result.conversation.events.some((event) => event.eventType === "manual_reply_failed")).toBe(true);
     expect(result.conversation.messages.filter((message) => message.senderType === "human")).toHaveLength(0);
+  });
+
+  it("records a manual video mock request without sending outbound media", async () => {
+    const store = new MemoryConversationStore();
+    const inbound = await handleInboundWhatsApp(
+      { from: "+34612345678", body: "persona" },
+      store,
+    );
+
+    const result = await requestManualVideoMock(inbound.conversation.id, "admin", store);
+    const event = result.conversation.events.at(-1);
+
+    expect(result.ok).toBe(true);
+    expect(result.mode).toBe("mock");
+    expect(result.conversation.mode).toBe("human");
+    expect(result.conversation.messages.filter((message) => message.senderType === "human")).toHaveLength(0);
+    expect(event?.eventType).toBe("media_attachment_mock_requested");
+    expect(event?.payload).toMatchObject({
+      mediaKind: "video",
+      outbound: "not_sent",
+      storage: "pending_object_storage",
+    });
   });
 
   it("changes mode and marks read", async () => {

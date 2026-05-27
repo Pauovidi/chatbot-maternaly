@@ -124,6 +124,8 @@ async function main() {
   await checkGet("/faq-demo");
   await checkGet("/reservas-demo");
   await checkGet("/admin");
+  await checkGet("/admin/conversations");
+  await checkGet("/admin/registro-entrada");
   await checkProcessEndpoint();
   await checkTwilioWebhookEndpoint();
 

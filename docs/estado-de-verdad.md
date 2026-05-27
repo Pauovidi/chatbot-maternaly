@@ -41,7 +41,7 @@
   - salida: explica qué hace el sistema tras recibir el formulario y qué revisa el admin
 - `Handoff`
   - intents: `reserva`, `reglas`
-  - salida: deriva al formulario oficial y evita cerrar por WhatsApp
+  - salida: deriva al formulario web y evita cerrar por WhatsApp
 - Regla transversal:
   - si la pregunta mezcla duda y ganas de reservar, gana el handoff al formulario
   - si no hay intent claro, se responde con seguridad y se deriva al formulario antes que inventar un cierre

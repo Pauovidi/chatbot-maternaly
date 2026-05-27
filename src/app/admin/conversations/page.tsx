@@ -29,7 +29,7 @@ export default async function ConversationsAdminPage() {
   const twilioConfig = readTwilioWhatsAppConfig();
 
   return (
-    <SiteShell>
+    <SiteShell compact>
       <section className="page-intro">
         <p className="demo-kicker">Operaciones</p>
         <h1 className="page-title">Panel de conversaciones</h1>

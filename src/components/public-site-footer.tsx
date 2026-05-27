@@ -13,7 +13,7 @@ export function PublicSiteFooter() {
             href={demoFormUrl}
             className="text-xs uppercase tracking-[0.18em] text-[#6f543d] transition-colors hover:text-[#201911]"
           >
-            Formulario oficial
+            Formulario web
           </a>
           <a
             href="https://somosmuyperros.com/contacto/"
@@ -37,7 +37,7 @@ export function PublicSiteFooter() {
         <div className="mx-auto max-w-6xl px-6 py-4 lg:px-10">
           <p className="text-center text-xs uppercase tracking-[0.18em] text-[#f8f4ec]">
             El chat responde preguntas frecuentes y la recepción revisa la
-            solicitud que llega por el formulario oficial
+            solicitud que llega por el formulario web
           </p>
         </div>
       </div>
