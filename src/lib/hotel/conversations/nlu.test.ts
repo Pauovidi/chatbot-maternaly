@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildConversationReplyPlan,
   classifyConversationIntent,
+  isAffirmativeConfirmationUtterance,
 } from "./nlu";
 
 describe("conversation NLU", () => {
@@ -14,6 +15,7 @@ describe("conversation NLU", () => {
     ["¿Mandáis fotos o vídeos?", "faq_photos_videos"],
     ["¿Tenéis sitio del 14 al 18 de abril?", "availability_request"],
     ["Quiero reservar para Luna del 10 al 15 de agosto", "availability_request"],
+    ["si", "reservation_confirm"],
     ["Sí, confirma", "reservation_confirm"],
     ["Quiero cancelar mi reserva", "reservation_cancel"],
     ["Quiero cambiar la fecha", "reservation_modify"],
@@ -21,6 +23,33 @@ describe("conversation NLU", () => {
     ["¿Ha comido mi perro?", "stay_status_question"],
   ] as const)("classifies %s as %s", (message, intent) => {
     expect(classifyConversationIntent(message).intent).toBe(intent);
+  });
+
+  it.each([
+    "si",
+    "sí",
+    "sii",
+    "siii",
+    "claro",
+    "vale",
+    "ok",
+    "okay",
+    "perfecto",
+    "adelante",
+    "confirma",
+    "confirmo",
+    "confirmar",
+    "sí confirma",
+    "si confirma",
+    "de acuerdo",
+    "correcto",
+    "anótala",
+    "dejadla anotada",
+    "déjala anotada",
+    "reservad",
+    "reserva",
+  ])("detects %s as a contextual affirmative confirmation", (message) => {
+    expect(isAffirmativeConfirmationUtterance(message)).toBe(true);
   });
 
   it("answers general information without sending the conversation to human mode", () => {

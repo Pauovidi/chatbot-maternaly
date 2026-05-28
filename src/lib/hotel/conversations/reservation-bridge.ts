@@ -250,6 +250,21 @@ function proposalIsLive(
   );
 }
 
+function proposalHasRequiredData(
+  proposal: PendingReservationProposal,
+  conversation: ConversationRecord,
+): boolean {
+  return (
+    proposal.conversationId === conversation.id &&
+    Boolean(proposal.petName.trim()) &&
+    Boolean(proposal.checkIn) &&
+    Boolean(proposal.checkOut) &&
+    Boolean(proposal.checkInSlot) &&
+    Boolean(proposal.checkOutSlot) &&
+    proposal.petCount > 0
+  );
+}
+
 function toReservationRecord(input: {
   conversation: ConversationRecord;
   proposal: PendingReservationProposal;
@@ -450,6 +465,23 @@ export async function confirmPendingReservationProposal(input: {
         "Para confirmarla necesito primero comprobar fechas y disponibilidad. ¿Qué fechas necesitas?",
       eventPayload: {
         reason: "missing_pending_proposal",
+      },
+    };
+  }
+
+  if (!proposalHasRequiredData(proposal, input.conversation)) {
+    return {
+      kind: "missing_proposal",
+      reply:
+        "Para confirmarla necesito primero comprobar fechas y disponibilidad. ¿Qué fechas necesitas?",
+      proposal: {
+        ...proposal,
+        status: "failed",
+        failureReason: "invalid_pending_proposal",
+      },
+      eventPayload: {
+        proposalId: proposal.proposalId,
+        reason: "invalid_pending_proposal",
       },
     };
   }

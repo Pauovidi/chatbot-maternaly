@@ -308,6 +308,47 @@ describe("WhatsApp reservation bridge", () => {
     });
   });
 
+  it.each([
+    "si",
+    "sí",
+    "ok",
+    "vale",
+    "perfecto",
+    "adelante",
+    "anótala",
+    "de acuerdo",
+  ])("confirms a pending proposal with short affirmative utterance: %s", async (utterance) => {
+    const store = new MemoryConversationStore();
+    const { counters, deps } = makeBridgeDeps();
+
+    await handleInboundWhatsApp(
+      {
+        from: "whatsapp:+34600009991",
+        body: "Quiero reservar para Kira QA del 29 al 31 de diciembre de 2026",
+        messageSid: `SM_BRIDGE_SHORT_${utterance}_1`,
+      },
+      store,
+      createStaticClientDirectory([]),
+      deps,
+    );
+    const confirmed = await handleInboundWhatsApp(
+      {
+        from: "whatsapp:+34600009991",
+        body: utterance,
+        messageSid: `SM_BRIDGE_SHORT_${utterance}_2`,
+      },
+      store,
+      createStaticClientDirectory([]),
+      deps,
+    );
+
+    expect(counters.checks).toBe(2);
+    expect(counters.writes).toBe(1);
+    expect(counters.reservations).toHaveLength(1);
+    expect(confirmed.conversation.pendingReservationProposal?.status).toBe("confirmed");
+    expect(confirmed.botReply?.body).toContain("queda anotada");
+  });
+
   it("does not confirm without a pending proposal", async () => {
     const store = new MemoryConversationStore();
     const { counters, deps } = makeBridgeDeps();
@@ -315,7 +356,7 @@ describe("WhatsApp reservation bridge", () => {
     const result = await handleInboundWhatsApp(
       {
         from: "whatsapp:+34600009991",
-        body: "Sí, confirma",
+        body: "si",
         messageSid: "SM_BRIDGE_NO_PROPOSAL",
       },
       store,
@@ -324,6 +365,27 @@ describe("WhatsApp reservation bridge", () => {
     );
 
     expect(result.conversation.mode).toBe("bot");
+    expect(result.botReply?.body).toContain("necesito primero comprobar");
+    expect(counters.checks).toBe(0);
+    expect(counters.writes).toBe(0);
+    expect(counters.reservations).toHaveLength(0);
+  });
+
+  it("does not confirm ok without a pending proposal", async () => {
+    const store = new MemoryConversationStore();
+    const { counters, deps } = makeBridgeDeps();
+
+    const result = await handleInboundWhatsApp(
+      {
+        from: "whatsapp:+34600009991",
+        body: "ok",
+        messageSid: "SM_BRIDGE_OK_NO_PROPOSAL",
+      },
+      store,
+      createStaticClientDirectory([]),
+      deps,
+    );
+
     expect(result.botReply?.body).toContain("necesito primero comprobar");
     expect(counters.checks).toBe(0);
     expect(counters.writes).toBe(0);
@@ -386,7 +448,7 @@ describe("WhatsApp reservation bridge", () => {
     const result = await handleInboundWhatsApp(
       {
         from: "whatsapp:+34600009991",
-        body: "Sí, confirma",
+        body: "si",
         messageSid: "SM_BRIDGE_EXPIRED_2",
       },
       store,
@@ -396,6 +458,42 @@ describe("WhatsApp reservation bridge", () => {
 
     expect(result.conversation.pendingReservationProposal?.status).toBe("expired");
     expect(result.botReply?.body).toContain("ya no está vigente");
+    expect(counters.writes).toBe(0);
+    expect(counters.reservations).toHaveLength(0);
+  });
+
+  it("does not autorespond or confirm short affirmatives while in human mode", async () => {
+    const store = new MemoryConversationStore();
+    const { counters, deps } = makeBridgeDeps();
+
+    const proposed = await handleInboundWhatsApp(
+      {
+        from: "whatsapp:+34600009991",
+        body: "Quiero reservar para Kira QA del 29 al 31 de diciembre de 2026",
+        messageSid: "SM_BRIDGE_HUMAN_MODE_1",
+      },
+      store,
+      createStaticClientDirectory([]),
+      deps,
+    );
+    await store.replaceConversation({
+      ...proposed.conversation,
+      mode: "human",
+      humanRequested: true,
+    });
+    const result = await handleInboundWhatsApp(
+      {
+        from: "whatsapp:+34600009991",
+        body: "si",
+        messageSid: "SM_BRIDGE_HUMAN_MODE_2",
+      },
+      store,
+      createStaticClientDirectory([]),
+      deps,
+    );
+
+    expect(result.botReply).toBeUndefined();
+    expect(result.conversation.mode).toBe("human");
     expect(counters.writes).toBe(0);
     expect(counters.reservations).toHaveLength(0);
   });
@@ -507,6 +605,36 @@ describe("WhatsApp reservation bridge", () => {
     expect(blocked.conversation.pendingReservationProposal).toBeUndefined();
     expect(ambiguous.conversation.mode).toBe("human");
     expect(ambiguous.conversation.pendingReservationProposal).toBeUndefined();
+
+    await handleInboundWhatsApp(
+      {
+        from: "whatsapp:+34600009991",
+        body: "si",
+        messageSid: "SM_BRIDGE_BLOCKED_CONFIRM",
+      },
+      blockedStore,
+      createStaticClientDirectory([
+        {
+          nombre: "Cliente QA Bloqueado",
+          telefonoNormalizado: "34600009991",
+          bloqueadoNoReservar: true,
+        },
+      ]),
+      deps,
+    );
+    await handleInboundWhatsApp(
+      {
+        from: "whatsapp:+34600009992",
+        body: "si",
+        messageSid: "SM_BRIDGE_AMBIGUOUS_CONFIRM",
+      },
+      ambiguousStore,
+      createStaticClientDirectory([
+        { nombre: "Cliente QA A", telefonoNormalizado: "34600009992" },
+        { nombre: "Cliente QA B", telefonoNormalizado: "34600009992" },
+      ]),
+      deps,
+    );
     expect(counters.checks).toBe(0);
     expect(counters.writes).toBe(0);
   });

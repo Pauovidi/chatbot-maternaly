@@ -278,7 +278,7 @@ async function runDirectSmoke() {
     {
       label: "confirm-without-proposal",
       from: "whatsapp:+34600009994",
-      body: "Sí, confirma",
+      body: "si",
       expectMode: "bot",
       expectReply: "necesito primero comprobar",
     },
@@ -345,12 +345,12 @@ async function runDirectSmoke() {
     {
       from: "whatsapp:+34600009993",
       to: SANDBOX_TO,
-      body: "Sí, confirma",
+      body: "si",
       messageSid: "SM_QA_bridge_confirm",
       rawPayload: {
         From: "whatsapp:+34600009993",
         To: SANDBOX_TO,
-        Body: "Sí, confirma",
+        Body: "si",
         MessageSid: "SM_QA_bridge_confirm",
       },
     },

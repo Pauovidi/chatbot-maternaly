@@ -72,7 +72,7 @@ function normalizeText(value: string): string {
     .normalize("NFD")
     .replace(/\p{Diacritic}/gu, "")
     .toLowerCase()
-    .replace(/[¿?¡!,.;:()[\]{}]/g, " ")
+    .replace(/[¿?¡!,.;:()[\]{}"'`´]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -83,6 +83,42 @@ function hasAny(text: string, signals: string[]): boolean {
 
 function matchAny(text: string, patterns: RegExp[]): boolean {
   return patterns.some((pattern) => pattern.test(text));
+}
+
+export function isAffirmativeConfirmationUtterance(message: string): boolean {
+  const normalized = normalizeText(message);
+  if (!normalized) {
+    return false;
+  }
+
+  return (
+    /^(s+i+|claro|vale|ok|okay|perfecto|adelante|confirm(a|o|ar)|correcto|reservad|reserva)$/.test(
+      normalized,
+    ) ||
+    [
+      "si confirma",
+      "de acuerdo",
+      "anotala",
+      "dejala anotada",
+      "dejadla anotada",
+    ].includes(normalized)
+  );
+}
+
+export function buildReservationConfirmReplyPlan(
+  message: string,
+  matchedSignal = "affirmative_contextual_confirmation",
+): ConversationReplyPlan {
+  const normalized = normalizeText(message);
+  return {
+    intent: "reservation_confirm",
+    slots: extractSlots(message, normalized),
+    confidence: "medium",
+    matchedSignals: [matchedSignal],
+    reply: RESERVATION_CONFIRM_REPLY,
+    handoff: true,
+    source: "conversation_nlu",
+  };
 }
 
 function extractSlots(rawText: string, normalized: string): ConversationSlots {
@@ -173,7 +209,10 @@ export function classifyConversationIntent(message: string): ConversationNluResu
     return result("reservation_modify");
   }
 
-  if (matchAny(normalized, [/\b(si|sí)\s*,?\s*(confirma|confirmo|confirmar)\b/, /\bconfirm(a|o|ar)\b/])) {
+  if (
+    isAffirmativeConfirmationUtterance(message) ||
+    matchAny(normalized, [/\bsi\s*,?\s*(confirma|confirmo|confirmar)\b/, /\bconfirm(a|o|ar)\b/])
+  ) {
     matchedSignals.push("reservation_confirm");
     return result("reservation_confirm", "medium");
   }
