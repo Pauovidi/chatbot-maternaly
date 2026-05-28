@@ -5,6 +5,7 @@ import {
   handleInboundWhatsApp,
   markConversationRead,
   requestManualVideoMock,
+  redactConversationSensitiveText,
   sendManualReply,
   setConversationMode,
   shouldAutoSeedConversations,
@@ -271,6 +272,37 @@ describe("conversation service", () => {
     expect(result.botReply?.body).not.toContain("por aqui");
     expect(result.conversation.events.some((event) => event.eventType === "nlu_classified")).toBe(true);
     expect(result.conversation.events.some((event) => event.eventType === "human_requested")).toBe(false);
+  });
+
+  it("redacts DNI/NIF-like identifiers from stored inbound text and raw payload", async () => {
+    const store = new MemoryConversationStore();
+
+    const result = await handleInboundWhatsApp(
+      {
+        from: "+34612345678",
+        body: "Hola, mi DNI es 12345678Z y quiero información",
+        rawPayload: {
+          Body: "Hola, mi DNI es 12345678Z y quiero información",
+          Extra: ["NIF 87654321X"],
+        },
+      },
+      store,
+    );
+    const serialized = JSON.stringify(result.conversation);
+
+    expect(result.inbound.body).toContain("[identificador oculto]");
+    expect(result.inbound.body).not.toContain("12345678Z");
+    expect(serialized).not.toContain("12345678Z");
+    expect(serialized).not.toContain("87654321X");
+  });
+
+  it("redacts Spanish document identifiers without changing normal text", () => {
+    expect(redactConversationSensitiveText("DNI 12345678Z")).toBe(
+      "[identificador oculto]",
+    );
+    expect(redactConversationSensitiveText("Hola, quiero información")).toBe(
+      "Hola, quiero información",
+    );
   });
 
   it("routes live stay status questions to human review without inventing", async () => {

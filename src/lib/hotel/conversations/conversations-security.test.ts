@@ -90,6 +90,19 @@ describe("conversations security", () => {
     }
   });
 
+  it("enforces the manual reply character limit on server-side routes", () => {
+    const routeFiles = [
+      "src/app/api/conversations/[id]/reply/route.ts",
+      "src/app/api/conversations/[id]/messages/route.ts",
+    ];
+
+    for (const routeFile of routeFiles) {
+      const source = readFileSync(path.join(process.cwd(), routeFile), "utf8");
+      expect(source, routeFile).toContain("MANUAL_REPLY_MAX_CHARS");
+      expect(source, routeFile).toContain("status: 400");
+    }
+  });
+
   it("keeps operational API routes behind panel auth", () => {
     const routeFiles = [
       "src/app/api/ops/email/poll/route.ts",
