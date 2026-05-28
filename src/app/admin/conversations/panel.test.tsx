@@ -1,5 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { ConversationsPanel } from "./panel";
 import { buildConversationSeed } from "@/lib/hotel/conversations/demo-seed";
 import type {
@@ -78,5 +80,24 @@ describe("conversation panel operational UI", () => {
     expect(html).toContain("Respuesta manual del equipo");
     expect(html).toContain("Enviar");
     expect(html).toContain("Adjuntar vídeo");
+  });
+
+  it("keeps inbox filters compact in narrow layouts", () => {
+    const conversation = buildConversationSeed("2026-05-06T08:00:00.000Z").conversations[0];
+    const html = renderToStaticMarkup(
+      <ConversationsPanel initialDashboard={dashboardWith(conversation)} twilioProviderMode="sandbox" />,
+    );
+    const css = readFileSync(join(process.cwd(), "src/app/globals.css"), "utf8");
+
+    for (const label of ["Todas", "Pendientes", "Humano", "Bot", "Leídas"]) {
+      expect(html).toContain(label);
+    }
+
+    expect(css).toContain("grid-template-rows: auto auto auto auto minmax(0, 1fr)");
+    expect(css).toContain(".conversation-tabs");
+    expect(css).toContain("flex-wrap: nowrap");
+    expect(css).toContain("overflow-x: auto");
+    expect(css).toContain("white-space: nowrap");
+    expect(html).not.toContain("En humano");
   });
 });
