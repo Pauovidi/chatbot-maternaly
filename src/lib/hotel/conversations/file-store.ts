@@ -204,6 +204,8 @@ function normalizeSnapshot(value: unknown): ConversationSnapshot {
         : typeof envelope.generatedAt === "string"
           ? envelope.generatedAt
           : new Date().toISOString(),
+    suppressDemoSeed: envelope.suppressDemoSeed === true,
+    resetAt: typeof envelope.resetAt === "string" ? envelope.resetAt : undefined,
   };
 }
 

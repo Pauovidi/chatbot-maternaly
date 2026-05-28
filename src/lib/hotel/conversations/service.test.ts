@@ -4,8 +4,10 @@ import {
   ensureDemoConversationSeed,
   handleInboundWhatsApp,
   markConversationRead,
+  RESET_CONVERSATIONS_CONFIRMATION,
   requestManualVideoMock,
   redactConversationSensitiveText,
+  resetConversations,
   sendManualReply,
   setConversationMode,
   shouldAutoSeedConversations,
@@ -166,6 +168,66 @@ describe("conversation service", () => {
       }),
     ).resolves.toBe(false);
     expect(await productionStore.list()).toHaveLength(0);
+  });
+
+  it("does not auto-seed a store that was explicitly reset", async () => {
+    const store = new MemoryConversationStore();
+    await store.save({
+      conversations: [],
+      updatedAt: new Date().toISOString(),
+      resetAt: new Date().toISOString(),
+      suppressDemoSeed: true,
+    });
+
+    await expect(
+      ensureDemoConversationSeed(store, {
+        NODE_ENV: "production",
+        VERCEL_ENV: "preview",
+      }),
+    ).resolves.toBe(false);
+    expect(await store.list()).toHaveLength(0);
+  });
+
+  it("dry-runs and confirms a conversation-only reset without touching other stores", async () => {
+    const store = new MemoryConversationStore();
+    await handleInboundWhatsApp(
+      {
+        from: "whatsapp:+34600000011",
+        body: "Hola, quiero información",
+        messageSid: "SM_RESET_DRY_RUN",
+      },
+      store,
+      createStaticClientDirectory([]),
+    );
+
+    const dryRun = await resetConversations({ dryRun: true }, store);
+    expect(dryRun).toEqual(
+      expect.objectContaining({
+        dryRun: true,
+        deleted: false,
+        conversations: 1,
+      }),
+    );
+    expect(await store.list()).toHaveLength(1);
+
+    await expect(resetConversations({}, store)).rejects.toThrow(
+      "RESET_CONVERSATIONS",
+    );
+
+    const confirmed = await resetConversations(
+      { confirm: RESET_CONVERSATIONS_CONFIRMATION },
+      store,
+    );
+    expect(confirmed).toEqual(
+      expect.objectContaining({
+        dryRun: false,
+        deleted: true,
+        conversations: 1,
+        suppressDemoSeed: true,
+      }),
+    );
+    expect(await store.list()).toHaveLength(0);
+    expect((await store.load()).suppressDemoSeed).toBe(true);
   });
 
   it("creates and reuses a conversation by phone", async () => {

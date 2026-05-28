@@ -101,6 +101,8 @@ export interface ConversationRecord extends Conversation {
 export interface ConversationSnapshot {
   conversations: ConversationRecord[];
   updatedAt: string;
+  suppressDemoSeed?: boolean;
+  resetAt?: string;
 }
 
 export interface ConversationListFilters {

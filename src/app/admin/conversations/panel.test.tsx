@@ -100,4 +100,20 @@ describe("conversation panel operational UI", () => {
     expect(css).toContain("white-space: nowrap");
     expect(html).not.toContain("En humano");
   });
+
+  it("keeps the polling implementation controlled and non-overlapping", () => {
+    const conversation = buildConversationSeed("2026-05-06T08:00:00.000Z").conversations[0];
+    const html = renderToStaticMarkup(
+      <ConversationsPanel initialDashboard={dashboardWith(conversation)} twilioProviderMode="sandbox" />,
+    );
+    const source = readFileSync(join(process.cwd(), "src/app/admin/conversations/panel.tsx"), "utf8");
+
+    expect(html).toContain("Actualizado");
+    expect(source).toContain("CONVERSATION_PANEL_POLL_INTERVAL_MS = 3000");
+    expect(source).toContain("refreshPromiseRef");
+    expect(source).toContain("AbortController");
+    expect(source).toContain("visibilitychange");
+    expect(source).toContain("setReply(\"\")");
+    expect(source).toContain("requestAnimationFrame");
+  });
 });

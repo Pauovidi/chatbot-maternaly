@@ -68,6 +68,15 @@ export interface ManualVideoMockResult {
   mode: "mock";
 }
 
+export interface ConversationResetResult {
+  dryRun: boolean;
+  conversations: number;
+  messages: number;
+  events: number;
+  deleted: boolean;
+  suppressDemoSeed: boolean;
+}
+
 export interface DemoSeedDecisionEnv {
   NODE_ENV?: string;
   VERCEL_ENV?: string;
@@ -75,6 +84,7 @@ export interface DemoSeedDecisionEnv {
 }
 
 export const MANUAL_REPLY_MAX_CHARS = 1200;
+export const RESET_CONVERSATIONS_CONFIRMATION = "RESET_CONVERSATIONS";
 
 const SPANISH_DOCUMENT_ID_PATTERN =
   /\b(?:dni|nif|nie)\s*(?:es|:)?\s*([XYZ]\d{7}[A-Z]|\d{8}[A-Z]|[A-Z]\d{7,8})\b|\b[XYZ]\d{7}[A-Z]\b|\b\d{8}[A-Z]\b/gi;
@@ -148,7 +158,11 @@ export async function ensureDemoConversationSeed(
 ): Promise<boolean> {
   const snapshot = await store.load();
 
-  if (snapshot.conversations.length > 0 || !shouldAutoSeedConversations(env)) {
+  if (
+    snapshot.conversations.length > 0 ||
+    snapshot.suppressDemoSeed ||
+    !shouldAutoSeedConversations(env)
+  ) {
     return false;
   }
 
@@ -344,6 +358,52 @@ export async function listConversationDashboard(
         (conversation) => conversation.unreadCount === 0 && !conversation.humanRequested,
       ).length,
     },
+  };
+}
+
+export async function resetConversations(
+  options: { dryRun?: boolean; confirm?: string } = {},
+  store: ConversationStore = getConversationStore(),
+): Promise<ConversationResetResult> {
+  const snapshot = await store.load();
+  const metrics = {
+    conversations: snapshot.conversations.length,
+    messages: snapshot.conversations.reduce(
+      (total, conversation) => total + conversation.messages.length,
+      0,
+    ),
+    events: snapshot.conversations.reduce(
+      (total, conversation) => total + conversation.events.length,
+      0,
+    ),
+  };
+
+  if (options.dryRun) {
+    return {
+      dryRun: true,
+      ...metrics,
+      deleted: false,
+      suppressDemoSeed: Boolean(snapshot.suppressDemoSeed),
+    };
+  }
+
+  if (options.confirm !== RESET_CONVERSATIONS_CONFIRMATION) {
+    throw new Error("RESET_CONVERSATIONS confirmation is required.");
+  }
+
+  const resetAt = nowIso();
+  await store.save({
+    conversations: [],
+    updatedAt: resetAt,
+    resetAt,
+    suppressDemoSeed: true,
+  });
+
+  return {
+    dryRun: false,
+    ...metrics,
+    deleted: true,
+    suppressDemoSeed: true,
   };
 }
 

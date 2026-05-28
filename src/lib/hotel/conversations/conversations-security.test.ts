@@ -5,13 +5,16 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { POST as postTwilioWebhook } from "../../../app/api/twilio/whatsapp/route";
+import { POST as postConversationsReset } from "../../../app/api/conversations/reset/route";
 
+import { createStaticClientDirectory } from "@/lib/hotel/clients";
 import {
   buildTwilioMessageResponse,
+  handleInboundWhatsApp,
   normalizePhone,
 } from "./service";
 import { verifyPanelAuthorization } from "./auth";
-import { resetConversationStoreForTests } from "./file-store";
+import { getConversationStore, resetConversationStoreForTests } from "./file-store";
 
 describe("conversations security", () => {
   let tempDir: string | undefined;
@@ -21,6 +24,8 @@ describe("conversations security", () => {
     delete process.env.TWILIO_WEBHOOK_AUTH_TOKEN;
     delete process.env.VERCEL_ENV;
     delete process.env.HOTEL_CONVERSATIONS_STORE_DIR;
+    delete process.env.HOTEL_PANEL_USERNAME;
+    delete process.env.HOTEL_PANEL_PASSWORD;
     if (tempDir) {
       rmSync(tempDir, { recursive: true, force: true });
       tempDir = undefined;
@@ -81,6 +86,7 @@ describe("conversations security", () => {
       "src/app/api/conversations/[id]/mark-read/route.ts",
       "src/app/api/conversations/[id]/messages/route.ts",
       "src/app/api/conversations/events/route.ts",
+      "src/app/api/conversations/reset/route.ts",
     ];
 
     for (const routeFile of routeFiles) {
@@ -88,6 +94,67 @@ describe("conversations security", () => {
       expect(source, routeFile).toContain("requirePanelAuth");
       expect(source, routeFile).toContain("if (!auth.ok)");
     }
+  });
+
+  it("requires explicit confirmation before resetting the conversation store", async () => {
+    tempDir = mkdtempSync(path.join(os.tmpdir(), "hotel-conversation-reset-"));
+    process.env.HOTEL_CONVERSATIONS_STORE_DIR = tempDir;
+    process.env.HOTEL_PANEL_USERNAME = "admin";
+    process.env.HOTEL_PANEL_PASSWORD = "correct-password";
+    resetConversationStoreForTests();
+
+    await handleInboundWhatsApp(
+      {
+        from: "whatsapp:+34600000041",
+        to: "whatsapp:+14155238886",
+        body: "Hola, quiero información",
+        messageSid: "SM_RESET_ROUTE_001",
+      },
+      getConversationStore(),
+      createStaticClientDirectory([]),
+    );
+
+    const authorization = `Basic ${Buffer.from("admin:correct-password").toString("base64")}`;
+    const missingConfirmation = await postConversationsReset(
+      new Request("https://example.test/api/conversations/reset", {
+        method: "POST",
+        headers: { authorization, "content-type": "application/json" },
+        body: JSON.stringify({}),
+      }),
+    );
+    expect(missingConfirmation.status).toBe(400);
+
+    const dryRun = await postConversationsReset(
+      new Request("https://example.test/api/conversations/reset", {
+        method: "POST",
+        headers: { authorization, "content-type": "application/json" },
+        body: JSON.stringify({ dryRun: true }),
+      }),
+    );
+    expect(dryRun.status).toBe(200);
+    await expect(dryRun.json()).resolves.toMatchObject({
+      ok: true,
+      reset: { dryRun: true, deleted: false, conversations: 1 },
+    });
+
+    const confirmed = await postConversationsReset(
+      new Request("https://example.test/api/conversations/reset", {
+        method: "POST",
+        headers: { authorization, "content-type": "application/json" },
+        body: JSON.stringify({ confirm: "RESET_CONVERSATIONS" }),
+      }),
+    );
+    expect(confirmed.status).toBe(200);
+    await expect(confirmed.json()).resolves.toMatchObject({
+      ok: true,
+      reset: { dryRun: false, deleted: true, conversations: 1 },
+    });
+
+    const snapshot = JSON.parse(
+      readFileSync(path.join(tempDir, "hotel-conversations.json"), "utf8"),
+    );
+    expect(snapshot.conversations).toEqual([]);
+    expect(snapshot.suppressDemoSeed).toBe(true);
   });
 
   it("enforces the manual reply character limit on server-side routes", () => {

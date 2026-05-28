@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Bot,
   CheckCheck,
@@ -27,6 +27,7 @@ interface ConversationsPanelProps {
 }
 
 type FilterMode = NonNullable<ConversationListFilters["mode"]>;
+export const CONVERSATION_PANEL_POLL_INTERVAL_MS = 3000;
 
 const filters: Array<{ label: string; value: FilterMode }> = [
   { label: "Todas", value: "all" },
@@ -107,7 +108,22 @@ export function ConversationsPanel({
   const [mode, setMode] = useState<FilterMode>("all");
   const [reply, setReply] = useState("");
   const [error, setError] = useState("");
+  const [pollError, setPollError] = useState("");
+  const [lastUpdatedAt, setLastUpdatedAt] = useState(() => new Date());
   const [isPending, setIsPending] = useState(false);
+  const timelineRef = useRef<HTMLDivElement | null>(null);
+  const refreshPromiseRef = useRef<Promise<void> | null>(null);
+  const refreshAbortRef = useRef<AbortController | null>(null);
+  const modeRef = useRef(mode);
+  const queryRef = useRef(query);
+
+  useEffect(() => {
+    modeRef.current = mode;
+  }, [mode]);
+
+  useEffect(() => {
+    queryRef.current = query;
+  }, [query]);
 
   const selected = useMemo(
     () =>
@@ -116,34 +132,120 @@ export function ConversationsPanel({
     [dashboard.conversations, selectedId],
   );
 
-  async function refresh(nextMode = mode, nextQuery = query) {
-    const params = new URLSearchParams();
-    if (nextMode !== "all") {
-      params.set("mode", nextMode);
-    }
-    if (nextQuery.trim()) {
-      params.set("query", nextQuery.trim());
+  function isTimelineNearBottom() {
+    const timeline = timelineRef.current;
+    if (!timeline) {
+      return true;
     }
 
-    const response = await fetch(`/api/conversations?${params.toString()}`, {
-      credentials: "same-origin",
-    });
-    const data = (await response.json()) as ConversationDashboard & {
-      ok?: boolean;
-      error?: string;
-    };
-
-    if (!response.ok || data.ok === false) {
-      throw new Error(data.error ?? "No se pudo cargar el panel.");
-    }
-
-    setDashboard(data);
-    setSelectedId((current) =>
-      data.conversations.some((conversation) => conversation.id === current)
-        ? current
-        : data.conversations[0]?.id ?? "",
-    );
+    return timeline.scrollHeight - timeline.scrollTop - timeline.clientHeight < 96;
   }
+
+  function scrollTimelineToBottom(behavior: ScrollBehavior = "auto") {
+    const timeline = timelineRef.current;
+    if (!timeline) {
+      return;
+    }
+
+    timeline.scrollTo({ top: timeline.scrollHeight, behavior });
+  }
+
+  const refresh = useCallback(async (
+    nextMode?: FilterMode,
+    nextQuery?: string,
+    options: { force?: boolean; silent?: boolean } = {},
+  ) => {
+    const requestedMode = nextMode ?? modeRef.current;
+    const requestedQuery = nextQuery ?? queryRef.current;
+    if (refreshPromiseRef.current && !options.force) {
+      return refreshPromiseRef.current;
+    }
+
+    if (refreshPromiseRef.current && options.force) {
+      refreshAbortRef.current?.abort();
+      await refreshPromiseRef.current.catch(() => undefined);
+    }
+
+    const controller = new AbortController();
+    const shouldAutoScroll = isTimelineNearBottom();
+    const params = new URLSearchParams();
+    if (requestedMode !== "all") {
+      params.set("mode", requestedMode);
+    }
+    if (requestedQuery.trim()) {
+      params.set("query", requestedQuery.trim());
+    }
+
+    const promise = (async () => {
+      const response = await fetch(`/api/conversations?${params.toString()}`, {
+        credentials: "same-origin",
+        signal: controller.signal,
+      });
+      const data = (await response.json()) as ConversationDashboard & {
+        ok?: boolean;
+        error?: string;
+      };
+
+      if (!response.ok || data.ok === false) {
+        throw new Error(data.error ?? "No se pudo cargar el panel.");
+      }
+
+      setDashboard(data);
+      setSelectedId((current) =>
+        data.conversations.some((conversation) => conversation.id === current)
+          ? current
+          : data.conversations[0]?.id ?? "",
+      );
+      setPollError("");
+      setLastUpdatedAt(new Date());
+      if (shouldAutoScroll) {
+        requestAnimationFrame(() => scrollTimelineToBottom(options.silent ? "auto" : "smooth"));
+      }
+    })()
+      .catch((caught) => {
+        if (caught instanceof DOMException && caught.name === "AbortError") {
+          return;
+        }
+
+        if (options.silent) {
+          setPollError("No se pudo actualizar en segundo plano.");
+          return;
+        }
+
+        throw caught;
+      })
+      .finally(() => {
+        if (refreshPromiseRef.current === promise) {
+          refreshPromiseRef.current = null;
+        }
+        if (refreshAbortRef.current === controller) {
+          refreshAbortRef.current = null;
+        }
+      });
+
+    refreshPromiseRef.current = promise;
+    refreshAbortRef.current = controller;
+    return promise;
+  }, []);
+
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      void refresh(undefined, undefined, { silent: true });
+    }, CONVERSATION_PANEL_POLL_INTERVAL_MS);
+
+    function refreshWhenVisible() {
+      if (document.visibilityState === "visible") {
+        void refresh(undefined, undefined, { force: true, silent: true });
+      }
+    }
+
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+    return () => {
+      window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+      refreshAbortRef.current?.abort();
+    };
+  }, [refresh]);
 
   function run(action: () => Promise<void>) {
     setError("");
@@ -157,12 +259,12 @@ export function ConversationsPanel({
 
   function changeMode(nextMode: FilterMode) {
     setMode(nextMode);
-    run(() => refresh(nextMode, query));
+    run(() => refresh(nextMode, query, { force: true }));
   }
 
   function search(nextQuery: string) {
     setQuery(nextQuery);
-    run(() => refresh(mode, nextQuery));
+    run(() => refresh(mode, nextQuery, { force: true }));
   }
 
   async function postAction(path: string, body?: unknown) {
@@ -191,7 +293,7 @@ export function ConversationsPanel({
         `/api/conversations/${encodeURIComponent(conversation.id)}/mode`,
         { mode: nextMode },
       );
-      await refresh();
+      await refresh(undefined, undefined, { force: true });
     });
   }
 
@@ -204,7 +306,7 @@ export function ConversationsPanel({
       await postAction(
         `/api/conversations/${encodeURIComponent(conversation.id)}/mark-read`,
       );
-      await refresh();
+      await refresh(undefined, undefined, { force: true });
     });
   }
 
@@ -221,7 +323,7 @@ export function ConversationsPanel({
         { body },
       );
       setReply("");
-      await refresh();
+      await refresh(undefined, undefined, { force: true });
     });
   }
 
@@ -231,7 +333,7 @@ export function ConversationsPanel({
         `/api/conversations/${encodeURIComponent(conversation.id)}/media-mock`,
         { kind: "video" },
       );
-      await refresh();
+      await refresh(undefined, undefined, { force: true });
     });
   }
 
@@ -289,6 +391,13 @@ export function ConversationsPanel({
               <RefreshCcw size={17} />
               Actualizar
             </button>
+          </div>
+          <div className="conversation-poll-status" role="status" aria-live="polite">
+            {pollError || `Actualizado ${lastUpdatedAt.toLocaleTimeString("es-ES", {
+              hour: "2-digit",
+              minute: "2-digit",
+              second: "2-digit",
+            })}`}
           </div>
 
           <div className="conversation-tabs" role="tablist" aria-label="Filtros">
@@ -421,7 +530,7 @@ export function ConversationsPanel({
                   ))}
                 </div>
               ) : null}
-              <div className="conversation-timeline">
+              <div className="conversation-timeline" ref={timelineRef}>
                 {[...selected.messages, ...selected.events]
                   .filter((item) => !("eventType" in item) || item.eventType !== "nlu_classified")
                   .sort((left, right) => left.createdAt.localeCompare(right.createdAt))

@@ -959,6 +959,15 @@ input {
   border-radius: 999px;
 }
 
+.conversation-poll-status {
+  min-height: 1rem;
+  color: var(--ink-700);
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1.25;
+  padding-inline: 0.2rem;
+}
+
 .conversation-tabs {
   display: flex;
   flex-wrap: wrap;
