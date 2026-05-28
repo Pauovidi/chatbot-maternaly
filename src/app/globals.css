@@ -1671,13 +1671,13 @@ input {
   font-size: 0.72rem;
 }
 
-.conversation-video-mock-button {
+.conversation-composer .conversation-video-mock-button {
   max-width: none;
   background: rgba(255, 255, 255, 0.72);
   color: var(--ink-900);
 }
 
-.conversation-video-mock-button small {
+.conversation-composer .conversation-video-mock-button small {
   width: auto;
   font-size: 0.64rem;
 }

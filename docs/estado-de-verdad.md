@@ -1,5 +1,14 @@
 # Estado de verdad
 
+## Actualizacion 2026-05-28: rama candidata demo cliente
+
+- Rama final candidata: `codex/smp-final-client-demo-integrated-v0`.
+- Base visual: `codex/smp-panel-layout-polish-v0` (`a1ef187`).
+- Bridge integrado: `codex/smp-whatsapp-reservation-bridge-v0` (`bbcfd37`).
+- Incluye: header final, panel pulido, NLU V0, ClientDirectory, Registro de entrada, Twilio Sandbox tecnico, video mock y puente WhatsApp -> propuesta -> confirmacion explicita -> Sheets -> ReservationRecord -> Registro de entrada.
+- Production no se toca desde esta rama hasta que QA preview este validado.
+- Smoke real Sheets ya validado con datos sinteticos QA y cleanup en la rama bridge; no se imprimio reservationId completo ni PII real.
+
 ## 1) Qué subagentes usé
 
 - `Google Sheets Real` (`Beauvoir`)

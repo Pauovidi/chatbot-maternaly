@@ -1,15 +1,16 @@
 # Informe QA Conversacional E2E V0
 
-Fecha: 2026-05-27  
+Fecha: 2026-05-28  
 Entorno: local / preview, sin production deploy  
-Rama: `codex/smp-conversation-e2e-qa-v0`  
-Base: `codex/smp-panel-layout-polish-v0`
+Rama final integrada: `codex/smp-final-client-demo-integrated-v0`  
+Base visual: `codex/smp-panel-layout-polish-v0`  
+Bridge integrado: `codex/smp-whatsapp-reservation-bridge-v0`
 
 ## Resumen ejecutivo
 
 La bateria de QA confirma que la capa conversacional V0 clasifica y responde correctamente a saludos, informacion general, FAQs, handoff humano, estado real del perro, cliente conocido/bloqueado/ambiguo y acciones criticas de reserva en modo seguro.
 
-Actualizacion puente WhatsApp reserva: el flujo WhatsApp ya puede crear una propuesta pendiente, pedir confirmacion explicita, revalidar disponibilidad, escribir por `SheetAdapter`, crear `ReservationRecord` y proyectar la entrada en Registro de entrada. El smoke real contra Google Sheets queda como opt-in seguro.
+Actualizacion puente WhatsApp reserva: el flujo WhatsApp ya puede crear una propuesta pendiente, pedir confirmacion explicita, revalidar disponibilidad, escribir por `SheetAdapter`, crear `ReservationRecord` y proyectar la entrada en Registro de entrada. El smoke real contra Google Sheets se ejecuto con datos sinteticos QA y cleanup en la rama bridge, y la rama final integrada conserva ese puente sobre el ultimo polish visual del panel.
 
 ## Auditoria
 
@@ -67,7 +68,7 @@ El panel mantiene conversaciones, filtros, modo bot/humano, respuesta manual, vi
 | Reserva desde WhatsApp | Verde | Crea propuesta, confirma con explicitud, escribe por adapter y crea ReservationRecord |
 | Cancelacion | Amarillo | Deriva/pide datos; no cancela real desde WhatsApp |
 | Modificacion | Amarillo | Deriva/pide datos; no existe modificacion Sheets directa |
-| Sheets real | Amarillo | Script opt-in creado; no ejecutado en esta pasada sin permiso de escritura real |
+| Sheets real | Verde | Smoke real opt-in ejecutado con datos sinteticos QA y cleanup en `codex/smp-whatsapp-reservation-bridge-v0` |
 | Registro entrada | Verde | ReservationRecord confirmado desde WhatsApp se proyecta como origen chatbot |
 | Panel | Verde | Conversacion visible, acciones por modo, NIF/DNI oculto |
 
@@ -84,11 +85,12 @@ Comandos ejecutados:
 
 ## Google Sheets
 
-Touched en real: No.  
-Datos sinteticos previstos si se habilita el flujo real: `SMP QA Conversacional`, `Kira QA <timestamp>`, teléfono QA, fechas diciembre 2026.  
-ReservationId real de QA: no generado por Sheets real en esta pasada.  
-Celdas reales tocadas: ninguna.  
-Cleanup real: no requerido.
+Touched en real: Si, solo con datos sinteticos QA y cleanup activado en la rama bridge.  
+Datos sinteticos usados: `Kira QA`, telefono QA del script, fechas 2026-12-29 a 2026-12-31.  
+ReservationId real de QA: generado y no impreso completo; resumen seguro `[reservation-id:_morning]`.  
+Hoja real tocada: `DICIEMBRE 2026`.  
+Celdas tocadas: `AD4`, `AE4`, `AF4`.  
+Cleanup real: solicitado y completado; verificacion posterior en Sheets: 0 reservas sinteticas activas `Kira QA` en `DICIEMBRE 2026`.
 
 Comando opt-in:
 
@@ -103,6 +105,7 @@ Sin `HOTEL_QA_ALLOW_REAL_SHEETS_WRITE=true`, el script no escribe y sale en modo
 ## Registro de entrada
 
 Entrada creada por WhatsApp en mock: Si.  
+Entrada creada por WhatsApp en smoke real Sheets: Si, con datos sinteticos QA.  
 Proyeccion sintetica validada en test: Si.  
 Campos validados: cliente, estado cliente, telefono/identificador, mascota, entrada, salida, accion, origen, reservationId, estado Gestet.  
 Estado Gestet: pendiente cuando no hay `sheetRegistration`.  
