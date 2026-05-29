@@ -485,6 +485,43 @@ export async function handleInboundWhatsApp(
     };
   }
 
+  const resetPlan = buildConversationReplyPlan(safeBody);
+  if (resetPlan.intent === "conversation_reset") {
+    const latest = (await store.getById(freshWithClient.id)) ?? freshWithClient;
+    const resetRecord: ConversationRecord = {
+      ...latest,
+      mode: "bot",
+      humanRequested: false,
+      assignedAgent: undefined,
+      pendingReservationProposal: undefined,
+      requiresManualReview:
+        latest.clientStatus === "blocked" || latest.clientStatus === "ambiguous",
+      updatedAt: nowIso(),
+    };
+    await store.replaceConversation(resetRecord);
+    await store.addEvent(
+      createEvent(freshWithClient.id, "conversation_reset_requested", {
+        matchedFrom: "nlu",
+        clearedPendingProposal: Boolean(latest.pendingReservationProposal),
+      }),
+    );
+    const botReply = await store.addMessage(
+      createMessage({
+        conversationId: freshWithClient.id,
+        direction: "outbound",
+        senderType: "bot",
+        body: resetPlan.reply,
+      }),
+    );
+
+    return {
+      conversation: (await store.getById(freshWithClient.id)) ?? resetRecord,
+      inbound,
+      botReply,
+      twiml: buildTwilioMessageResponse(resetPlan.reply),
+    };
+  }
+
   if (freshWithClient.mode === "human") {
     await store.addEvent(createEvent(freshWithClient.id, "auto_reply_skipped_human_mode"));
     return {

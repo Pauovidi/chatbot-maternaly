@@ -42,7 +42,11 @@ export function readHotelPersistenceConfig(
   const explicitProvider = normalizeProvider(configuredProvider);
   const isProduction = env.NODE_ENV === "production";
   const isVercelPreview = env.VERCEL_ENV === "preview";
+  const isVercelRuntime = Boolean(env.VERCEL);
   const databaseUrlConfigured = Boolean(env.DATABASE_URL?.trim());
+  const explicitDurableFileBaseDir = Boolean(
+    env.HOTEL_FILE_STORE_DIR?.trim() || env.HOTEL_STORE_DIR?.trim(),
+  );
   const durableFileBaseDir =
     env.HOTEL_FILE_STORE_DIR?.trim() ||
     env.HOTEL_STORE_DIR?.trim() ||
@@ -53,6 +57,8 @@ export function readHotelPersistenceConfig(
       explicitProvider ??
       (databaseUrlConfigured && isProduction
         ? "postgres"
+        : isVercelRuntime && !explicitDurableFileBaseDir
+          ? "file-tmp"
         : isVercelPreview
           ? "file-tmp"
           : isProduction

@@ -91,6 +91,20 @@ function safeErrorCode(error: unknown): string {
   return "unknown_error";
 }
 
+function logReservationDiagnostic(
+  level: "warn" | "error",
+  event: string,
+  payload: Record<string, unknown>,
+): void {
+  const logger = level === "error" ? console.error : console.warn;
+  logger(
+    JSON.stringify({
+      event,
+      ...payload,
+    }),
+  );
+}
+
 function isoDate(year: number, month: number, day: number): string | undefined {
   const date = new Date(Date.UTC(year, month - 1, day));
   if (
@@ -516,72 +530,95 @@ export async function confirmPendingReservationProposal(input: {
     };
   }
 
+  let adapter: SheetAdapter;
+  let availability: Awaited<ReturnType<SheetAdapter["checkAvailability"]>>;
   try {
-    const adapter = await (input.deps?.buildSheetAdapter ?? getDefaultBuildSheetAdapter())();
-    const availability = await adapter.checkAvailability({
+    adapter = await (input.deps?.buildSheetAdapter ?? getDefaultBuildSheetAdapter())();
+    availability = await adapter.checkAvailability({
       entryDate: proposal.checkIn,
       entrySlot: proposal.checkInSlot,
       exitDate: proposal.checkOut,
       exitSlot: proposal.checkOutSlot,
       dogs: proposal.petCount,
     });
-
-    if (!availability.available) {
-      return {
-        kind: "no_availability",
-        handoff: true,
-        reply:
-          "Acabo de volver a comprobar disponibilidad y ya no puedo dejarla anotada automáticamente. Lo revisa una persona del equipo y te contestamos por aquí.",
-        proposal: {
-          ...proposal,
-          status: "failed",
-          failureReason: "availability_lost_before_write",
-        },
-        eventPayload: {
+  } catch (error) {
+    logReservationDiagnostic("error", "reservation_confirmation_failed", {
+      reason: "availability_revalidation_failed",
+      hasProposal: true,
+      proposalStatus: proposal.status,
+      availabilityRevalidated: false,
+      sheetWriteAttempted: false,
+      sheetWriteSuccess: false,
+      reservationRecordCreated: false,
+      errorCode: safeErrorCode(error),
+    });
+    return {
+      kind: "failed",
+      handoff: true,
+      reply:
+        "No he podido anotar la reserva con seguridad, así que no la marco como confirmada. Lo revisa una persona del equipo y te contestamos por aquí.",
+      proposal: {
+        ...proposal,
+        status: "failed",
+        failureReason: "availability_revalidation_failed",
+      },
+      eventPayload: {
         proposalId: proposal.proposalId,
-        reason: "availability_lost_before_write",
-          conflictCount: availability.conflicts.length,
+        reason: "availability_revalidation_failed",
+        availabilityRevalidated: false,
+        sheetWriteAttempted: false,
+        sheetWriteSuccess: false,
+        reservationRecordCreated: false,
+        errorCode: safeErrorCode(error),
       },
     };
-    }
+  }
 
+  if (!availability.available) {
+    return {
+      kind: "no_availability",
+      handoff: true,
+      reply:
+        "Acabo de volver a comprobar disponibilidad y ya no puedo dejarla anotada automáticamente. Lo revisa una persona del equipo y te contestamos por aquí.",
+      proposal: {
+        ...proposal,
+        status: "failed",
+        failureReason: "availability_lost_before_write",
+      },
+      eventPayload: {
+        proposalId: proposal.proposalId,
+        reason: "availability_lost_before_write",
+        availabilityRevalidated: true,
+        sheetWriteAttempted: false,
+        sheetWriteSuccess: false,
+        reservationRecordCreated: false,
+        conflictCount: availability.conflicts.length,
+      },
+    };
+  }
+
+  let writeResult: SheetsWriteResult;
+  try {
     const previewReservation = toReservationRecord({
       conversation: input.conversation,
       proposal,
       availability,
       nowIso,
     });
-    const writeResult = await adapter.writeReservation(
+    writeResult = await adapter.writeReservation(
       toLegacyReservationRecord(previewReservation, "confirmada"),
     );
-    const reservation = toReservationRecord({
-      conversation: input.conversation,
-      proposal,
-      availability,
-      writeResult,
-      nowIso,
-    });
-
-    await (input.deps?.upsertReservationRecord ?? upsertReservation)(reservation);
-
-    const confirmedProposal: PendingReservationProposal = {
-      ...proposal,
-      status: "confirmed",
-      reservationId: reservation.reservationId,
-    };
-
-    return {
-      kind: "confirmed",
-      proposal: confirmedProposal,
-      reservation,
-      reply: buildConfirmationReply(confirmedProposal),
-      eventPayload: {
-        proposalId: proposal.proposalId,
-        reservationIdSummary: summarizeSensitiveId(reservation.reservationId),
-        cellsWritten: reservation.sheetRegistration?.cells.length ?? 0,
-      },
-    };
   } catch (error) {
+    logReservationDiagnostic("error", "reservation_confirmation_failed", {
+      reason: "sheet_write_failed",
+      hasProposal: true,
+      proposalStatus: proposal.status,
+      availabilityRevalidated: true,
+      sheetWriteAttempted: true,
+      sheetWriteSuccess: false,
+      reservationRecordCreated: false,
+      errorCode: safeErrorCode(error),
+    });
     return {
       kind: "failed",
       handoff: true,
@@ -595,8 +632,63 @@ export async function confirmPendingReservationProposal(input: {
       eventPayload: {
         proposalId: proposal.proposalId,
         reason: "sheet_write_failed",
+        availabilityRevalidated: true,
+        sheetWriteAttempted: true,
+        sheetWriteSuccess: false,
+        reservationRecordCreated: false,
         errorCode: safeErrorCode(error),
       },
     };
   }
+
+  const reservation = toReservationRecord({
+    conversation: input.conversation,
+    proposal,
+    availability,
+    writeResult,
+    nowIso,
+  });
+
+  let recordWarning: Record<string, unknown> | undefined;
+  try {
+    await (input.deps?.upsertReservationRecord ?? upsertReservation)(reservation);
+  } catch (error) {
+    recordWarning = {
+      reason: "reservation_record_upsert_failed",
+      errorCode: safeErrorCode(error),
+    };
+    logReservationDiagnostic("error", "reservation_record_upsert_failed", {
+      hasProposal: true,
+      proposalStatus: proposal.status,
+      availabilityRevalidated: true,
+      sheetWriteAttempted: true,
+      sheetWriteSuccess: true,
+      reservationRecordCreated: false,
+      errorCode: safeErrorCode(error),
+    });
+  }
+
+  const confirmedProposal: PendingReservationProposal = {
+    ...proposal,
+    status: "confirmed",
+    reservationId: reservation.reservationId,
+  };
+
+  return {
+    kind: "confirmed",
+    proposal: confirmedProposal,
+    reservation,
+    handoff: Boolean(recordWarning),
+    reply: buildConfirmationReply(confirmedProposal),
+    eventPayload: {
+      proposalId: proposal.proposalId,
+      reservationIdSummary: summarizeSensitiveId(reservation.reservationId),
+      cellsWritten: reservation.sheetRegistration?.cells.length ?? 0,
+      availabilityRevalidated: true,
+      sheetWriteAttempted: true,
+      sheetWriteSuccess: true,
+      reservationRecordCreated: !recordWarning,
+      postWriteWarning: recordWarning,
+    },
+  };
 }

@@ -345,12 +345,12 @@ async function runDirectSmoke() {
     {
       from: "whatsapp:+34600009993",
       to: SANDBOX_TO,
-      body: "si",
+      body: "confirmo",
       messageSid: "SM_QA_bridge_confirm",
       rawPayload: {
         From: "whatsapp:+34600009993",
         To: SANDBOX_TO,
-        Body: "si",
+        Body: "confirmo",
         MessageSid: "SM_QA_bridge_confirm",
       },
     },

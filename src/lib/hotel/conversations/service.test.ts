@@ -318,6 +318,73 @@ describe("conversation service", () => {
     expect(inbound.conversation.events.some((event) => event.eventType === "auto_reply_skipped_human_mode")).toBe(true);
   });
 
+  it("resets only the current conversation context even from human mode", async () => {
+    const store = new MemoryConversationStore();
+    const created = await handleInboundWhatsApp(
+      { from: "+34612345678", body: "Quiero hablar con una persona" },
+      store,
+    );
+    await store.replaceConversation({
+      ...created.conversation,
+      mode: "human",
+      humanRequested: true,
+      assignedAgent: "ops",
+      pendingReservationProposal: {
+        proposalId: "proposal_test_reset",
+        conversationId: created.conversation.id,
+        phoneNormalized: created.conversation.phoneNormalized,
+        clientStatus: "unknown",
+        petName: "Kira QA",
+        checkIn: "2026-12-29",
+        checkOut: "2026-12-31",
+        checkInSlot: "morning",
+        checkOutSlot: "afternoon",
+        petCount: 1,
+        requestedAt: new Date().toISOString(),
+        expiresAt: new Date(Date.now() + 60_000).toISOString(),
+        status: "proposed",
+        source: "whatsapp",
+        createdFromMessageId: "msg_test",
+      },
+    });
+
+    const reset = await handleInboundWhatsApp(
+      { from: "+34612345678", body: "reiniciar" },
+      store,
+    );
+
+    expect(reset.conversation.mode).toBe("bot");
+    expect(reset.conversation.humanRequested).toBe(false);
+    expect(reset.conversation.assignedAgent).toBeUndefined();
+    expect(reset.conversation.pendingReservationProposal).toBeUndefined();
+    expect(reset.conversation.messages.length).toBeGreaterThan(0);
+    expect(reset.botReply?.body).toContain("empezamos de nuevo");
+    expect(reset.conversation.events.some((event) => event.eventType === "conversation_reset_requested")).toBe(true);
+    expect(reset.conversation.events.some((event) => event.eventType === "auto_reply_skipped_human_mode")).toBe(false);
+  });
+
+  it("does not let blocked clients reset out of human review", async () => {
+    const store = new MemoryConversationStore();
+    const directory = createStaticClientDirectory([
+      {
+        nombre: "Cliente Bloqueado",
+        telefonoNormalizado: "34682621177",
+        bloqueadoNoReservar: true,
+      },
+    ]);
+
+    const result = await handleInboundWhatsApp(
+      { from: "whatsapp:+34682621177", body: "reiniciar" },
+      store,
+      directory,
+    );
+
+    expect(result.conversation.clientStatus).toBe("blocked");
+    expect(result.conversation.mode).toBe("human");
+    expect(result.botReply?.body).toContain("revisamos tu solicitud");
+    expect(result.conversation.events.some((event) => event.eventType === "conversation_reset_requested")).toBe(false);
+  });
+
   it("answers general information without human handoff", async () => {
     const store = new MemoryConversationStore();
 

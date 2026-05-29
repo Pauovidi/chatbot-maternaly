@@ -138,6 +138,7 @@ function makeReservation(overrides: Partial<ReservationRecord> = {}): Reservatio
 describe("conversation end-to-end policy QA", () => {
   it.each([
     ["Hola", "greeting", false],
+    ["hola buenos días", "greeting", false],
     ["Hola, quiero información", "general_information", false],
     ["Me gustaría saber cómo funciona", "general_information", false],
     ["¿Qué tengo que llevar?", "faq_what_to_bring", false],
@@ -149,6 +150,7 @@ describe("conversation end-to-end policy QA", () => {
     ["Sí, confirma", "reservation_confirm", true],
     ["Quiero cancelar mi reserva", "reservation_cancel", true],
     ["Quiero cambiar la fecha", "reservation_modify", true],
+    ["reiniciar", "conversation_reset", false],
     ["Quiero hablar con una persona", "human_handoff", true],
     ["¿Ha comido?", "stay_status_question", true],
     ["¿Ha llorado mucho?", "stay_status_question", true],

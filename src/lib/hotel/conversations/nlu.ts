@@ -15,6 +15,7 @@ export type ConversationIntent =
   | "reservation_confirm"
   | "reservation_cancel"
   | "reservation_modify"
+  | "conversation_reset"
   | "human_handoff"
   | "stay_status_question"
   | "media_request"
@@ -66,6 +67,9 @@ const RESERVATION_CANCEL_REPLY =
 
 const RESERVATION_MODIFY_REPLY =
   "Para cambiar fechas o datos de una reserva, envíame el identificador de reserva o el nombre del perro y las nuevas fechas. Lo revisa una persona del equipo antes de confirmar nada.";
+
+const CONVERSATION_RESET_REPLY =
+  "Perfecto, empezamos de nuevo. ¿Quieres información general, consultar disponibilidad o hablar con una persona del equipo?";
 
 function normalizeText(value: string): string {
   return value
@@ -155,6 +159,15 @@ export function classifyConversationIntent(message: string): ConversationNluResu
   if (!normalized) {
     matchedSignals.push("empty");
     return result("unknown", "low");
+  }
+
+  if (
+    matchAny(normalized, [
+      /^(reiniciar|reset|empezar de nuevo|volver a empezar|borrar conversacion|empezar otra vez|olvida lo anterior)$/,
+    ])
+  ) {
+    matchedSignals.push("conversation_reset");
+    return result("conversation_reset");
   }
 
   if (
@@ -287,7 +300,12 @@ export function classifyConversationIntent(message: string): ConversationNluResu
     return result("faq_what_to_bring");
   }
 
-  if (matchAny(normalized, [/^(hola|buenas|buenos dias|buenas tardes|buenas noches)$/])) {
+  if (
+    matchAny(normalized, [
+      /^(hola\s+)?(buenas|buenos dias|buenas tardes|buenas noches)$/,
+      /^hola$/,
+    ])
+  ) {
     matchedSignals.push("greeting");
     return result("greeting");
   }
@@ -328,6 +346,8 @@ export function buildConversationReplyPlan(message: string): ConversationReplyPl
       return { ...nlu, reply: RESERVATION_CANCEL_REPLY, handoff: true, source: "conversation_nlu" };
     case "reservation_modify":
       return { ...nlu, reply: RESERVATION_MODIFY_REPLY, handoff: true, source: "conversation_nlu" };
+    case "conversation_reset":
+      return { ...nlu, reply: CONVERSATION_RESET_REPLY, handoff: false, source: "conversation_nlu" };
     case "faq_hours":
       return { ...nlu, reply: faqReply("¿Cuál es vuestro horario?"), handoff: false, source: "faq_public_chat" };
     case "faq_prices":

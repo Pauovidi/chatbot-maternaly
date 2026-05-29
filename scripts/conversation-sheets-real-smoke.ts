@@ -154,7 +154,7 @@ async function main() {
     {
       from,
       to: "whatsapp:+14155238886",
-      body: "Sí, confirma",
+      body: "confirmo",
       messageSid: `SM_QA_REAL_CONFIRM_${suffix}`,
     },
     store,

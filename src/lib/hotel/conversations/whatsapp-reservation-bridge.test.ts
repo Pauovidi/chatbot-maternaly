@@ -125,6 +125,7 @@ function makeAvailability(available = true): SheetsAvailabilityResult {
 function makeBridgeDeps(options: {
   availabilitySequence?: boolean[];
   writeFails?: boolean;
+  recordUpsertFails?: boolean;
 } = {}) {
   const counters = {
     checks: 0,
@@ -218,6 +219,9 @@ function makeBridgeDeps(options: {
         return adapter;
       },
       async upsertReservationRecord(reservation: ReservationRecord) {
+        if (options.recordUpsertFails) {
+          throw new Error("mock reservation record upsert failed");
+        }
         counters.reservations.push(structuredClone(reservation));
       },
     },
@@ -316,6 +320,8 @@ describe("WhatsApp reservation bridge", () => {
     "perfecto",
     "adelante",
     "anótala",
+    "confirmo",
+    "confirmo la reserva",
     "de acuerdo",
   ])("confirms a pending proposal with short affirmative utterance: %s", async (utterance) => {
     const store = new MemoryConversationStore();
@@ -530,6 +536,50 @@ describe("WhatsApp reservation bridge", () => {
     expect(counters.reservations).toHaveLength(0);
     const serialized = JSON.stringify(result.conversation);
     expect(serialized).not.toContain("mock sheet write failed");
+  });
+
+  it("keeps confirmed copy if ReservationRecord persistence fails after Sheets write", async () => {
+    const store = new MemoryConversationStore();
+    const { counters, deps } = makeBridgeDeps({ recordUpsertFails: true });
+
+    await handleInboundWhatsApp(
+      {
+        from: "whatsapp:+34600009991",
+        body: "Quiero reservar para Kira QA del 29 al 31 de diciembre de 2026",
+        messageSid: "SM_BRIDGE_RECORD_FAIL_1",
+      },
+      store,
+      createStaticClientDirectory([]),
+      deps,
+    );
+    const result = await handleInboundWhatsApp(
+      {
+        from: "whatsapp:+34600009991",
+        body: "confirmo",
+        messageSid: "SM_BRIDGE_RECORD_FAIL_2",
+      },
+      store,
+      createStaticClientDirectory([]),
+      deps,
+    );
+
+    expect(counters.writes).toBe(1);
+    expect(counters.reservations).toHaveLength(0);
+    expect(result.conversation.mode).toBe("human");
+    expect(result.conversation.pendingReservationProposal?.status).toBe("confirmed");
+    expect(result.conversation.reservationId).toBeDefined();
+    expect(result.botReply?.body).toContain("queda anotada");
+    expect(result.botReply?.body).not.toContain("no la marco como confirmada");
+    const confirmationEvent = result.conversation.events.findLast(
+      (event) => event.eventType === "reservation_confirmation_checked",
+    );
+    expect(confirmationEvent?.payload).toMatchObject({
+      kind: "confirmed",
+      postWriteWarning: {
+        reason: "reservation_record_upsert_failed",
+      },
+    });
+    expect(JSON.stringify(result.conversation.events)).not.toContain("mock reservation record upsert failed");
   });
 
   it("does not persist raw reservation ids or sheet internals in conversation events", async () => {

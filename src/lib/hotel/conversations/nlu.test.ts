@@ -8,6 +8,10 @@ import {
 describe("conversation NLU", () => {
   it.each([
     ["Hola", "greeting"],
+    ["hola buenos días", "greeting"],
+    ["Hola, buenos días", "greeting"],
+    ["buenas tardes, quería información", "general_information"],
+    ["hola, quería información", "general_information"],
     ["Hola, quiero información", "general_information"],
     ["¿Qué tengo que llevar?", "faq_what_to_bring"],
     ["¿Puedo visitar el hotel?", "faq_visits"],
@@ -19,6 +23,8 @@ describe("conversation NLU", () => {
     ["Sí, confirma", "reservation_confirm"],
     ["Quiero cancelar mi reserva", "reservation_cancel"],
     ["Quiero cambiar la fecha", "reservation_modify"],
+    ["reiniciar", "conversation_reset"],
+    ["empezar de nuevo", "conversation_reset"],
     ["Quiero hablar con una persona", "human_handoff"],
     ["¿Ha comido mi perro?", "stay_status_question"],
   ] as const)("classifies %s as %s", (message, intent) => {

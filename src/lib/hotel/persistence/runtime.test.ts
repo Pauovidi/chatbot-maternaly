@@ -47,6 +47,27 @@ describe("production persistence runtime", () => {
     expect(normalized).not.toBe("/data/hotel-conversations.json");
   });
 
+  it("uses tmp storage on Vercel production when no durable store is configured", () => {
+    const config = readHotelPersistenceConfig({
+      NODE_ENV: "production",
+      VERCEL: "1",
+      VERCEL_ENV: "production",
+    } as NodeJS.ProcessEnv);
+    const filePath = resolveJsonStorePath({
+      fileName: "hotel-canino-domain.json",
+      env: {
+        NODE_ENV: "production",
+        VERCEL: "1",
+        VERCEL_ENV: "production",
+      } as NodeJS.ProcessEnv,
+    });
+
+    const normalized = filePath.replaceAll("\\", "/");
+    expect(config.provider).toBe("file-tmp");
+    expect(normalized).toContain("/hotel-canino-demo/hotel-canino-domain.json");
+    expect(normalized).not.toBe("/data/hotel-canino-domain.json");
+  });
+
   it("redirects /data file overrides to tmp on Vercel Preview", () => {
     const byDir = resolveJsonStorePath({
       fileName: "hotel-conversations.json",
