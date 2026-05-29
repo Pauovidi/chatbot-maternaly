@@ -1,22 +1,18 @@
 import packageJson from "../../../../package.json";
 import { NextResponse } from "next/server";
+import { readHotelPersistenceConfig } from "@/lib/hotel/persistence/runtime";
 import { readTwilioWhatsAppConfig } from "@/lib/hotel/twilio/client";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 function readPersistenceHealth() {
-  const provider =
-    process.env.HOTEL_PERSISTENCE_PROVIDER?.trim() ||
-    (process.env.DATABASE_URL?.trim() ? "postgres" : process.env.NODE_ENV === "production" ? "file-volume" : "file-local");
+  const config = readHotelPersistenceConfig();
 
   return {
-    provider,
-    databaseUrlConfigured: Boolean(process.env.DATABASE_URL?.trim()),
-    durableFileBaseDir:
-      provider === "file-volume"
-        ? process.env.HOTEL_FILE_STORE_DIR?.trim() || process.env.HOTEL_STORE_DIR?.trim() || "/data"
-        : undefined,
+    provider: config.provider,
+    databaseUrlConfigured: config.databaseUrlConfigured,
+    durableFileBaseDir: config.durableFileBaseDir,
   };
 }
 
