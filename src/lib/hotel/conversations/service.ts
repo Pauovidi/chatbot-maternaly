@@ -5,6 +5,7 @@ import {
   getClientDirectory,
   type ClientDirectory,
   type ClientIdentityResult,
+  type ClientUpsertFromConfirmedReservationResult,
 } from "@/lib/hotel/clients";
 import { buildConversationReplyPlan, classifyConversationIntent } from "./nlu";
 import {
@@ -195,12 +196,127 @@ function sanitizeClientIdentityPayload(identity: ClientIdentityResult): Record<s
   };
 }
 
+function sanitizeClientUpsertPayload(
+  result: ClientUpsertFromConfirmedReservationResult,
+): Record<string, unknown> {
+  return {
+    kind: result.kind,
+    clientStatus: result.clientStatus,
+    source: result.source,
+    rowNumber: result.rowNumber,
+    sheetName: result.sheetName,
+    matchCount: result.matchCount,
+    warning: result.warning,
+  };
+}
+
+function clientUpsertEventType(result: ClientUpsertFromConfirmedReservationResult): string {
+  if (result.kind === "created") {
+    return "client_directory_created_from_reservation";
+  }
+  if (result.kind === "created_pending_name") {
+    return "client_directory_created_pending_name";
+  }
+  if (result.kind === "existing") {
+    return "client_directory_existing_from_reservation";
+  }
+  if (result.kind === "skipped_ambiguous") {
+    return "client_directory_upsert_skipped_ambiguous";
+  }
+  if (result.kind === "skipped_blocked") {
+    return "client_directory_upsert_skipped_blocked";
+  }
+  if (result.kind === "skipped_invalid_phone") {
+    return "client_directory_upsert_skipped_invalid_phone";
+  }
+  return "client_directory_upsert_failed";
+}
+
+function applyClientReservationUpsert(
+  record: ConversationRecord,
+  result?: ClientUpsertFromConfirmedReservationResult,
+): ConversationRecord {
+  if (!result || !["created", "created_pending_name", "existing"].includes(result.kind)) {
+    return record;
+  }
+
+  const warnings = Array.from(
+    new Set([
+      ...(record.clientWarnings ?? []),
+      result.kind === "created_pending_name" ? "client_name_pending_review" : undefined,
+    ].filter((warning): warning is string => Boolean(warning))),
+  );
+
+  return {
+    ...record,
+    customerName: result.clientName ?? record.customerName,
+    clientStatus: "known",
+    clientConfidence: "strong",
+    clientName: result.clientName ?? record.clientName,
+    clientWarnings: warnings,
+    clientSource: result.source,
+    clientSheetName: result.sheetName ?? record.clientSheetName,
+    clientSheetRow: result.rowNumber ?? record.clientSheetRow,
+    tags: Array.from(new Set([...(record.tags ?? []), "cliente_habitual"])),
+  };
+}
+
 function summarizeReservationId(value?: string): string | undefined {
   if (!value) {
     return undefined;
   }
 
   return value.length <= 8 ? "[reservation-id]" : `[reservation-id:${value.slice(-8)}]`;
+}
+
+const RESERVATION_CONTEXT_TTL_MS = 2 * 60 * 60 * 1000;
+
+function pendingContextIsLive(
+  record: ConversationRecord,
+  now = new Date(),
+): boolean {
+  return (
+    record.pendingReservationContext?.status === "collecting" &&
+    new Date(record.pendingReservationContext.expiresAt).getTime() > now.getTime()
+  );
+}
+
+function shouldTreatAsReservationSlotFill(
+  record: ConversationRecord,
+  replyPlan: ReturnType<typeof buildConversationReplyPlan>,
+  message: string,
+): boolean {
+  if (replyPlan.intent !== "unknown" && replyPlan.intent !== "general_information") {
+    return false;
+  }
+
+  if (!pendingContextIsLive(record)) {
+    return false;
+  }
+
+  const hasUsefulSlots = Boolean(
+    replyPlan.slots.petName || replyPlan.slots.checkIn || replyPlan.slots.checkOut,
+  );
+  return hasUsefulSlots || /\b(?:del|desde)\s+\d{1,2}\s+(?:al|hasta)\s+\d{1,2}\b/i.test(message);
+}
+
+function buildPendingReservationContext(input: {
+  conversation: ConversationRecord;
+  inboundMessageId: string;
+}): ConversationRecord["pendingReservationContext"] {
+  const now = new Date();
+  return {
+    contextId: createId("reservation_context"),
+    conversationId: input.conversation.id,
+    phoneNormalized: input.conversation.phoneNormalized,
+    status: "collecting",
+    source: "whatsapp",
+    requestedAt: now.toISOString(),
+    updatedAt: now.toISOString(),
+    expiresAt: new Date(now.getTime() + RESERVATION_CONTEXT_TTL_MS).toISOString(),
+    requestedFields: ["petName", "dates"],
+    createdFromMessageId: input.inboundMessageId,
+  };
 }
 
 function applyClientIdentity(
@@ -283,6 +399,18 @@ async function getOrCreateConversation(
   const existing = await store.getByPhone(normalized.phoneNormalized);
 
   if (existing) {
+    if (existing.archivedAt) {
+      const reopened = await store.replaceConversation({
+        ...existing,
+        archivedAt: undefined,
+        archivedBy: undefined,
+        archivedReason: undefined,
+        updatedAt: nowIso(),
+      });
+      await store.addEvent(createEvent(existing.id, "conversation_reopened_from_inbound"));
+      return (await store.getById(existing.id)) ?? reopened;
+    }
+
     if (displayName && existing.displayName !== displayName) {
       return store.replaceConversation({
         ...existing,
@@ -344,6 +472,7 @@ export async function listConversationDashboard(
   await ensureDemoConversationSeed(store);
   const conversations = await store.list(filters);
   const all = await store.list();
+  const snapshot = await store.load();
 
   return {
     conversations,
@@ -357,6 +486,7 @@ export async function listConversationDashboard(
       read: all.filter(
         (conversation) => conversation.unreadCount === 0 && !conversation.humanRequested,
       ).length,
+      archived: snapshot.conversations.filter((conversation) => conversation.archivedAt).length,
     },
   };
 }
@@ -494,6 +624,7 @@ export async function handleInboundWhatsApp(
       humanRequested: false,
       assignedAgent: undefined,
       pendingReservationProposal: undefined,
+      pendingReservationContext: undefined,
       requiresManualReview:
         latest.clientStatus === "blocked" || latest.clientStatus === "ambiguous",
       updatedAt: nowIso(),
@@ -503,6 +634,7 @@ export async function handleInboundWhatsApp(
       createEvent(freshWithClient.id, "conversation_reset_requested", {
         matchedFrom: "nlu",
         clearedPendingProposal: Boolean(latest.pendingReservationProposal),
+        clearedPendingContext: Boolean(latest.pendingReservationContext),
       }),
     );
     const botReply = await store.addMessage(
@@ -530,7 +662,23 @@ export async function handleInboundWhatsApp(
     };
   }
 
-  const replyPlan = buildConversationReplyPlan(safeBody);
+  const initialReplyPlan = buildConversationReplyPlan(safeBody);
+  const latestBeforePlan = (await store.getById(freshWithClient.id)) ?? freshWithClient;
+  const replyPlan = shouldTreatAsReservationSlotFill(
+    latestBeforePlan,
+    initialReplyPlan,
+    safeBody,
+  )
+    ? {
+        ...initialReplyPlan,
+        intent: "availability_request" as const,
+        confidence: "medium" as const,
+        matchedSignals: [
+          ...initialReplyPlan.matchedSignals,
+          "contextual_reservation_slot_fill",
+        ],
+      }
+    : initialReplyPlan;
   await store.addEvent(
     createEvent(freshWithClient.id, "nlu_classified", {
       intent: replyPlan.intent,
@@ -565,6 +713,16 @@ export async function handleInboundWhatsApp(
       pendingReservationProposal:
         proposalOutcome.proposal ??
         ((await store.getById(freshWithClient.id)) ?? freshWithClient).pendingReservationProposal,
+      pendingReservationContext:
+        proposalOutcome.kind === "missing_data"
+          ? buildPendingReservationContext({
+              conversation: freshWithClient,
+              inboundMessageId: inbound.id,
+            })
+          : proposalOutcome.proposal
+            ? undefined
+            : ((await store.getById(freshWithClient.id)) ?? freshWithClient)
+                .pendingReservationContext,
       petName:
         proposalOutcome.proposal?.petName ??
         ((await store.getById(freshWithClient.id)) ?? freshWithClient).petName,
@@ -585,6 +743,13 @@ export async function handleInboundWhatsApp(
           checkIn: proposalOutcome.proposal.checkIn,
           checkOut: proposalOutcome.proposal.checkOut,
           expiresAt: proposalOutcome.proposal.expiresAt,
+        }),
+      );
+    } else if (proposalOutcome.kind === "missing_data") {
+      await store.addEvent(
+        createEvent(freshWithClient.id, "reservation_context_detected", {
+          reason: proposalOutcome.eventPayload?.reason,
+          requestedFields: ["petName", "dates"],
         }),
       );
     }
@@ -633,6 +798,10 @@ export async function handleInboundWhatsApp(
       pendingReservationProposal:
         confirmation.proposal ??
         ((await store.getById(freshWithClient.id)) ?? latest).pendingReservationProposal,
+      pendingReservationContext:
+        confirmation.kind === "confirmed"
+          ? undefined
+          : ((await store.getById(freshWithClient.id)) ?? latest).pendingReservationContext,
       reservationId:
         confirmation.reservation?.reservationId ??
         ((await store.getById(freshWithClient.id)) ?? latest).reservationId,
@@ -649,7 +818,9 @@ export async function handleInboundWhatsApp(
         Boolean(confirmation.handoff),
       updatedAt: nowIso(),
     };
-    await store.replaceConversation(updatedRecord);
+    await store.replaceConversation(
+      applyClientReservationUpsert(updatedRecord, confirmation.clientDirectoryUpsert),
+    );
 
     if (confirmation.kind === "confirmed" && confirmation.reservation) {
       await store.addEvent(
@@ -657,6 +828,16 @@ export async function handleInboundWhatsApp(
           reservationIdSummary: summarizeReservationId(confirmation.reservation.reservationId),
           proposalId: confirmation.proposal?.proposalId,
         }),
+      );
+    }
+
+    if (confirmation.clientDirectoryUpsert) {
+      await store.addEvent(
+        createEvent(
+          freshWithClient.id,
+          clientUpsertEventType(confirmation.clientDirectoryUpsert),
+          sanitizeClientUpsertPayload(confirmation.clientDirectoryUpsert),
+        ),
       );
     }
 
@@ -882,6 +1063,57 @@ export async function markConversationRead(
     updatedAt: nowIso(),
   });
   await store.addEvent(createEvent(id, "marked_read"));
+  return (await store.getById(id)) ?? updated;
+}
+
+export async function archiveConversation(
+  id: string,
+  agent = "admin",
+  reason?: string,
+  store: ConversationStore = getConversationStore(),
+) {
+  const record = await store.getById(id);
+
+  if (!record) {
+    throw new Error("Conversation not found");
+  }
+
+  const archivedAt = nowIso();
+  const updated = await store.replaceConversation({
+    ...record,
+    archivedAt,
+    archivedBy: agent,
+    archivedReason: reason?.slice(0, 180),
+    updatedAt: archivedAt,
+  });
+  await store.addEvent(
+    createEvent(id, "conversation_archived", {
+      agent,
+      reason: reason?.slice(0, 180),
+    }),
+  );
+  return (await store.getById(id)) ?? updated;
+}
+
+export async function unarchiveConversation(
+  id: string,
+  agent = "admin",
+  store: ConversationStore = getConversationStore(),
+) {
+  const record = await store.getById(id);
+
+  if (!record) {
+    throw new Error("Conversation not found");
+  }
+
+  const updated = await store.replaceConversation({
+    ...record,
+    archivedAt: undefined,
+    archivedBy: undefined,
+    archivedReason: undefined,
+    updatedAt: nowIso(),
+  });
+  await store.addEvent(createEvent(id, "conversation_unarchived", { agent }));
   return (await store.getById(id)) ?? updated;
 }
 

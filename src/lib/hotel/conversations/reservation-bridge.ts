@@ -1,6 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { upsertReservation } from "@/lib/hotel/application/demo-store";
 import {
+  upsertClientFromConfirmedReservation,
+  type ClientUpsertFromConfirmedReservationInput,
+  type ClientUpsertFromConfirmedReservationResult,
+} from "@/lib/hotel/clients";
+import {
   mapLegacyAvailabilityToDomain,
   toLegacyReservationRecord,
 } from "@/lib/hotel/application/integration-bridge";
@@ -37,6 +42,9 @@ export interface WhatsAppReservationBridgeDeps {
   now?: () => Date;
   buildSheetAdapter?: () => Promise<SheetAdapter>;
   upsertReservationRecord?: (reservation: ReservationRecord) => Promise<void>;
+  upsertClientFromConfirmedReservation?: (
+    input: ClientUpsertFromConfirmedReservationInput,
+  ) => Promise<ClientUpsertFromConfirmedReservationResult>;
 }
 
 export interface ReservationProposalOutcome {
@@ -52,6 +60,7 @@ export interface ReservationConfirmationOutcome {
   reply: string;
   proposal?: PendingReservationProposal;
   reservation?: ReservationRecord;
+  clientDirectoryUpsert?: ClientUpsertFromConfirmedReservationResult;
   handoff?: boolean;
   eventPayload?: Record<string, unknown>;
 }
@@ -122,17 +131,28 @@ function isoDate(year: number, month: number, day: number): string | undefined {
   ].join("-");
 }
 
-function parseDateRange(message: string): { checkIn: string; checkOut: string } | undefined {
+function resolveYear(rawYear: string | undefined, now: Date): number {
+  if (!rawYear || rawYear === "este ano") {
+    return now.getUTCFullYear();
+  }
+
+  return Number.parseInt(rawYear, 10);
+}
+
+function parseDateRange(
+  message: string,
+  now = new Date(),
+): { checkIn: string; checkOut: string } | undefined {
   const text = normalize(message);
   const sameMonth = text.match(
-    /\b(?:del|desde)\s+(\d{1,2})\s+(?:al|hasta)\s+(\d{1,2})\s+de\s+([a-z]+)\s+de\s+(\d{4})\b/,
+    /\b(?:del|desde)\s+(\d{1,2})\s+(?:al|hasta)\s+(\d{1,2})\s+de\s+([a-z]+)(?:\s+de\s+(\d{4}|este\s+ano))?\b/,
   );
 
   if (sameMonth) {
     const startDay = Number.parseInt(sameMonth[1], 10);
     const endDay = Number.parseInt(sameMonth[2], 10);
     const month = MONTHS[sameMonth[3]];
-    const year = Number.parseInt(sameMonth[4], 10);
+    const year = resolveYear(sameMonth[4], now);
     const checkIn = month ? isoDate(year, month, startDay) : undefined;
     const checkOut = month ? isoDate(year, month, endDay) : undefined;
 
@@ -140,7 +160,7 @@ function parseDateRange(message: string): { checkIn: string; checkOut: string } 
   }
 
   const explicitMonths = text.match(
-    /\b(?:del|desde)\s+(\d{1,2})\s+de\s+([a-z]+)\s+(?:al|hasta)\s+(\d{1,2})\s+de\s+([a-z]+)\s+de\s+(\d{4})\b/,
+    /\b(?:del|desde)\s+(\d{1,2})\s+de\s+([a-z]+)\s+(?:al|hasta)\s+(\d{1,2})\s+de\s+([a-z]+)(?:\s+de\s+(\d{4}|este\s+ano))?\b/,
   );
 
   if (explicitMonths) {
@@ -148,7 +168,7 @@ function parseDateRange(message: string): { checkIn: string; checkOut: string } 
     const startMonth = MONTHS[explicitMonths[2]];
     const endDay = Number.parseInt(explicitMonths[3], 10);
     const endMonth = MONTHS[explicitMonths[4]];
-    const year = Number.parseInt(explicitMonths[5], 10);
+    const year = resolveYear(explicitMonths[5], now);
     const checkIn = startMonth ? isoDate(year, startMonth, startDay) : undefined;
     const checkOut = endMonth ? isoDate(year, endMonth, endDay) : undefined;
 
@@ -161,6 +181,10 @@ function parseDateRange(message: string): { checkIn: string; checkOut: string } 
 function extractPetName(message: string, fallback?: string): string | undefined {
   const match =
     message.match(
+      /\b(?:mi\s+)?(?:mascota|perro|perra)\s+se\s+llama\s+([\p{L}'-]+(?:\s+[\p{L}'-]+){0,1})\b/iu,
+    ) ??
+    message.match(/\bse\s+llama\s+([\p{L}'-]+(?:\s+[\p{L}'-]+){0,1})\b/iu) ??
+    message.match(
       /\b(?:para|perro|perra|mascota|se llama)\s+([\p{L}'-]+(?:\s+[\p{L}'-]+){0,2})\s+(?:del|desde)\b/iu,
     ) ??
     message.match(/\b(?:para|perro|perra|mascota|se llama)\s+([\p{L}'-]+(?:\s+[\p{L}'-]+){0,2})\b/iu);
@@ -170,7 +194,10 @@ function extractPetName(message: string, fallback?: string): string | undefined 
     return undefined;
   }
 
-  return raw.replace(/\s+/g, " ");
+  return raw
+    .replace(/\b(y|busco|necesito|del|desde)\b.*$/iu, "")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function extractPetCount(message: string): number {
@@ -191,8 +218,9 @@ function extractPetCount(message: string): number {
 export function extractReservationRequestDetails(
   message: string,
   nlu: ConversationNluResult,
+  now = new Date(),
 ): ReservationRequestDetails | undefined {
-  const dateRange = parseDateRange(message);
+  const dateRange = parseDateRange(message, now);
   const petName = extractPetName(message, nlu.slots.petName);
 
   if (!dateRange || !petName) {
@@ -262,6 +290,15 @@ function proposalIsLive(
     proposal?.status === "proposed" &&
     new Date(proposal.expiresAt).getTime() > now.getTime()
   );
+}
+
+function buildFailedClientUpsertResult(error: unknown): ClientUpsertFromConfirmedReservationResult {
+  return {
+    kind: "failed",
+    clientStatus: "unknown",
+    warning: safeErrorCode(error),
+    source: "google_sheets_client_directory",
+  };
 }
 
 function proposalHasRequiredData(
@@ -363,7 +400,7 @@ export async function createPendingReservationProposal(input: {
     };
   }
 
-  const details = extractReservationRequestDetails(input.message, input.nlu);
+  const details = extractReservationRequestDetails(input.message, input.nlu, now);
   if (!details) {
     return {
       kind: "missing_data",
@@ -668,6 +705,32 @@ export async function confirmPendingReservationProposal(input: {
     });
   }
 
+  let clientDirectoryUpsert: ClientUpsertFromConfirmedReservationResult | undefined;
+  if (!recordWarning) {
+    try {
+      clientDirectoryUpsert = await (
+        input.deps?.upsertClientFromConfirmedReservation ??
+        upsertClientFromConfirmedReservation
+      )({
+        phoneE164: input.conversation.phoneE164,
+        phoneNormalized: input.conversation.phoneNormalized,
+        clientName:
+          input.conversation.clientName ??
+          input.conversation.displayName ??
+          input.conversation.customerName,
+        email: input.conversation.clientEmail,
+        reservationId: reservation.reservationId,
+        petName: proposal.petName,
+        checkIn: proposal.checkIn,
+        checkOut: proposal.checkOut,
+        source: "whatsapp_reservation",
+        now,
+      });
+    } catch (error) {
+      clientDirectoryUpsert = buildFailedClientUpsertResult(error);
+    }
+  }
+
   const confirmedProposal: PendingReservationProposal = {
     ...proposal,
     status: "confirmed",
@@ -678,6 +741,7 @@ export async function confirmPendingReservationProposal(input: {
     kind: "confirmed",
     proposal: confirmedProposal,
     reservation,
+    clientDirectoryUpsert,
     handoff: Boolean(recordWarning),
     reply: buildConfirmationReply(confirmedProposal),
     eventPayload: {
@@ -689,6 +753,16 @@ export async function confirmPendingReservationProposal(input: {
       sheetWriteSuccess: true,
       reservationRecordCreated: !recordWarning,
       postWriteWarning: recordWarning,
+      clientDirectoryUpsert: clientDirectoryUpsert
+        ? {
+            kind: clientDirectoryUpsert.kind,
+            clientStatus: clientDirectoryUpsert.clientStatus,
+            rowNumber: clientDirectoryUpsert.rowNumber,
+            sheetName: clientDirectoryUpsert.sheetName,
+            matchCount: clientDirectoryUpsert.matchCount,
+            warning: clientDirectoryUpsert.warning,
+          }
+        : undefined,
     },
   };
 }

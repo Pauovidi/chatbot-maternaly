@@ -19,6 +19,7 @@ describe("conversation NLU", () => {
     ["¿Mandáis fotos o vídeos?", "faq_photos_videos"],
     ["¿Tenéis sitio del 14 al 18 de abril?", "availability_request"],
     ["Quiero reservar para Luna del 10 al 15 de agosto", "availability_request"],
+    ["Mi mascota se llama Toby y busco del 29 al 31 de diciembre de este año", "availability_request"],
     ["si", "reservation_confirm"],
     ["Sí, confirma", "reservation_confirm"],
     ["Quiero cancelar mi reserva", "reservation_cancel"],
@@ -50,12 +51,31 @@ describe("conversation NLU", () => {
     "de acuerdo",
     "correcto",
     "anótala",
+    "si por favor",
+    "sí por favor",
+    "ok gracias",
+    "vale gracias",
+    "adelante por favor",
+    "confirmo reserva",
+    "confirmo la reserva",
+    "deja la reserva anotada",
+    "anótala por favor",
     "dejadla anotada",
     "déjala anotada",
     "reservad",
     "reserva",
   ])("detects %s as a contextual affirmative confirmation", (message) => {
     expect(isAffirmativeConfirmationUtterance(message)).toBe(true);
+  });
+
+  it("extracts slot-filling availability details from natural follow-up copy", () => {
+    const result = classifyConversationIntent(
+      "Mi mascota se llama Toby y busco del 29 al 31 de diciembre de este año",
+    );
+
+    expect(result.intent).toBe("availability_request");
+    expect(result.slots.petName).toBe("Toby");
+    expect(result.matchedSignals).toContain("availability_slot_filling");
   });
 
   it("answers general information without sending the conversation to human mode", () => {

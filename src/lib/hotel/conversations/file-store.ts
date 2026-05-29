@@ -88,6 +88,11 @@ function normalizeRecord(value: unknown): ConversationRecord | undefined {
     typeof record.pendingReservationProposal === "object"
       ? (record.pendingReservationProposal as ConversationRecord["pendingReservationProposal"])
       : undefined;
+  const pendingReservationContext =
+    record.pendingReservationContext &&
+    typeof record.pendingReservationContext === "object"
+      ? (record.pendingReservationContext as ConversationRecord["pendingReservationContext"])
+      : undefined;
 
   return {
     id: conversationId,
@@ -149,6 +154,11 @@ function normalizeRecord(value: unknown): ConversationRecord | undefined {
         ? record.clientSheetRow
         : undefined,
     pendingReservationProposal,
+    pendingReservationContext,
+    archivedAt: typeof record.archivedAt === "string" ? record.archivedAt : undefined,
+    archivedBy: typeof record.archivedBy === "string" ? record.archivedBy : undefined,
+    archivedReason:
+      typeof record.archivedReason === "string" ? record.archivedReason : undefined,
     requiresManualReview: Boolean(record.requiresManualReview),
     mode: record.mode === "human" ? "human" : "bot",
     humanRequested: Boolean(record.humanRequested),

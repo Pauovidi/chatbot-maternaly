@@ -6,6 +6,7 @@ import {
   Bot,
   CheckCheck,
   Circle,
+  Archive,
   ExternalLink,
   Film,
   MessageSquareText,
@@ -35,6 +36,7 @@ const filters: Array<{ label: string; value: FilterMode }> = [
   { label: "Humano", value: "human" },
   { label: "Bot", value: "bot" },
   { label: "Leídas", value: "read" },
+  { label: "Archivadas", value: "archived" },
 ];
 
 function formatDate(value?: string) {
@@ -55,6 +57,9 @@ function formatEventType(value: string) {
     auto_reply_skipped_human_mode: "Bot pausado por modo humano",
     bot_reply_sent: "Respuesta automática enviada",
     conversation_created: "Conversación creada",
+    conversation_archived: "Conversación archivada",
+    conversation_unarchived: "Conversación restaurada",
+    conversation_reopened_from_inbound: "Reabierta por WhatsApp entrante",
     human_requested: "Handoff solicitado",
     client_directory_ambiguous: "Match ambiguo de cliente",
     client_directory_blocked: "Cliente bloqueado en directorio",
@@ -147,8 +152,17 @@ export function ConversationsPanel({
       return;
     }
 
+    if (timeline.scrollHeight <= timeline.clientHeight + 1) {
+      timeline.scrollTop = 0;
+      return;
+    }
+
     timeline.scrollTo({ top: timeline.scrollHeight, behavior });
   }
+
+  useEffect(() => {
+    requestAnimationFrame(() => scrollTimelineToBottom("auto"));
+  }, [selected?.id]);
 
   const refresh = useCallback(async (
     nextMode?: FilterMode,
@@ -267,14 +281,14 @@ export function ConversationsPanel({
     run(() => refresh(mode, nextQuery, { force: true }));
   }
 
-  async function postAction(path: string, body?: unknown) {
+  async function postAction(path: string, body?: unknown, method = "POST") {
     const response = await fetch(path, {
-      method: "POST",
+      method,
       headers: {
         "Content-Type": "application/json",
       },
       credentials: "same-origin",
-      body: body ? JSON.stringify(body) : "{}",
+      body: body ? JSON.stringify(body) : method === "DELETE" ? undefined : "{}",
     });
     const data = (await response.json()) as { ok?: boolean; error?: string };
 
@@ -334,6 +348,27 @@ export function ConversationsPanel({
         { kind: "video" },
       );
       await refresh(undefined, undefined, { force: true });
+    });
+  }
+
+  function archiveSelectedConversation(conversation: ConversationRecord) {
+    run(async () => {
+      await postAction(
+        `/api/conversations/${encodeURIComponent(conversation.id)}/archive`,
+        { reason: "inbox_cleanup" },
+      );
+      await refresh(undefined, undefined, { force: true });
+    });
+  }
+
+  function unarchiveSelectedConversation(conversation: ConversationRecord) {
+    run(async () => {
+      await postAction(
+        `/api/conversations/${encodeURIComponent(conversation.id)}/archive`,
+        undefined,
+        "DELETE",
+      );
+      await refresh("archived", undefined, { force: true });
     });
   }
 
@@ -482,7 +517,16 @@ export function ConversationsPanel({
                       Marcar como leído
                     </button>
                   ) : null}
-                  {selected.mode === "bot" ? (
+                  {selected.archivedAt ? (
+                    <button
+                      type="button"
+                      onClick={() => unarchiveSelectedConversation(selected)}
+                      disabled={isPending}
+                    >
+                      <RefreshCcw size={16} />
+                      Restaurar
+                    </button>
+                  ) : selected.mode === "bot" ? (
                     <button
                       type="button"
                       onClick={() => setConversationMode(selected, "human")}
@@ -501,6 +545,16 @@ export function ConversationsPanel({
                       Devolver al bot
                     </button>
                   )}
+                  {!selected.archivedAt ? (
+                    <button
+                      type="button"
+                      onClick={() => archiveSelectedConversation(selected)}
+                      disabled={isPending}
+                    >
+                      <Archive size={16} />
+                      Archivar
+                    </button>
+                  ) : null}
                 </div>
               </header>
 
@@ -573,7 +627,7 @@ export function ConversationsPanel({
                     className="conversation-send-button"
                     type="button"
                     onClick={() => sendReply(selected)}
-                    disabled={isPending || !reply.trim()}
+                    disabled={isPending || !reply.trim() || Boolean(selected.archivedAt)}
                   >
                     <Send size={17} />
                     Enviar
@@ -582,7 +636,7 @@ export function ConversationsPanel({
                     className="conversation-video-mock-button"
                     type="button"
                     onClick={() => requestVideoMock(selected)}
-                    disabled={isPending}
+                    disabled={isPending || Boolean(selected.archivedAt)}
                     title="Mock: requiere almacenamiento de archivos"
                   >
                     <Film size={17} />

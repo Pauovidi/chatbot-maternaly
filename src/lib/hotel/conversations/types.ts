@@ -35,6 +35,19 @@ export interface PendingReservationProposal {
   failureReason?: string;
 }
 
+export interface PendingReservationContext {
+  contextId: string;
+  conversationId: string;
+  phoneNormalized: string;
+  status: "collecting" | "fulfilled" | "expired" | "cancelled";
+  source: "whatsapp";
+  requestedAt: string;
+  updatedAt: string;
+  expiresAt: string;
+  requestedFields: Array<"petName" | "dates">;
+  createdFromMessageId: string;
+}
+
 export interface Conversation {
   id: string;
   phoneE164: string;
@@ -58,6 +71,10 @@ export interface Conversation {
   clientSheetName?: string;
   clientSheetRow?: number;
   pendingReservationProposal?: PendingReservationProposal;
+  pendingReservationContext?: PendingReservationContext;
+  archivedAt?: string;
+  archivedBy?: string;
+  archivedReason?: string;
   requiresManualReview?: boolean;
   mode: ConversationMode;
   humanRequested: boolean;
@@ -112,7 +129,7 @@ export interface ConversationListFilters {
   channel?: string;
   unreadOnly?: boolean;
   limit?: number;
-  mode?: "all" | ConversationMode | "pending" | "read";
+  mode?: "all" | ConversationMode | "pending" | "read" | "archived";
 }
 
 export interface ConversationStats {
@@ -121,6 +138,7 @@ export interface ConversationStats {
   pending: number;
   human: number;
   read: number;
+  archived: number;
 }
 
 export interface ConversationDashboard {

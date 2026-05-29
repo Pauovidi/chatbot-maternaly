@@ -96,13 +96,23 @@ export function isAffirmativeConfirmationUtterance(message: string): boolean {
   }
 
   return (
-    /^(s+i+|claro|vale|ok|okay|perfecto|adelante|confirm(a|o|ar)|correcto|reservad|reserva)$/.test(
+    /^(s+i+|claro|vale|ok|okay|perfecto|adelante|confirm(a|o|ar)|correcto|reservad|reserva)(\s+(por favor|gracias))?$/.test(
       normalized,
     ) ||
     [
       "si confirma",
+      "si por favor",
+      "si gracias",
+      "vale gracias",
+      "ok gracias",
+      "perfecto gracias",
+      "adelante por favor",
+      "confirmo reserva",
+      "confirmo la reserva",
       "de acuerdo",
       "anotala",
+      "anotala por favor",
+      "deja la reserva anotada",
       "dejala anotada",
       "dejadla anotada",
     ].includes(normalized)
@@ -130,9 +140,11 @@ function extractSlots(rawText: string, normalized: string): ConversationSlots {
   const phone = rawText.match(/(?:\+34\s*)?(?:\d[\s.-]?){9,}/)?.[0]?.trim();
   const reservationId = rawText.match(/\b(?:res|reserva)[-_ ]?[a-z0-9-]{4,}\b/i)?.[0];
   const petMatch =
-    rawText.match(/\b(?:para|perro|perra|mascota|se llama)\s+([A-ZÁÉÍÓÚÑ][\p{L}'-]{1,24})/u) ??
+    rawText.match(/\b(?:mi\s+)?(?:mascota|perro|perra)\s+se\s+llama\s+([A-ZÁÉÍÓÚÑ][\p{L}'-]{1,24})/u) ??
+    rawText.match(/\bse\s+llama\s+([A-ZÁÉÍÓÚÑ][\p{L}'-]{1,24})/u) ??
+    rawText.match(/\b(?:para|perro|perra|mascota)\s+([A-ZÁÉÍÓÚÑ][\p{L}'-]{1,24})/u) ??
     rawText.match(/\b([A-ZÁÉÍÓÚÑ][\p{L}'-]{1,24})\s+(?:del|desde)\b/u);
-  const dateRange = normalized.match(/\b(?:del|desde)\s+([0-9]{1,2}(?:\s+de\s+\w+)?)\s+(?:al|hasta)\s+([0-9]{1,2}(?:\s+de\s+\w+)?)\b/);
+  const dateRange = normalized.match(/\b(?:del|desde)\s+([0-9]{1,2}(?:\s+de\s+\w+)?)\s+(?:al|hasta)\s+([0-9]{1,2}(?:\s+de\s+\w+)?(?:\s+de\s+(?:\d{4}|este\s+ano))?)\b/);
 
   return {
     email,
@@ -233,6 +245,15 @@ export function classifyConversationIntent(message: string): ConversationNluResu
   if (hasAny(normalized, ["quiero reservar", "reservar", "reserva para", "plaza para"])) {
     matchedSignals.push("reservation_start");
     return result(slots.checkIn || slots.checkOut ? "availability_request" : "reservation_start");
+  }
+
+  if (
+    (hasAny(normalized, ["busco", "necesito plaza", "necesito sitio"]) ||
+      matchAny(normalized, [/\b(?:del|desde)\s+\d{1,2}\s+(?:al|hasta)\s+\d{1,2}\b/])) &&
+    (slots.petName || slots.checkIn || slots.checkOut)
+  ) {
+    matchedSignals.push("availability_slot_filling");
+    return result("availability_request", "medium");
   }
 
   if (

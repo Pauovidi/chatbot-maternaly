@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { createStaticClientDirectory } from "@/lib/hotel/clients";
 import {
   ensureDemoConversationSeed,
+  archiveConversation,
   handleInboundWhatsApp,
   markConversationRead,
   RESET_CONVERSATIONS_CONFIRMATION,
@@ -11,6 +12,7 @@ import {
   sendManualReply,
   setConversationMode,
   shouldAutoSeedConversations,
+  unarchiveConversation,
 } from "./service";
 import {
   createEmptyConversationSnapshot,
@@ -596,5 +598,49 @@ describe("conversation service", () => {
     expect(human.mode).toBe("human");
     expect(read.unreadCount).toBe(0);
     expect(read.humanRequested).toBe(false);
+  });
+
+  it("archives conversations without deleting history and restores them on demand", async () => {
+    const store = new MemoryConversationStore();
+    const inbound = await handleInboundWhatsApp(
+      { from: "+34612345678", body: "Hola, quiero información" },
+      store,
+    );
+
+    const archived = await archiveConversation(inbound.conversation.id, "admin", "qa_cleanup", store);
+
+    expect(archived.archivedAt).toBeDefined();
+    expect(archived.messages.length).toBeGreaterThan(0);
+    expect(archived.events.some((event) => event.eventType === "conversation_archived")).toBe(true);
+    expect(await store.list()).toHaveLength(0);
+    expect(await store.list({ mode: "archived" })).toHaveLength(1);
+
+    const restored = await unarchiveConversation(inbound.conversation.id, "admin", store);
+
+    expect(restored.archivedAt).toBeUndefined();
+    expect(restored.events.some((event) => event.eventType === "conversation_unarchived")).toBe(true);
+    expect(await store.list()).toHaveLength(1);
+  });
+
+  it("reopens an archived conversation automatically when WhatsApp receives a new message", async () => {
+    const store = new MemoryConversationStore();
+    const inbound = await handleInboundWhatsApp(
+      { from: "+34612345678", body: "Hola, quiero información" },
+      store,
+    );
+    await archiveConversation(inbound.conversation.id, "admin", "qa_cleanup", store);
+
+    const reopened = await handleInboundWhatsApp(
+      { from: "+34612345678", body: "Hola de nuevo" },
+      store,
+    );
+
+    expect(reopened.conversation.archivedAt).toBeUndefined();
+    expect(reopened.conversation.messages.length).toBeGreaterThan(2);
+    expect(
+      reopened.conversation.events.some(
+        (event) => event.eventType === "conversation_reopened_from_inbound",
+      ),
+    ).toBe(true);
   });
 });

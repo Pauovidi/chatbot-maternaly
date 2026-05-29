@@ -302,7 +302,7 @@ describe("conversation end-to-end policy QA", () => {
     expect(start.intent).toBe("availability_request");
     expect(start.slots.petName).toBe("Kira");
     expect(start.slots.checkIn).toBe("29");
-    expect(start.slots.checkOut).toBe("31 de diciembre");
+    expect(start.slots.checkOut).toBe("31 de diciembre de 2026");
     expect(confirm.intent).toBe("reservation_confirm");
     expect(confirm.handoff).toBe(true);
     expect(confirm.reply).toContain("propuesta válida revisada");

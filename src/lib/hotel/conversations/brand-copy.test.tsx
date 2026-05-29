@@ -83,6 +83,7 @@ describe("conversations panel visible demo copy", () => {
         read: conversations.filter(
           (conversation) => conversation.unreadCount === 0 && !conversation.humanRequested,
         ).length,
+        archived: 0,
       },
     };
 
@@ -126,6 +127,7 @@ describe("conversations panel visible demo copy", () => {
         human: 0,
         unread: 0,
         read: conversations.length,
+        archived: 0,
       },
     };
     const sandbox = renderToStaticMarkup(
@@ -170,6 +172,7 @@ describe("conversations panel visible demo copy", () => {
         human: 1,
         unread: 1,
         read: conversations.length - 1,
+        archived: 0,
       },
     };
 
@@ -224,6 +227,7 @@ describe("conversations panel visible demo copy", () => {
         human: 0,
         unread: 0,
         read: conversations.length,
+        archived: 0,
       },
     };
     const panelHtml = renderToStaticMarkup(

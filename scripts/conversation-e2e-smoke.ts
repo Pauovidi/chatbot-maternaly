@@ -1,4 +1,5 @@
 import { createStaticClientDirectory } from "@/lib/hotel/clients";
+import type { ClientUpsertFromConfirmedReservationInput } from "@/lib/hotel/clients";
 import { buildEntryLogRecord } from "@/lib/hotel/application/entry-log";
 import {
   buildTwilioMessageResponse,
@@ -161,6 +162,7 @@ function makeBridgeDeps() {
     checks: 0,
     writes: 0,
     reservations: [] as ReservationRecord[],
+    clientUpserts: [] as ClientUpsertFromConfirmedReservationInput[],
   };
   const adapter: SheetAdapter = {
     async readMonth() {
@@ -236,6 +238,18 @@ function makeBridgeDeps() {
       async upsertReservationRecord(reservation: ReservationRecord) {
         counters.reservations.push(structuredClone(reservation));
       },
+      async upsertClientFromConfirmedReservation(input: ClientUpsertFromConfirmedReservationInput) {
+        counters.clientUpserts.push(structuredClone(input));
+        return {
+          kind: "created_pending_name" as const,
+          clientStatus: "known" as const,
+          clientName: "Contacto WhatsApp ****9993",
+          rowNumber: 9003,
+          sheetName: "CLIENTES_QA",
+          warning: "client_name_pending_review",
+          source: "google_sheets_client_directory" as const,
+        };
+      },
     },
   };
 }
@@ -269,11 +283,11 @@ async function runDirectSmoke() {
       expectReply: "horarios",
     },
     {
-      label: "availability",
+      label: "availability-context-start",
       from: "whatsapp:+34600009993",
-      body: "Quiero reservar para Kira QA del 29 al 31 de diciembre de 2026",
+      body: "quiero consultar disponibilidad ¿es posible?",
       expectMode: "bot",
-      expectReply: "Tenemos disponibilidad",
+      expectReply: "fechas completas",
     },
     {
       label: "confirm-without-proposal",
@@ -341,16 +355,50 @@ async function runDirectSmoke() {
     });
   }
 
+  const contextualProposal = await handleInboundWhatsApp(
+    {
+      from: "whatsapp:+34600009993",
+      to: SANDBOX_TO,
+      body: "Mi mascota se llama Toby QA y busco del 29 al 31 de diciembre de este año",
+      messageSid: "SM_QA_bridge_slot_fill",
+      rawPayload: {
+        From: "whatsapp:+34600009993",
+        To: SANDBOX_TO,
+        Body: "Mi mascota se llama Toby QA y busco del 29 al 31 de diciembre de este año",
+        MessageSid: "SM_QA_bridge_slot_fill",
+      },
+    },
+    store,
+    knownDirectory,
+    deps,
+  );
+  rows.push({
+    label: "contextual-slot-fill-proposal",
+    status:
+      contextualProposal.conversation.pendingReservationProposal?.status === "proposed" &&
+      contextualProposal.conversation.pendingReservationProposal.petName === "Toby QA" &&
+      counters.writes === 0
+        ? "OK"
+        : "FAIL",
+    intent: "availability_request",
+    mode: contextualProposal.conversation.mode,
+    twiml: isTwiml(contextualProposal.twiml) ? "valid" : "invalid",
+    events: contextualProposal.conversation.events.map((event) => event.eventType).join(","),
+    entryLogAffected: "no",
+    clientUpsertAffected: "no",
+    reply: summarizeReply(contextualProposal.botReply?.body),
+  });
+
   const confirmed = await handleInboundWhatsApp(
     {
       from: "whatsapp:+34600009993",
       to: SANDBOX_TO,
-      body: "confirmo",
+      body: "si por favor",
       messageSid: "SM_QA_bridge_confirm",
       rawPayload: {
         From: "whatsapp:+34600009993",
         To: SANDBOX_TO,
-        Body: "confirmo",
+        Body: "si por favor",
         MessageSid: "SM_QA_bridge_confirm",
       },
     },
@@ -366,6 +414,7 @@ async function runDirectSmoke() {
       confirmed.conversation.pendingReservationProposal?.status === "confirmed" &&
       Boolean(confirmed.conversation.reservationId) &&
       counters.writes === 1 &&
+      counters.clientUpserts.length === 1 &&
       entryLog?.source === "chatbot"
         ? "OK"
         : "FAIL",
@@ -374,6 +423,7 @@ async function runDirectSmoke() {
     twiml: isTwiml(confirmed.twiml) ? "valid" : "invalid",
     events: confirmed.conversation.events.map((event) => event.eventType).join(","),
     entryLogAffected: entryLog ? "yes" : "no",
+    clientUpsertAffected: counters.clientUpserts.length > 0 ? "yes" : "no",
     reply: summarizeReply(confirmed.botReply?.body),
   });
 

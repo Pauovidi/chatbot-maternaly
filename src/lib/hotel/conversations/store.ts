@@ -39,6 +39,13 @@ export function filterConversationRecords(
 
   const filtered = records
     .filter((record) => {
+      if (filters.mode === "archived") {
+        return Boolean(record.archivedAt);
+      }
+
+      return !record.archivedAt;
+    })
+    .filter((record) => {
       if (filters.mode === "bot" || filters.mode === "human") {
         return record.mode === filters.mode;
       }

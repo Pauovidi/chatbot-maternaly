@@ -10,8 +10,8 @@ const sampleEmail = `Asunto: Solicitud de reserva web
 Hola,
 Quería reservar para Luna, una golden retriever muy tranquila.
 Soy Ana López y mi teléfono es 612 345 678.
-Entrada: 12/04/2026 por la mañana.
-Salida: 15/04/2026 por la tarde.
+Entrada: 29/12/2026 por la mañana.
+Salida: 31/12/2026 por la tarde.
 Sería 1 perro.
 Notas: trae su manta y come pienso propio.
 `;

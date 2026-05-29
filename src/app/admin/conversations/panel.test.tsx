@@ -18,6 +18,7 @@ function dashboardWith(conversation: ConversationRecord): ConversationDashboard 
       human: conversation.mode === "human" ? 1 : 0,
       unread: conversation.unreadCount > 0 ? 1 : 0,
       read: conversation.unreadCount === 0 && !conversation.humanRequested ? 1 : 0,
+      archived: conversation.archivedAt ? 1 : 0,
     },
   };
 }
@@ -115,5 +116,19 @@ describe("conversation panel operational UI", () => {
     expect(source).toContain("visibilitychange");
     expect(source).toContain("setReply(\"\")");
     expect(source).toContain("requestAnimationFrame");
+  });
+
+  it("renders archive controls and preserves chronological timeline markup", () => {
+    const conversation = buildConversationSeed("2026-05-06T08:00:00.000Z").conversations[0];
+    const html = renderToStaticMarkup(
+      <ConversationsPanel initialDashboard={dashboardWith(conversation)} twilioProviderMode="sandbox" />,
+    );
+    const source = readFileSync(join(process.cwd(), "src/app/admin/conversations/panel.tsx"), "utf8");
+
+    expect(html).toContain("Archivadas");
+    expect(html).toContain("Archivar");
+    expect(source).toContain("conversation_archived");
+    expect(source).toContain("timeline.scrollHeight <= timeline.clientHeight");
+    expect(source).toContain("left.createdAt.localeCompare(right.createdAt)");
   });
 });

@@ -1,6 +1,11 @@
 import { listEntryLogRecords } from "@/lib/hotel/application/entry-log";
 import { requestReservationCancellation } from "@/lib/hotel/application/operations";
-import { createStaticClientDirectory } from "@/lib/hotel/clients";
+import {
+  clearClientDirectoryRow,
+  createStaticClientDirectory,
+  upsertClientFromConfirmedReservation,
+  type ClientUpsertFromConfirmedReservationResult,
+} from "@/lib/hotel/clients";
 import { handleInboundWhatsApp } from "@/lib/hotel/conversations/service";
 import {
   createEmptyConversationSnapshot,
@@ -109,7 +114,7 @@ function summarizeReservationId(value: string): string {
 }
 
 function assertSyntheticInput(input: { from: string; petName: string }) {
-  if (input.from !== "whatsapp:+34600009991" || !/^Kira QA \d+$/.test(input.petName)) {
+  if (input.from !== "whatsapp:+34600009991" || !/^Toby QA \d+$/.test(input.petName)) {
     throw new Error("Smoke real abortado: los datos no parecen sinteticos QA.");
   }
 }
@@ -123,7 +128,7 @@ async function main() {
   const store = new MemoryConversationStore();
   const suffix = String(Date.now()).slice(-6);
   const from = "whatsapp:+34600009991";
-  const petName = `Kira QA ${suffix}`;
+  const petName = `Toby QA ${suffix}`;
   assertSyntheticInput({ from, petName });
   if (
     process.env.HOTEL_QA_CLEANUP_REAL_SHEETS !== "true" &&
@@ -133,7 +138,50 @@ async function main() {
       "Smoke real abortado: define HOTEL_QA_CLEANUP_REAL_SHEETS=true o HOTEL_QA_KEEP_REAL_SHEETS_WRITE=true.",
     );
   }
-  const requestText = `Quiero reservar para ${petName} del 29 al 31 de diciembre de 2026`;
+  if (
+    process.env.HOTEL_QA_ALLOW_REAL_CLIENTS_WRITE === "true" &&
+    process.env.HOTEL_QA_CLEANUP_REAL_CLIENTS !== "true" &&
+    process.env.HOTEL_QA_KEEP_REAL_CLIENTS_WRITE !== "true"
+  ) {
+    throw new Error(
+      "Smoke real abortado: define HOTEL_QA_CLEANUP_REAL_CLIENTS=true o HOTEL_QA_KEEP_REAL_CLIENTS_WRITE=true.",
+    );
+  }
+  const requestText = `Mi mascota se llama ${petName} y busco del 29 al 31 de diciembre de este año`;
+  let clientUpsertResult: ClientUpsertFromConfirmedReservationResult | undefined;
+  const reservationBridgeDeps = {
+    async upsertClientFromConfirmedReservation(
+      input: Parameters<typeof upsertClientFromConfirmedReservation>[0],
+    ) {
+      if (process.env.HOTEL_QA_ALLOW_REAL_CLIENTS_WRITE !== "true") {
+        return {
+          kind: "skipped_invalid_phone" as const,
+          clientStatus: "unknown" as const,
+          warning: "real_clients_write_not_enabled_for_smoke",
+          source: "google_sheets_client_directory" as const,
+        };
+      }
+
+      clientUpsertResult = await upsertClientFromConfirmedReservation({
+        ...input,
+        clientName: `SMP QA Conversacional ${suffix}`,
+        email: `qa-conversacional-${suffix}@example.test`,
+      });
+      return clientUpsertResult;
+    },
+  };
+
+  await handleInboundWhatsApp(
+    {
+      from,
+      to: "whatsapp:+14155238886",
+      body: "quiero consultar disponibilidad ¿es posible?",
+      messageSid: `SM_QA_REAL_CONTEXT_${suffix}`,
+    },
+    store,
+    createStaticClientDirectory([]),
+    reservationBridgeDeps,
+  );
 
   const proposal = await handleInboundWhatsApp(
     {
@@ -144,6 +192,7 @@ async function main() {
     },
     store,
     createStaticClientDirectory([]),
+    reservationBridgeDeps,
   );
 
   if (proposal.conversation.pendingReservationProposal?.status !== "proposed") {
@@ -154,11 +203,12 @@ async function main() {
     {
       from,
       to: "whatsapp:+14155238886",
-      body: "confirmo",
+      body: "si por favor",
       messageSid: `SM_QA_REAL_CONFIRM_${suffix}`,
     },
     store,
     createStaticClientDirectory([]),
+    reservationBridgeDeps,
   );
   const reservationId = confirmed.conversation.reservationId;
 
@@ -179,6 +229,10 @@ async function main() {
       status: "OK",
       reservationId: summarizeReservationId(reservationId),
       entryLog: "yes",
+      clientUpsert:
+        process.env.HOTEL_QA_ALLOW_REAL_CLIENTS_WRITE === "true"
+          ? clientUpsertResult?.kind ?? "missing"
+          : "skipped",
       source: entry.source,
       action: entry.action,
       gestetStatus: entry.gestetStatus,
@@ -188,6 +242,15 @@ async function main() {
   if (process.env.HOTEL_QA_CLEANUP_REAL_SHEETS === "true") {
     await requestReservationCancellation(reservationId);
     console.log("[ok] cleanup requested for synthetic reservation");
+  }
+
+  if (
+    process.env.HOTEL_QA_CLEANUP_REAL_CLIENTS === "true" &&
+    clientUpsertResult?.rowNumber &&
+    clientUpsertResult.sheetName
+  ) {
+    await clearClientDirectoryRow(clientUpsertResult.rowNumber, clientUpsertResult.sheetName);
+    console.log("[ok] cleanup requested for synthetic CLIENTES row");
   }
 }
 
