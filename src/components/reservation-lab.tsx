@@ -28,13 +28,13 @@ const DEFAULT_SHEETS_STATUS: GoogleSheetsConfigStatus = {
 
 const reviewFlagLabels: Record<string, string> = {
   invalid_slot: "Hora fuera de franja operativa",
-  falta_nombre_perro: "Falta nombre de la mascota",
+  falta_nombre_perro: "Falta servicio o sesión",
   falta_telefono: "Falta teléfono",
   falta_fecha_entrada: "Falta fecha de entrada",
   falta_fecha_salida: "Falta fecha de salida",
   falta_turno_entrada: "Falta turno de entrada",
   falta_turno_salida: "Falta turno de salida",
-  numero_perros_ambiguous: "Número de mascotas ambiguo",
+  numero_perros_ambiguous: "Número de personas ambiguo",
   telefono_no_normalizado: "Teléfono no normalizado",
   fecha_incompleta: "Fecha incompleta",
   requiere_revision_manual: "Revisión manual",
@@ -291,7 +291,7 @@ export function ReservationLab({
                 </dd>
               </div>
               <div className="ops-review-list-wide">
-                <dt>Mascota/s</dt>
+                <dt>Servicio/sesión</dt>
                 <dd>
                   {result.parsed.pets && result.parsed.pets.length > 0 ? (
                     <div className="ops-pet-list">

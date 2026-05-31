@@ -42,7 +42,7 @@ export default async function AdminPage() {
           <h2 className="demo-section-title">Panel de conversaciones WhatsApp</h2>
           <p className="page-description">
             Abre el inbox con conversaciones demo, handoff humano, modo bot y
-            respuesta manual por Twilio WhatsApp en Mock, Sandbox o Real según configuración.
+            respuesta manual por WhatsApp en modo mock o YCloud según configuración.
           </p>
         </div>
         <Link className="demo-button demo-button-primary" href="/admin/conversations">

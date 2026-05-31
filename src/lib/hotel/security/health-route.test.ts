@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { GET } from "@/app/api/health/route";
 
 describe("health route", () => {
@@ -6,15 +6,13 @@ describe("health route", () => {
 
   afterEach(() => {
     process.env = { ...previousEnv };
+    vi.unstubAllEnvs();
   });
 
-  it("returns app, Twilio and persistence status without secrets", async () => {
-    process.env.NODE_ENV = "production";
-    process.env.HOTEL_CONVERSATIONS_MOCK_TWILIO = "false";
-    process.env.TWILIO_ACCOUNT_SID = "AC_test";
-    process.env.TWILIO_AUTH_TOKEN = "super-secret-token";
-    process.env.TWILIO_WHATSAPP_FROM = "whatsapp:+34600111222";
-    process.env.TWILIO_WHATSAPP_PROVIDER_MODE = "real";
+  it("returns app, WhatsApp and persistence status without secrets", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    process.env.WHATSAPP_PROVIDER = "ycloud";
+    process.env.YCLOUD_API_KEY = "super-secret-token";
     process.env.DATABASE_URL = "postgres://user:password@example.test/db";
     process.env.HOTEL_PERSISTENCE_PROVIDER = "postgres";
 
@@ -26,12 +24,11 @@ describe("health route", () => {
     expect(json.ok).toBe(true);
     expect(json.whatsapp).toEqual(
       expect.objectContaining({
-        provider: "twilio",
-        mode: "real",
-        mock: false,
+        provider: "ycloud",
+        ycloudConfigured: true,
       }),
     );
-    expect(json.persistence.provider).toBe("postgres");
+    expect(json.database.provider).toBe("postgres");
     expect(serialized).not.toContain("super-secret-token");
     expect(serialized).not.toContain("password@example");
   });

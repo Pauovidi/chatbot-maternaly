@@ -33,7 +33,7 @@ const initialMessages: ChatMessage[] = [
   {
     id: 1,
     role: "bot",
-    text: "Hola, soy el asistente FAQ de la demo. Respondo con un catálogo controlado y, si la consulta necesita disponibilidad real o revisión humana, te lo indico sin improvisar.",
+    text: "Hola, soy el asistente FAQ de Maternaly. Respondo con un catálogo controlado y, si la consulta necesita disponibilidad real o revisión humana, te lo indico sin improvisar.",
   },
 ];
 
@@ -227,7 +227,7 @@ export function FaqChatDemo({
         <textarea
           id="faq-question"
           className="demo-textarea demo-textarea-chat"
-          placeholder="Escribe aquí una duda del cliente: precios, vacunas, fechas, comportamiento..."
+          placeholder="Escribe aquí una duda del cliente: servicios, sedes, horarios, pagos o facturas..."
           value={question}
           onChange={(event) => setQuestion(event.target.value)}
           rows={4}
@@ -240,7 +240,7 @@ export function FaqChatDemo({
             className="demo-button demo-button-secondary"
             type="button"
             onClick={() =>
-              sendQuestion("Mi perro es muy especial, te puedo llamar y contarte")
+              sendQuestion("Necesito hablar con una persona del equipo")
             }
           >
             Ver derivación a humano

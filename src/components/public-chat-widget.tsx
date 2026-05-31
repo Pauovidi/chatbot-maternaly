@@ -3,30 +3,28 @@
 import { MessageCircle, RotateCcw, Send, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import {
-  getPublicChatWelcomeMessage,
-  PUBLIC_CHAT_QUICK_ACTIONS,
-  resolvePublicChatReply,
-} from "@/lib/hotel/faq/public-chat";
-import type { FaqAction, FaqRuntimeLinks } from "@/lib/hotel/faq";
+  getMaternalyChatWelcomeMessage,
+  MATERNALY_CHAT_QUICK_ACTIONS,
+  resolveMaternalyChatReply,
+} from "@/lib/maternaly/public-chat";
+import type { MaternalyChatAction } from "@/lib/maternaly/public-chat";
 
 type ChatMessage = {
   role: "user" | "assistant";
   text: string;
-  actions?: FaqAction[];
+  actions?: MaternalyChatAction[];
 };
 
 interface PublicChatWidgetProps {
   floating?: boolean;
-  runtimeLinks?: Partial<FaqRuntimeLinks>;
 }
 
 function getInitialMessages(): ChatMessage[] {
-  return [{ role: "assistant", text: getPublicChatWelcomeMessage() }];
+  return [{ role: "assistant", text: getMaternalyChatWelcomeMessage() }];
 }
 
 export function PublicChatWidget({
   floating = false,
-  runtimeLinks,
 }: PublicChatWidgetProps) {
   const timeoutRef = useRef<number | null>(null);
   const messagesContainerRef = useRef<HTMLDivElement | null>(null);
@@ -89,7 +87,7 @@ export function PublicChatWidget({
   }
 
   function queueAssistantReply(text: string) {
-    const reply = resolvePublicChatReply(text, runtimeLinks);
+    const reply = resolveMaternalyChatReply(text);
 
     timeoutRef.current = window.setTimeout(() => {
       setMessages((prev) => [
@@ -122,9 +120,9 @@ export function PublicChatWidget({
       <div className="flex items-center justify-between border-b border-black/8 bg-[#fffaf1] px-5 py-4">
         <div>
           <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[#8d6b51]">
-            Chat web
+            WhatsApp V1
           </p>
-          <p className="text-sm font-semibold text-[#201911]">Hotel canino</p>
+          <p className="text-sm font-semibold text-[#201911]">Maternaly</p>
         </div>
         <div className="flex items-center gap-2">
           <button
@@ -193,7 +191,7 @@ export function PublicChatWidget({
           Preguntas rápidas
         </p>
         <div className="mb-4 flex flex-wrap gap-2">
-          {PUBLIC_CHAT_QUICK_ACTIONS.map((action) => (
+          {MATERNALY_CHAT_QUICK_ACTIONS.map((action) => (
             <button
               key={action}
               type="button"
@@ -217,7 +215,7 @@ export function PublicChatWidget({
             className="h-12 flex-1 rounded-2xl border border-black/10 bg-[#fffdf8] px-4 text-sm text-[#201911] outline-none transition-colors placeholder:text-[#8d6b51] focus:border-[#b98f67]"
             value={input}
             onChange={(event) => setInput(event.target.value)}
-            placeholder="Escribe tu duda sobre el hotel canino"
+            placeholder="Escribe tu duda sobre servicios Maternaly"
             disabled={loading}
           />
           <button

@@ -2,7 +2,7 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { POST as postTwilioWebhook } from "../../../app/api/twilio/whatsapp/route";
 import { POST as postConversationsReset } from "../../../app/api/conversations/reset/route";
@@ -20,6 +20,7 @@ describe("conversations security", () => {
   let tempDir: string | undefined;
 
   afterEach(() => {
+    vi.unstubAllEnvs();
     resetConversationStoreForTests();
     delete process.env.TWILIO_WEBHOOK_AUTH_TOKEN;
     delete process.env.VERCEL_ENV;
@@ -122,7 +123,7 @@ describe("conversations security", () => {
         body: JSON.stringify({}),
       }),
     );
-    expect(missingConfirmation.status).toBe(400);
+    expect(missingConfirmation!.status).toBe(400);
 
     const dryRun = await postConversationsReset(
       new Request("https://example.test/api/conversations/reset", {
@@ -131,8 +132,8 @@ describe("conversations security", () => {
         body: JSON.stringify({ dryRun: true }),
       }),
     );
-    expect(dryRun.status).toBe(200);
-    await expect(dryRun.json()).resolves.toMatchObject({
+    expect(dryRun!.status).toBe(200);
+    await expect(dryRun!.json()).resolves.toMatchObject({
       ok: true,
       reset: { dryRun: true, deleted: false, conversations: 1 },
     });
@@ -144,8 +145,8 @@ describe("conversations security", () => {
         body: JSON.stringify({ confirm: "RESET_CONVERSATIONS" }),
       }),
     );
-    expect(confirmed.status).toBe(200);
-    await expect(confirmed.json()).resolves.toMatchObject({
+    expect(confirmed!.status).toBe(200);
+    await expect(confirmed!.json()).resolves.toMatchObject({
       ok: true,
       reset: { dryRun: false, deleted: true, conversations: 1 },
     });
@@ -220,7 +221,7 @@ describe("conversations security", () => {
 
   it("rejects production Twilio webhook calls when token is not configured", async () => {
     const previousNodeEnv = process.env.NODE_ENV;
-    process.env.NODE_ENV = "production";
+    vi.stubEnv("NODE_ENV", "production");
     process.env.VERCEL_ENV = "production";
 
     try {
@@ -243,7 +244,11 @@ describe("conversations security", () => {
         '<?xml version="1.0" encoding="UTF-8"?><Response></Response>',
       );
     } finally {
-      process.env.NODE_ENV = previousNodeEnv;
+      if (previousNodeEnv === undefined) {
+        vi.unstubAllEnvs();
+      } else {
+        vi.stubEnv("NODE_ENV", previousNodeEnv);
+      }
     }
   });
 

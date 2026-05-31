@@ -1,4 +1,4 @@
-import { Clock3, FileText, ShieldCheck } from "lucide-react";
+import { CalendarDays, FileCheck2, ShieldCheck } from "lucide-react";
 import Link from "next/link";
 import { ProductShell } from "@/components/product-shell";
 import { PublicChatWidget } from "@/components/public-chat-widget";
@@ -12,23 +12,23 @@ export function PublicDemoHome() {
             <div className="flex flex-col justify-center gap-8">
               <div className="flex flex-wrap gap-3">
                 <span className="rounded-full border border-black/8 bg-white px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.22em] text-[#8d6b51]">
-                  FAQ del hotel
+                  Servicios Maternaly
                 </span>
                 <span className="rounded-full border border-black/8 bg-white px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.22em] text-[#8d6b51]">
-                  Reserva por formulario
+                  WhatsApp + Sheets
                 </span>
               </div>
 
               <div className="space-y-5">
                 <p className="text-xs font-semibold uppercase tracking-[0.24em] text-[#8d6b51]">
-                  Somos Muy Perros
+                  Maternaly
                 </p>
                 <h1 className="max-w-3xl font-serif text-5xl leading-[0.95] tracking-[-0.04em] md:text-6xl">
-                  Chat web para el hotel canino
+                  Chatbot WhatsApp para reservas asistidas
                 </h1>
                 <p className="max-w-2xl text-base leading-8 text-[#5d4a3a] md:text-lg">
-                  Resuelve preguntas frecuentes, deriva al formulario web y
-                  deja preparada la revisión operativa de la reserva.
+                  Interpreta mensajes caoticos, consulta disponibilidad fiable y
+                  deja la reserva pendiente hasta que pago y factura existan de verdad.
                 </p>
               </div>
 
@@ -37,31 +37,30 @@ export function PublicDemoHome() {
                   href="/ops"
                   className="inline-flex min-h-[3.5rem] items-center justify-center rounded-full border border-black/10 bg-white px-6 py-3.5 text-sm font-semibold tracking-[0.02em] text-[#201911] shadow-[0_16px_34px_rgba(32,25,17,0.08)] transition-transform hover:-translate-y-0.5 hover:bg-[#fffaf1] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#201911]"
                 >
-                  Ir a lógica de recepción de emails
+                  Ir a operativa
                 </Link>
                 <p className="text-sm leading-7 text-[#6a5746]">
-                  Si el cliente quiere reservar, el chat lo dirige al
-                  formulario web.
+                  En esta V1 la escritura real en Sheets esta bloqueada por defecto.
                 </p>
               </div>
 
               <div className="grid gap-4 sm:grid-cols-3">
                 <article className="rounded-[24px] border border-black/8 bg-white p-5 shadow-[0_10px_32px_rgba(34,49,35,0.08)]">
-                  <Clock3 className="mb-4 text-[#8d6b51]" size={18} />
+                  <CalendarDays className="mb-4 text-[#8d6b51]" size={18} />
                   <p className="text-xs uppercase tracking-[0.18em] text-[#8d6b51]">
-                    Horarios
+                    Disponibilidad
                   </p>
                   <strong className="mt-2 block text-base">
-                    Respuestas claras sobre horarios, precios y vacunas
+                    Solo se muestran horarios procedentes de Sheets fiables
                   </strong>
                 </article>
                 <article className="rounded-[24px] border border-black/8 bg-white p-5 shadow-[0_10px_32px_rgba(34,49,35,0.08)]">
-                  <FileText className="mb-4 text-[#8d6b51]" size={18} />
+                  <FileCheck2 className="mb-4 text-[#8d6b51]" size={18} />
                   <p className="text-xs uppercase tracking-[0.18em] text-[#8d6b51]">
-                    Reserva
+                    Pagos y facturas
                   </p>
                   <strong className="mt-2 block text-base">
-                    El chat encauza la solicitud al formulario web
+                    No se confirma plaza ni factura sin evento real
                   </strong>
                 </article>
                 <article className="rounded-[24px] border border-black/8 bg-white p-5 shadow-[0_10px_32px_rgba(34,49,35,0.08)]">
@@ -91,11 +90,11 @@ export function PublicDemoHome() {
               1. Preguntas frecuentes
             </p>
             <h2 className="mt-3 font-serif text-3xl tracking-[-0.03em]">
-              Responde lo esencial del hotel canino
+              Separa servicios y sedes
             </h2>
             <p className="mt-4 leading-7 text-[#5d4a3a]">
-              El chat resuelve las dudas más habituales con respuestas cortas,
-              claras y controladas.
+              AIPAP Agua, AIPAP Terra, Pilates y talleres mantienen contexto
+              separado para evitar mezclas peligrosas.
             </p>
           </article>
           <article className="rounded-[28px] border border-black/8 bg-white p-7 shadow-[0_12px_36px_rgba(34,49,35,0.08)]">
@@ -103,11 +102,11 @@ export function PublicDemoHome() {
               2. Reserva
             </p>
             <h2 className="mt-3 font-serif text-3xl tracking-[-0.03em]">
-              La solicitud entra por el canal correcto
+              Consulta fuentes operativas
             </h2>
               <p className="mt-4 leading-7 text-[#5d4a3a]">
-                Si alguien quiere reservar o consultar fechas, el chat lo dirige
-              al formulario web para que el equipo lo revise.
+                La disponibilidad sale del catalogo normalizado construido desde
+              los dos Google Sheets configurados.
             </p>
           </article>
           <article className="rounded-[28px] border border-black/8 bg-white p-7 shadow-[0_12px_36px_rgba(34,49,35,0.08)]">
@@ -115,11 +114,11 @@ export function PublicDemoHome() {
               3. Recepción
             </p>
             <h2 className="mt-3 font-serif text-3xl tracking-[-0.03em]">
-              La recepción valida disponibilidad y turno
+              El equipo conserva control
             </h2>
             <p className="mt-4 leading-7 text-[#5d4a3a]">
-              La parte operativa sigue funcionando detrás para procesar emails,
-              revisar hueco y dejar preparada la gestión interna.
+              El panel permite tomar conversaciones, bloquear el bot y revisar
+              reservas pendientes, pagos y facturas.
             </p>
           </article>
         </section>

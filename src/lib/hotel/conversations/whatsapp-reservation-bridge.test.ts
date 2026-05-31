@@ -9,6 +9,7 @@ import {
   type ClientUpsertFromConfirmedReservationResult,
 } from "@/lib/hotel/clients";
 import type { SheetAdapter, SheetsWriteResult } from "@/lib/hotel/sheets/types";
+import { HOTEL_SHEETS_CONFIG } from "@/lib/hotel/config/sheets";
 import { handleInboundWhatsApp } from "./service";
 import {
   createEmptyConversationSnapshot,
@@ -157,15 +158,14 @@ function makeBridgeDeps(options: {
         monthKey: "2026-12",
         sheetName: "DICIEMBRE 2026",
         layout: {
-          rangeStart: "A1",
-          rangeEnd: "AF39",
-          titleRow: 1,
-          dayHeaderRow: 3,
-          firstReservationRow: 4,
-          lastReservationRow: 39,
-          firstDayColumn: 2,
-          lastDayColumn: 32,
-          specialLabelColumn: 1,
+          ...HOTEL_SHEETS_CONFIG.monthlyLayout,
+          titleRowIndex: 1,
+          dayHeaderRowIndex: 3,
+          firstDataRowIndex: 4,
+          lastDataRowIndex: 39,
+          firstDayColumnIndex: 2,
+          lastDayColumnIndex: 32,
+          labelColumnIndex: 1,
         },
         issues: [],
         rowCount: 39,

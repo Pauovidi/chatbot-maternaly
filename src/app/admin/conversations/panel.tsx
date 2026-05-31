@@ -24,7 +24,7 @@ import type {
 
 interface ConversationsPanelProps {
   initialDashboard: ConversationDashboard;
-  twilioProviderMode: "mock" | "sandbox" | "real";
+  whatsAppProviderMode?: "mock" | "ycloud" | "twilio";
 }
 
 type FilterMode = NonNullable<ConversationListFilters["mode"]>;
@@ -71,6 +71,7 @@ function formatEventType(value: string) {
     mode_changed: "Modo actualizado",
     nlu_classified: "Intent detectado",
     reservation_context_detected: "Reserva detectada",
+    maternaly_intent_detected: "Servicio Maternaly detectado",
   };
 
   return labels[value] ?? value.replaceAll("_", " ");
@@ -95,7 +96,7 @@ function conversationSubtitle(conversation: ConversationRecord) {
   const parts = [
     conversation.phoneE164,
     conversation.clientEmail,
-    conversation.petName ? `Mascota: ${conversation.petName}` : undefined,
+    conversation.serviceDetected ? `Servicio: ${conversation.serviceDetected}` : undefined,
   ].filter(Boolean);
 
   return parts.join(" · ");
@@ -103,7 +104,7 @@ function conversationSubtitle(conversation: ConversationRecord) {
 
 export function ConversationsPanel({
   initialDashboard,
-  twilioProviderMode,
+  whatsAppProviderMode = "mock",
 }: ConversationsPanelProps) {
   const [dashboard, setDashboard] = useState(initialDashboard);
   const [selectedId, setSelectedId] = useState(
@@ -383,9 +384,9 @@ export function ConversationsPanel({
         </div>
         <details className="conversation-technical-status">
           <summary>Estado técnico</summary>
-          <span className={`conversation-transport conversation-transport-${twilioProviderMode}`}>
+          <span className={`conversation-transport conversation-transport-${whatsAppProviderMode}`}>
             <Circle size={10} fill="currentColor" />
-            Proveedor: Twilio WhatsApp · {formatProviderMode(twilioProviderMode)}
+            Proveedor: WhatsApp · {formatProviderMode(whatsAppProviderMode)}
           </span>
         </details>
       </div>
@@ -394,8 +395,8 @@ export function ConversationsPanel({
         <aside className="conversation-sidebar">
           <div className="conversation-sidebar-brand">
             <div>
-              <strong>Inbox WhatsApp</strong>
-              <small>Reservas y handoffs</small>
+              <strong>Inbox WhatsApp Maternaly</strong>
+              <small>Servicios, reservas y handoffs</small>
             </div>
           </div>
 
@@ -412,7 +413,7 @@ export function ConversationsPanel({
               <input
                 value={query}
                 onChange={(event) => search(event.target.value)}
-                placeholder="Buscar teléfono, nombre o mascota"
+                placeholder="Buscar teléfono, nombre o servicio"
               />
             </label>
             <button
@@ -503,7 +504,7 @@ export function ConversationsPanel({
                   </div>
                   <span>
                     {selected.phoneE164}
-                    {selected.petName ? ` · Mascota: ${selected.petName}` : ""}
+                    {selected.serviceDetected ? ` · Servicio: ${selected.serviceDetected}` : ""}
                   </span>
                 </div>
                 <div className="conversation-actions">
@@ -570,9 +571,16 @@ export function ConversationsPanel({
                   {selected.clientEmail ? <span>{selected.clientEmail}</span> : null}
                   {selected.reservationId ? <span>Reserva: {selected.reservationId}</span> : null}
                   {selected.assignedAgent ? <span>{selected.assignedAgent}</span> : null}
-                  {selected.clientSheetName && selected.clientSheetRow ? (
-                    <span>CLIENTES · fila {selected.clientSheetRow}</span>
-                  ) : null}
+                  <span>{selected.sheetSource ? `Sheet conectado: ${selected.sheetSource}` : "Sheet pendiente"}</span>
+                  {selected.sheetRange ? <span>Rango: {selected.sheetRange}</span> : null}
+                  <span>Reserva: {selected.maternalyReservationStatus ?? "none"}</span>
+                  <span>Pago: {selected.maternalyPaymentStatus ?? "none"}</span>
+                  <span>Factura: {selected.maternalyInvoiceStatus ?? "none"}</span>
+                  <span>
+                    {selected.maternalyReviewStatus === "manual_review_required"
+                      ? "Revisión manual"
+                      : "Bot activo"}
+                  </span>
                 </div>
               </details>
 
@@ -645,11 +653,11 @@ export function ConversationsPanel({
                   </button>
                 </div>
                 <small className="conversation-composer-hint">
-                  {twilioProviderMode === "mock"
+                  {whatsAppProviderMode === "mock"
                     ? "Modo demo: se guarda en el timeline, no sale por WhatsApp real."
-                    : twilioProviderMode === "sandbox"
-                      ? "Sandbox: el destinatario debe haberse unido antes de responder."
-                      : "Twilio real activo: revisa el mensaje antes de enviarlo."}
+                    : whatsAppProviderMode === "ycloud"
+                      ? "YCloud configurado como provider principal: revisa el mensaje antes de enviarlo."
+                      : "Twilio legacy activo: revisa el mensaje antes de enviarlo."}
                 </small>
               </div>
             </>
@@ -664,11 +672,11 @@ export function ConversationsPanel({
   );
 }
 
-function formatProviderMode(mode: ConversationsPanelProps["twilioProviderMode"]) {
-  const labels: Record<ConversationsPanelProps["twilioProviderMode"], string> = {
+function formatProviderMode(mode: NonNullable<ConversationsPanelProps["whatsAppProviderMode"]>) {
+  const labels: Record<NonNullable<ConversationsPanelProps["whatsAppProviderMode"]>, string> = {
     mock: "Mock",
-    real: "Real",
-    sandbox: "Sandbox",
+    twilio: "Twilio legacy",
+    ycloud: "YCloud",
   };
 
   return labels[mode];

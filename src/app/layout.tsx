@@ -13,13 +13,13 @@ const manrope = Manrope({
 });
 
 export const metadata: Metadata = {
-  title: "Chat web para el hotel canino | Somos Muy Perros",
+  title: "Chatbot WhatsApp Maternaly",
   description:
-    "Resuelve preguntas frecuentes, deriva al formulario web y deja preparada la revisión operativa de la reserva.",
+    "Chatbot WhatsApp con LLM estructurado, Google Sheets en dry-run y panel de conversaciones para Maternaly.",
   openGraph: {
-    title: "Chat web para el hotel canino | Somos Muy Perros",
+    title: "Chatbot WhatsApp Maternaly",
     description:
-      "Resuelve preguntas frecuentes, deriva al formulario web y deja preparada la revisión operativa de la reserva.",
+      "Chatbot WhatsApp con LLM estructurado, Google Sheets en dry-run y panel de conversaciones para Maternaly.",
     type: "website",
   },
 };

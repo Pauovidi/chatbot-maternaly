@@ -13,10 +13,10 @@ export function PublicSiteFooter() {
             href={demoFormUrl}
             className="text-xs uppercase tracking-[0.18em] text-[#6f543d] transition-colors hover:text-[#201911]"
           >
-            Formulario web
+            Web Maternaly
           </a>
           <a
-            href="https://somosmuyperros.com/contacto/"
+            href="https://maternaly.es/"
             className="text-xs uppercase tracking-[0.18em] text-[#6f543d] transition-colors hover:text-[#201911]"
           >
             Contacto
@@ -25,19 +25,18 @@ export function PublicSiteFooter() {
             href="/ops"
             className="text-xs uppercase tracking-[0.18em] text-[#6f543d] transition-colors hover:text-[#201911]"
           >
-            Recepción emails
+            Operativa
           </Link>
         </nav>
 
         <p className="text-xs uppercase tracking-[0.18em] text-[#8d6b51]">
-          Chat web y operativa del hotel canino
+          Chatbot WhatsApp y panel operativo Maternaly
         </p>
       </div>
       <div className="bg-[#201911]">
         <div className="mx-auto max-w-6xl px-6 py-4 lg:px-10">
           <p className="text-center text-xs uppercase tracking-[0.18em] text-[#f8f4ec]">
-            El chat responde preguntas frecuentes y la recepción revisa la
-            solicitud que llega por el formulario web
+            El bot no confirma plazas, pagos ni facturas sin una fuente real validada
           </p>
         </div>
       </div>

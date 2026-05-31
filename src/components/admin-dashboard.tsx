@@ -78,8 +78,8 @@ export function AdminDashboard({
           {dashboard.reservations.map((item) => (
             <div key={item.reservationId} className="demo-table-row">
               <div>
-                <strong>{item.petName ?? "Mascota pendiente"}</strong>
-                <p>{item.ownerName ?? "Propietario pendiente"}</p>
+                <strong>{item.petName ?? "Servicio pendiente"}</strong>
+                <p>{item.ownerName ?? "Cliente pendiente"}</p>
               </div>
               <div>
                 <strong>
@@ -113,7 +113,7 @@ export function AdminDashboard({
           {dashboard.reminders.map((item) => (
             <article key={item.reminderId} className="demo-reminder-card">
               <div>
-                <strong>{item.petName ?? "Mascota"}</strong>
+                <strong>{item.petName ?? "Servicio"}</strong>
                 <p>{item.ownerName ?? "Cliente pendiente"}</p>
               </div>
               <div className="demo-reminder-meta">

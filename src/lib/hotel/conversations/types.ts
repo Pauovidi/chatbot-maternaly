@@ -62,6 +62,13 @@ export interface Conversation {
   sourceType: ConversationSourceType;
   sourceRecordId?: string;
   reservationId?: string;
+  serviceDetected?: string;
+  sheetSource?: string;
+  sheetRange?: string;
+  maternalyReservationStatus?: "none" | "pending" | "confirmed";
+  maternalyPaymentStatus?: "none" | "pending" | "confirmed";
+  maternalyInvoiceStatus?: "none" | "pending" | "sent" | "failed";
+  maternalyReviewStatus?: "ok" | "manual_review_required";
   clientStatus?: ConversationClientStatus;
   clientConfidence?: ConversationClientConfidence;
   clientName?: string;

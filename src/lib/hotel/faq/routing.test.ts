@@ -7,17 +7,17 @@ describe("FAQ routing", () => {
     expect(FAQ_ROUTING_RULES).toHaveLength(4);
     expect(
       FAQ_ROUTING_RULES.some((rule) =>
-        rule.intents.includes("workflow_disponibilidad"),
+        (rule.intents as readonly string[]).includes("workflow_disponibilidad"),
       ),
     ).toBe(true);
     expect(
       FAQ_ROUTING_RULES.some((rule) =>
-        rule.intents.includes("faq_confianza_residencia"),
+        (rule.intents as readonly string[]).includes("faq_confianza_residencia"),
       ),
     ).toBe(true);
     expect(
       FAQ_ROUTING_RULES.some((rule) =>
-        rule.intents.includes("faq_peluqueria"),
+        (rule.intents as readonly string[]).includes("faq_peluqueria"),
       ),
     ).toBe(true);
   });

@@ -1,14 +1,17 @@
-import { HOTEL_FAQ_DEMO_EXAMPLES, HOTEL_FAQ_SECTIONS } from "@/lib/hotel/content/faq";
 import { DEMO_SAMPLE_EMAILS } from "@/lib/hotel/parser";
+import {
+  MATERNALY_CHAT_QUICK_ACTIONS,
+  resolveMaternalyChatReply,
+} from "@/lib/maternaly/public-chat";
 
-export const demoFormUrl = "https://somosmuyperros.com/hotel-canino/";
+export const demoFormUrl = "https://maternaly.es/";
 
 export const demoOperationalBanner =
-  "Operativa conectada: emails, conversaciones y registro de entrada.";
+  "Maternaly V1: WhatsApp, LLM estructurado, Google Sheets en lectura/dry-run y panel humano.";
 
 export const demoNavItems = [
   { href: "/", label: "Inicio" },
-  { href: "/ops", label: "Recepción emails" },
+  { href: "/ops", label: "Operativa" },
   { href: "/admin/conversations", label: "Panel conversaciones" },
 ];
 
@@ -16,34 +19,32 @@ export const demoRoutes = [
   {
     href: "/",
     label: "Inicio",
-    description: "Chatbot protagonista, respuestas rápidas y CTA directo al formulario web.",
+    description: "Chatbot WhatsApp-first con respuestas seguras y derivacion humana.",
   },
   {
     href: "/ops",
-    label: "Recepción emails",
-    description: "Zona secundaria con parser, disponibilidad, precio, recordatorios y admin.",
+    label: "Operativa",
+    description: "Zona para revisar disponibilidad, escritura dry-run y estado de integraciones.",
   },
   {
     href: "/admin/conversations",
     label: "Panel conversaciones",
-    description: "Inbox de WhatsApp con modo bot/humano, handoff y respuesta manual.",
+    description: "Inbox de WhatsApp con modo bot/humano, servicio, Sheets, pago y factura.",
   },
 ];
 
-export const demoFaqTopics = HOTEL_FAQ_SECTIONS.flatMap((section) =>
-  section.entries.map((entry) => ({
-    key: entry.id,
-    label: entry.question,
-    question: entry.question,
-    answer: entry.answer,
-  })),
-);
+export const demoFaqTopics = MATERNALY_CHAT_QUICK_ACTIONS.map((question) => ({
+  key: question,
+  label: question,
+  question,
+  answer: resolveMaternalyChatReply(question).text,
+}));
 
-export const demoFaqQuickPrompts = HOTEL_FAQ_DEMO_EXAMPLES.map((entry) => ({
-  key: entry.intent,
-  label: entry.label,
-  question: entry.question,
-  outputType: entry.outputType,
+export const demoFaqQuickPrompts = MATERNALY_CHAT_QUICK_ACTIONS.map((question) => ({
+  key: question,
+  label: question,
+  question,
+  outputType: "workflow",
 }));
 
 export const demoSampleEmails = DEMO_SAMPLE_EMAILS;

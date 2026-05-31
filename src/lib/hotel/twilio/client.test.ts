@@ -15,6 +15,7 @@ describe("twilio whatsapp client", () => {
   it("detects real and sandbox provider modes from env-gated Twilio config", () => {
     expect(
       readTwilioWhatsAppConfig({
+        NODE_ENV: "test",
         TWILIO_ACCOUNT_SID: "AC_test",
         TWILIO_AUTH_TOKEN: "token",
         TWILIO_WHATSAPP_FROM: "whatsapp:+34600111222",
@@ -23,6 +24,7 @@ describe("twilio whatsapp client", () => {
     ).toBe("real");
     expect(
       readTwilioWhatsAppConfig({
+        NODE_ENV: "test",
         TWILIO_ACCOUNT_SID: "AC_test",
         TWILIO_AUTH_TOKEN: "token",
         TWILIO_WHATSAPP_FROM: "whatsapp:+14155238886",
@@ -31,6 +33,7 @@ describe("twilio whatsapp client", () => {
     ).toBe("sandbox");
     expect(
       readTwilioWhatsAppConfig({
+        NODE_ENV: "test",
         TWILIO_ACCOUNT_SID: "AC_test",
         TWILIO_AUTH_TOKEN: "token",
         TWILIO_MESSAGING_SERVICE_SID: "MG_test",

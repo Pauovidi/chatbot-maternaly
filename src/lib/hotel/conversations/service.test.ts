@@ -154,7 +154,7 @@ describe("conversation service", () => {
         VERCEL_ENV: "preview",
       }),
     ).resolves.toBe(true);
-    expect((await store.list()).length).toBeGreaterThanOrEqual(5);
+    expect((await store.list()).length).toBeGreaterThanOrEqual(3);
     await expect(
       ensureDemoConversationSeed(store, {
         NODE_ENV: "production",

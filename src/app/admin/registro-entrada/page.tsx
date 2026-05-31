@@ -33,7 +33,7 @@ export default async function EntryLogPage() {
         <h1 className="page-title">Registro de entrada</h1>
         <p className="page-description">
           Lista de reservas y solicitudes que el equipo debe revisar antes de
-          pasarlas a Gestet o marcarlas como gestionadas.
+          pasarlas a Sheets o marcarlas como gestionadas.
         </p>
       </section>
 
@@ -54,12 +54,12 @@ export default async function EntryLogPage() {
               <span>Cliente</span>
               <span>Estado cliente</span>
               <span>Identificador</span>
-              <span>Mascota</span>
-              <span>Entrada</span>
-              <span>Salida</span>
+              <span>Servicio</span>
+              <span>Fecha</span>
+              <span>Hora</span>
               <span>Reserva</span>
               <span>Notas</span>
-              <span>Gestet</span>
+              <span>Sheets</span>
             </div>
             {records.map((record) => (
               <article key={record.reservationId} className="entry-log-row">

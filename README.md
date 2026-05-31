@@ -1,36 +1,65 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Chatbot Maternaly
 
-## Getting Started
+Proyecto Next.js para arrancar el chatbot WhatsApp de Maternaly a partir de la base tecnica de `hotel-canino-demo`.
 
-First, run the development server:
+## Estado V1
+
+- Producto: Maternaly.
+- Provider WhatsApp principal: YCloud, con `mock` para desarrollo.
+- Twilio queda como provider legacy si `WHATSAPP_PROVIDER=twilio`.
+- Persistencia objetivo: Postgres por `DATABASE_URL`.
+- Deploy objetivo: EasyPanel con Docker.
+- Google Sheets: lectura/auditoria para los dos Sheets reales.
+- Escritura Sheets: bloqueada por defecto; solo `WritePlan` y dry-run.
+- LLM: interprete estructurado con fallback determinista cuando no exista `OPENAI_API_KEY`.
+- Panel: reutiliza el inbox de conversaciones de la base Somos Perros, adaptado a servicios, pagos, facturas y revision manual Maternaly.
+
+## Base importada
+
+Base tecnica usada:
+
+- repo: `https://github.com/Pauovidi/hotel-canino-demo`
+- rama: `codex/smp-conversation-slotfill-archive-clientupsert-v0`
+- commit: `75635585609f749c357b013cfeb1432b69ddb5fd`
+
+Se eligio porque es descendiente de EasyPanel, polling/reset y fixes de produccion, y contiene el panel de conversaciones mas completo.
+
+## Scripts utiles
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm install
+npm run lint
+npm run test:run
+npm run build
+npm run maternaly:health
+npm run maternaly:sheets:audit
+npm run maternaly:sheets:dry-run-write
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Los scripts `hotel:*` se conservan temporalmente como base tecnica heredada.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Variables
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+No secretas principales:
 
-## Learn More
+- `APP_NAME=Maternaly`
+- `APP_ENV`
+- `APP_BASE_URL`
+- `WHATSAPP_PROVIDER=ycloud|mock|twilio`
+- `GOOGLE_SHEETS_ACCESS_MODE=read_only|dry_run|live`
+- `BOT_SHEETS_LIVE_WRITE_ENABLED=false`
+- `MATERNALY_SHEET_IDS`
+- `LLM_PROVIDER=openai|mock`
+- `LLM_MODEL`
+- `PANEL_ADMIN_USERNAME`
 
-To learn more about Next.js, take a look at the following resources:
+Secretas esperadas:
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+- `GOOGLE_SERVICE_ACCOUNT_JSON_BASE64` o `GOOGLE_APPLICATION_CREDENTIALS`
+- `YCLOUD_API_KEY`
+- `YCLOUD_WEBHOOK_SECRET`
+- `OPENAI_API_KEY`
+- `DATABASE_URL`
+- `PANEL_ADMIN_PASSWORD`
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+No guardes secretos en Git.

@@ -31,7 +31,7 @@ describe("conversation panel operational UI", () => {
     } satisfies ConversationRecord;
 
     const html = renderToStaticMarkup(
-      <ConversationsPanel initialDashboard={dashboardWith(conversation)} twilioProviderMode="sandbox" />,
+      <ConversationsPanel initialDashboard={dashboardWith(conversation)} whatsAppProviderMode="ycloud" />,
     );
 
     expect(html).toContain("Tomar conversación");
@@ -45,7 +45,7 @@ describe("conversation panel operational UI", () => {
     } satisfies ConversationRecord;
 
     const html = renderToStaticMarkup(
-      <ConversationsPanel initialDashboard={dashboardWith(conversation)} twilioProviderMode="sandbox" />,
+      <ConversationsPanel initialDashboard={dashboardWith(conversation)} whatsAppProviderMode="ycloud" />,
     );
 
     expect(html).toContain("Devolver al bot");
@@ -55,11 +55,12 @@ describe("conversation panel operational UI", () => {
   it("keeps technical provider status out of the main timeline banners", () => {
     const conversation = buildConversationSeed("2026-05-06T08:00:00.000Z").conversations[0];
     const html = renderToStaticMarkup(
-      <ConversationsPanel initialDashboard={dashboardWith(conversation)} twilioProviderMode="sandbox" />,
+      <ConversationsPanel initialDashboard={dashboardWith(conversation)} whatsAppProviderMode="ycloud" />,
     );
 
     expect(html).toContain("Estado técnico");
-    expect(html).toContain("Proveedor: Twilio WhatsApp");
+    expect(html).toContain("Proveedor: WhatsApp");
+    expect(html).toContain("YCloud");
     expect(html).not.toContain("Twilio Sandbox activo para pruebas de WhatsApp.");
     expect(html).not.toContain("conversation-notice");
     expect(html.toLowerCase()).not.toContain("nif");
@@ -69,7 +70,7 @@ describe("conversation panel operational UI", () => {
   it("renders a compact composer and short human metric label", () => {
     const conversation = buildConversationSeed("2026-05-06T08:00:00.000Z").conversations[0];
     const html = renderToStaticMarkup(
-      <ConversationsPanel initialDashboard={dashboardWith(conversation)} twilioProviderMode="mock" />,
+      <ConversationsPanel initialDashboard={dashboardWith(conversation)} whatsAppProviderMode="mock" />,
     );
 
     expect(html).toContain(">Humano<");
@@ -86,7 +87,7 @@ describe("conversation panel operational UI", () => {
   it("keeps inbox filters compact in narrow layouts", () => {
     const conversation = buildConversationSeed("2026-05-06T08:00:00.000Z").conversations[0];
     const html = renderToStaticMarkup(
-      <ConversationsPanel initialDashboard={dashboardWith(conversation)} twilioProviderMode="sandbox" />,
+      <ConversationsPanel initialDashboard={dashboardWith(conversation)} whatsAppProviderMode="ycloud" />,
     );
     const css = readFileSync(join(process.cwd(), "src/app/globals.css"), "utf8");
 
@@ -105,7 +106,7 @@ describe("conversation panel operational UI", () => {
   it("keeps the polling implementation controlled and non-overlapping", () => {
     const conversation = buildConversationSeed("2026-05-06T08:00:00.000Z").conversations[0];
     const html = renderToStaticMarkup(
-      <ConversationsPanel initialDashboard={dashboardWith(conversation)} twilioProviderMode="sandbox" />,
+      <ConversationsPanel initialDashboard={dashboardWith(conversation)} whatsAppProviderMode="ycloud" />,
     );
     const source = readFileSync(join(process.cwd(), "src/app/admin/conversations/panel.tsx"), "utf8");
 
@@ -121,7 +122,7 @@ describe("conversation panel operational UI", () => {
   it("renders archive controls and preserves chronological timeline markup", () => {
     const conversation = buildConversationSeed("2026-05-06T08:00:00.000Z").conversations[0];
     const html = renderToStaticMarkup(
-      <ConversationsPanel initialDashboard={dashboardWith(conversation)} twilioProviderMode="sandbox" />,
+      <ConversationsPanel initialDashboard={dashboardWith(conversation)} whatsAppProviderMode="ycloud" />,
     );
     const source = readFileSync(join(process.cwd(), "src/app/admin/conversations/panel.tsx"), "utf8");
 

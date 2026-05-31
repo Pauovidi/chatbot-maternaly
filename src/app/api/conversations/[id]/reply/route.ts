@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { requirePanelAuth } from "@/lib/hotel/conversations/auth";
 import { MANUAL_REPLY_MAX_CHARS, sendManualReply } from "@/lib/hotel/conversations/service";
-import { createTwilioWhatsAppSender } from "@/lib/hotel/twilio/whatsapp";
+import { createMaternalyWhatsAppSender } from "@/lib/maternaly/whatsapp/provider";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -39,7 +39,7 @@ export async function POST(
     result = await sendManualReply(
       id,
       replyBody,
-      createTwilioWhatsAppSender(),
+      createMaternalyWhatsAppSender(),
       auth.agent,
     );
   } catch (error) {

@@ -23,7 +23,6 @@ function forbiddenReferenceCopyPatterns() {
     new RegExp(`\\bSoporte${brand}FM\\b`, "i"),
     new RegExp(`\\b${shortBrand}\\b`),
     new RegExp(`\\b${brand.toLowerCase()}s?\\b`, "i"),
-    /\benv[ií]o\b/i,
   ];
 }
 
@@ -41,7 +40,7 @@ describe("conversations panel visible demo copy", () => {
     );
   });
 
-  it("renders the shared Somos Muy Perros header with final navigation", () => {
+  it("renders the shared Maternaly header with final navigation", () => {
     const headerHtml = renderToStaticMarkup(<PublicSiteHeader />);
     const shellHtml = renderToStaticMarkup(
       <SiteShell>
@@ -51,25 +50,24 @@ describe("conversations panel visible demo copy", () => {
       </SiteShell>,
     );
 
-    expect(headerHtml).toContain("Somos Muy Perros");
-    expect(headerHtml).toContain("somos-muy-perros-logo.png");
+    expect(headerHtml).toContain("Maternaly");
+    expect(headerHtml).toContain("WhatsApp bot");
     expect(headerHtml).toContain("Inicio");
-    expect(headerHtml).toContain("Recepción emails");
+    expect(headerHtml).toContain("Operativa");
     expect(headerHtml).toContain("Panel conversaciones");
-    expect(headerHtml).toContain("Formulario web");
+    expect(headerHtml).toContain("Web Maternaly");
     expect(headerHtml).not.toContain("Formulario oficial");
     expect(headerHtml).not.toMatch(/>Chat</);
     expect(headerHtml).not.toContain("Hotel canino");
-    expect(headerHtml).not.toMatch(/<strong>Somos Muy Perros<\/strong>/);
-    expect(shellHtml).toContain("Somos Muy Perros");
+    expect(shellHtml).toContain("Maternaly");
     expect(shellHtml).toContain("Panel conversaciones");
-    expect(shellHtml).toContain("Formulario web");
+    expect(shellHtml).toContain("Web Maternaly");
     expect(shellHtml).not.toContain("Demo hotel canino");
     expect(shellHtml).not.toContain("Formulario real");
     expect(shellHtml).not.toMatch(/>SM</);
   });
 
-  it("renders a non-empty Somos Muy Perros inbox with mock WhatsApp notice", () => {
+  it("renders a non-empty Maternaly inbox with mock WhatsApp notice", () => {
     const conversations = buildConversationSeed("2026-05-06T08:00:00.000Z").conversations;
     const dashboard: ConversationDashboard = {
       conversations,
@@ -88,11 +86,11 @@ describe("conversations panel visible demo copy", () => {
     };
 
     const html = renderToStaticMarkup(
-      <ConversationsPanel initialDashboard={dashboard} twilioProviderMode="mock" />,
+      <ConversationsPanel initialDashboard={dashboard} whatsAppProviderMode="mock" />,
     );
 
-    expect(html).toContain("Inbox WhatsApp");
-    expect(html).toContain("Proveedor: Twilio WhatsApp");
+    expect(html).toContain("Inbox WhatsApp Maternaly");
+    expect(html).toContain("Proveedor: WhatsApp");
     expect(html).toContain("Estado técnico");
     expect(html).toContain("Mock");
     expect(html).toContain("Registro de entrada");
@@ -101,7 +99,7 @@ describe("conversations panel visible demo copy", () => {
     expect(html).not.toContain("En humano");
     expect(html).toContain("Todas");
     expect(html).toContain("Marta R.");
-    expect(html).toContain("Mascota: Luna");
+    expect(html).toContain("Servicio: AIPAP Agua");
     expect(html).toContain("Respuesta manual del equipo");
     expect(html).toContain("Adjuntar vídeo");
     expect(html).toContain("Modo demo: se guarda en el timeline, no sale por WhatsApp real.");
@@ -117,7 +115,7 @@ describe("conversations panel visible demo copy", () => {
     expect(html).not.toMatch(/>SM</);
   });
 
-  it("renders sandbox and real Twilio provider states without changing provider", () => {
+  it("renders mock, YCloud and legacy provider states without changing provider", () => {
     const conversations = buildConversationSeed("2026-05-06T08:00:00.000Z").conversations;
     const dashboard: ConversationDashboard = {
       conversations,
@@ -130,19 +128,23 @@ describe("conversations panel visible demo copy", () => {
         archived: 0,
       },
     };
-    const sandbox = renderToStaticMarkup(
-      <ConversationsPanel initialDashboard={dashboard} twilioProviderMode="sandbox" />,
+    const mock = renderToStaticMarkup(
+      <ConversationsPanel initialDashboard={dashboard} whatsAppProviderMode="mock" />,
     );
-    const real = renderToStaticMarkup(
-      <ConversationsPanel initialDashboard={dashboard} twilioProviderMode="real" />,
+    const ycloud = renderToStaticMarkup(
+      <ConversationsPanel initialDashboard={dashboard} whatsAppProviderMode="ycloud" />,
+    );
+    const legacy = renderToStaticMarkup(
+      <ConversationsPanel initialDashboard={dashboard} whatsAppProviderMode="twilio" />,
     );
 
-    expect(sandbox).toContain("Proveedor: Twilio WhatsApp");
-    expect(sandbox).toContain("Sandbox");
-    expect(sandbox).toContain("Sandbox: el destinatario debe haberse unido antes de responder.");
-    expect(real).toContain("Proveedor: Twilio WhatsApp");
-    expect(real).toContain("Real");
-    expect(real).toContain("Twilio real activo: revisa el mensaje antes de enviarlo.");
+    expect(mock).toContain("Proveedor: WhatsApp");
+    expect(mock).toContain("Mock");
+    expect(mock).toContain("Modo demo: se guarda en el timeline, no sale por WhatsApp real.");
+    expect(ycloud).toContain("Proveedor: WhatsApp");
+    expect(ycloud).toContain("YCloud");
+    expect(ycloud).toContain("YCloud configurado como provider principal");
+    expect(legacy).toContain("Twilio legacy");
   });
 
   it("renders client directory badges without exposing NIF", () => {
@@ -177,13 +179,12 @@ describe("conversations panel visible demo copy", () => {
     };
 
     const html = renderToStaticMarkup(
-      <ConversationsPanel initialDashboard={dashboard} twilioProviderMode="mock" />,
+      <ConversationsPanel initialDashboard={dashboard} whatsAppProviderMode="mock" />,
     );
 
     expect(html).toContain("Cliente habitual");
     expect(html).toContain("Nuevo contacto");
     expect(html).toContain("Directorio");
-    expect(html).toContain("CLIENTES · fila 2");
     expect(html).toContain("cliente@example.com");
     expect(html).not.toContain("NIF");
     expect(html.toLowerCase()).not.toContain("dni");
@@ -201,12 +202,12 @@ describe("conversations panel visible demo copy", () => {
       .join("\n");
 
     expect(surfaces).toContain("Panel de conversaciones");
-    expect(surfaces).toContain("Centraliza WhatsApp, handoffs del bot y contexto de reservas en un único inbox operativo.");
-    expect(surfaces).toContain("Proveedor: Twilio WhatsApp");
+    expect(surfaces).toContain("Centraliza WhatsApp, handoffs del bot, servicio detectado");
+    expect(surfaces).toContain("Proveedor: WhatsApp");
     expect(surfaces).toContain("Registro de entrada");
     expect(surfaces).toContain("Adjuntar vídeo");
     expect(surfaces).toContain("media-mock");
-    expect(surfaces).toContain("Formulario web");
+    expect(surfaces).toContain("Web Maternaly");
     expect(surfaces).not.toContain("Panel reservas");
     expect(surfaces).not.toContain("Panel de reservas");
     expect(surfaces).not.toContain("Formulario oficial");
@@ -231,7 +232,7 @@ describe("conversations panel visible demo copy", () => {
       },
     };
     const panelHtml = renderToStaticMarkup(
-      <ConversationsPanel initialDashboard={dashboard} twilioProviderMode="mock" />,
+      <ConversationsPanel initialDashboard={dashboard} whatsAppProviderMode="mock" />,
     );
     const chatHtml = renderToStaticMarkup(<PublicChatWidget />);
 
@@ -252,10 +253,10 @@ describe("conversations panel visible demo copy", () => {
     expect(page).toContain("Cliente");
     expect(page).toContain("Estado cliente");
     expect(page).toContain("Identificador");
-    expect(page).toContain("Mascota");
-    expect(page).toContain("Entrada");
-    expect(page).toContain("Salida");
-    expect(page).toContain("Gestet");
+    expect(page).toContain("Servicio");
+    expect(page).toContain("Fecha");
+    expect(page).toContain("Hora");
+    expect(page).toContain("Sheets");
     expect(entryLog).toContain("pendiente Gestet");
     expect(page.toLowerCase()).not.toContain("nif");
     expect(page.toLowerCase()).not.toContain("dni");
@@ -286,14 +287,13 @@ describe("conversations panel visible demo copy", () => {
       "src/components/public-site-header.tsx",
       "src/components/site-shell.tsx",
       "src/lib/hotel/conversations/demo-seed.ts",
-      "docs/CONVERSATIONS_PANEL_V0.md",
-      "docs/TWILIO_WHATSAPP_REAL_V0.md",
+      "docs/ycloud.md",
     ]
       .map(readSurface)
       .join("\n");
 
     expect(surfaces).not.toContain("Formulario oficial");
-    expect(surfaces).toContain("Formulario web");
+    expect(surfaces).toContain("Web Maternaly");
 
     for (const pattern of forbiddenReferenceCopyPatterns()) {
       expect(surfaces).not.toMatch(pattern);

@@ -36,26 +36,25 @@ export default async function OpsPage() {
         <div className="relative mx-auto flex max-w-6xl flex-col gap-6 px-6 py-12 lg:px-10 lg:py-16">
           <div className="flex flex-wrap gap-3">
             <span className="rounded-full border border-black/8 bg-white px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.22em] text-[#8d6b51]">
-              Lógica de recepción de emails
+              Google Sheets dry-run
             </span>
             <span className="rounded-full border border-black/8 bg-white px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.22em] text-[#8d6b51]">
-              Resultado operativo
+              Seguridad operativa
             </span>
           </div>
 
           <div className="grid gap-6 lg:grid-cols-[1.2fr_0.8fr]">
             <div className="space-y-5">
               <p className="text-xs font-semibold uppercase tracking-[0.24em] text-[#8d6b51]">
-                Operativa
+                Operativa Maternaly
               </p>
               <h1 className="max-w-3xl font-serif text-5xl leading-[0.95] tracking-[-0.04em] md:text-6xl">
-                Solicitud recibida y revisada
+                Disponibilidad, WritePlan y revision humana
               </h1>
               <p className="max-w-3xl text-base leading-8 text-[#5d4a3a] md:text-lg">
-                Aquí vemos el email recibido, los datos detectados y la
-                decisión operativa. Las horas del formulario se traducen a
-                turno de mañana o de tarde según la franja real del negocio,
-                así que una entrada o salida a `13:00` pasa a turno de tarde.
+                Esta zona conserva la base tecnica importada, pero Maternaly ya
+                prepara lectura de Sheets, escritura dry-run y handoff cuando el
+                mapping no sea fiable.
               </p>
             </div>
 
