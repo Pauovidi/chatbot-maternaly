@@ -23,6 +23,8 @@ describe("EasyPanel production readiness", () => {
     expect(dockerfile).toContain("rm -rf .next/standalone/.demo-state");
     expect(dockerfile).toContain(".next/standalone/bot-maternaly-*.json");
     expect(dockerfile).toContain(".next/standalone/bot-somos-muy-perros-*.json");
+    expect(dockerfile).toContain("/app/db/migrations ./db/migrations");
+    expect(dockerfile).toContain("/app/scripts/db-migrate.mjs ./scripts/db-migrate.mjs");
   });
 
   it("does not copy env files or local credentials into the Docker build context", () => {
@@ -46,5 +48,17 @@ describe("EasyPanel production readiness", () => {
     expect(packageJson.scripts["smoke:docker"]).toContain("smoke-docker");
     expect(packageJson.scripts["db:migrate"]).toContain("db-migrate");
     expect(packageJson.scripts["easypanel:check"]).toContain("check-easypanel-env");
+  });
+
+  it("uses Maternaly panel auth names in proxy and docs", () => {
+    const proxy = readFileSync(path.join(process.cwd(), "src/proxy.ts"), "utf8");
+    const docs = readFileSync(path.join(process.cwd(), "docs/easypanel.md"), "utf8");
+
+    expect(proxy).toContain("PANEL_ADMIN_USERNAME");
+    expect(proxy).toContain("PANEL_ADMIN_PASSWORD");
+    expect(proxy).toContain('Basic realm="Maternaly operaciones"');
+    expect(docs).toContain("PANEL_ADMIN_USERNAME");
+    expect(docs).toContain("PANEL_ADMIN_PASSWORD");
+    expect(docs).not.toContain("hotel-canino-demo.vercel.app");
   });
 });

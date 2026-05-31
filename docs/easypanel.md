@@ -1,47 +1,52 @@
-# EasyPanel deployment guide
+# Guia de despliegue seguro en EasyPanel
 
-Maternaly is targeted at EasyPanel from the first production-like deploy. Do not deploy this repo to Vercel and do not reuse the live Somos Perros Vercel project.
+Maternaly debe desplegarse en EasyPanel con Docker. No desplegar este repo en Vercel, no reutilizar el proyecto vivo de Somos Perros y no tocar `hotel-canino-demo`.
 
-## 1. Create the app
+## 1. App
 
-- App name: `maternaly-chatbot`
-- Type: Docker / GitHub repository
-- Repository: `https://github.com/Pauovidi/chatbot-maternaly`
-- Branch: `codex/maternaly-bootstrap-ycloud-sheets-llm-v0`
-- Build: `Dockerfile`
-- Internal port: `3000`
-- Healthcheck path: `/api/health`
+- Nombre sugerido: `maternaly-chatbot`.
+- Tipo: App desde repositorio GitHub con `Dockerfile`.
+- Repo: `https://github.com/Pauovidi/chatbot-maternaly`.
+- Rama: `codex/maternaly-bootstrap-ycloud-sheets-llm-v0`.
+- Puerto interno: `3000`.
+- Healthcheck: `GET /api/health`.
+- Runtime: Next standalone (`output: "standalone"`) iniciado con `node server.js`.
 
-The repo uses Next standalone output (`output: "standalone"`) and the Docker image starts `node server.js` as a non-root user.
+El `Dockerfile` copia tambien `db/migrations` y `scripts/db-migrate.mjs` para poder ejecutar migraciones dentro del contenedor si EasyPanel lo permite.
 
-## 2. Create Postgres
+## 2. Postgres
 
-- Service name: `maternaly-postgres`
-- Link `DATABASE_URL` into the app as a secret.
-- Enable EasyPanel backups before handling real traffic.
-- Do not use ephemeral container storage for production state.
+- Servicio sugerido: `maternaly-postgres`.
+- Conectar `DATABASE_URL` a la app como secreto.
+- Activar backups antes de trafico real.
+- No usar almacenamiento efimero para estado de produccion.
 
-Production requires Postgres. JSON/file stores are local-development fallback only and are disabled in production unless an explicit unsafe override is set.
+Produccion requiere Postgres. El fallback JSON/file store queda solo para desarrollo local y esta bloqueado en produccion salvo opt-in inseguro explicito.
 
-## 3. Environment variables
+## 3. Variables iniciales no secretas
 
-Non-secret variables:
+Configurar una a una:
 
 ```text
 APP_NAME=Maternaly
 APP_ENV=production
 NODE_ENV=production
 WHATSAPP_PROVIDER=mock
+LLM_PROVIDER=mock
 GOOGLE_SHEETS_ACCESS_MODE=read_only
 BOT_SHEETS_LIVE_WRITE_ENABLED=false
 MATERNALY_SHEET_IDS=163BD-mjKeYGx7bjjUzW_FUYhwMUniLfHlhPnByZWOfI,1p74UI3SUFgtHCc5mSdW0RnmV2pnGECBTBudJz8YF5Do
-LLM_PROVIDER=mock
-PANEL_ADMIN_USERNAME=<admin-user>
-APP_BASE_URL=https://<maternaly-domain>
+APP_BASE_URL=https://<dominio-maternaly>
+PANEL_ADMIN_USERNAME=<usuario-admin>
 PORT=3000
+NEXT_TELEMETRY_DISABLED=1
 ```
 
-Secret variables, values must be added in EasyPanel only:
+Primer despliegue: mantener `WHATSAPP_PROVIDER=mock`, `LLM_PROVIDER=mock`, Sheets en `read_only` y `BOT_SHEETS_LIVE_WRITE_ENABLED=false`.
+
+## 4. Variables secretas pendientes
+
+Configurar solo desde EasyPanel y sin importaciones masivas:
 
 ```text
 DATABASE_URL
@@ -53,103 +58,133 @@ GOOGLE_SERVICE_ACCOUNT_JSON_BASE64
 GOOGLE_APPLICATION_CREDENTIALS
 ```
 
-Do not bulk replace environment variables if the app already has secrets. Add or edit one variable at a time.
+No imprimir ni copiar valores en logs, tickets o commits.
 
-## 4. Migrations
+## 5. Migraciones
 
-Run after `DATABASE_URL` is linked:
+Las migraciones son idempotentes, no hacen reset y no borran datos. Ejecutar despues de enlazar `DATABASE_URL`:
+
+```bash
+node scripts/db-migrate.mjs
+```
+
+Si se ejecuta desde el checkout completo tambien sirve:
 
 ```bash
 npm run db:migrate
 ```
 
-Migrations are idempotent and do not reset data:
+Migraciones actuales:
 
-- `db/migrations/001_init.sql`
-- `db/migrations/002_conversations.sql`
-- `db/migrations/003_operational_state.sql`
-- `db/migrations/004_maternaly_operational_models.sql`
-- `db/migrations/005_maternaly_contacts_handoffs.sql`
+- `001_init.sql`
+- `002_conversations.sql`
+- `003_operational_state.sql`
+- `004_maternaly_operational_models.sql`
+- `005_maternaly_contacts_handoffs.sql`
 
-Expected operational tables/views include contacts, conversations, messages, manual handoffs, service session cache, reservations, reservation write plans, payments, invoice events, sheet audit logs and LLM interpretation events.
+Modelos cubiertos:
 
-## 5. First safe deploy
+- `maternaly_contacts`
+- `hotel_conversations` y vista `maternaly_conversations`
+- `hotel_conversation_messages` y vista `maternaly_messages`
+- `maternaly_manual_handoffs`
+- `maternaly_service_sessions_cache`
+- `maternaly_reservations`
+- `maternaly_reservation_write_plans`
+- `maternaly_payments`
+- `maternaly_invoice_events`
+- `maternaly_sheet_audit_logs`
+- `maternaly_llm_interpretation_events`
 
-Use the safest first-run modes:
+## 6. Checklist post-deploy
 
-- `WHATSAPP_PROVIDER=mock`
-- `LLM_PROVIDER=mock`
-- `GOOGLE_SHEETS_ACCESS_MODE=read_only`
-- `BOT_SHEETS_LIVE_WRITE_ENABLED=false`
+Validar antes de exponer trafico real:
 
-This means no real WhatsApp send, no real LLM dependency and no real Sheets write.
+- `GET /api/health` responde `ok: true`.
+- Health muestra `app=Maternaly`.
+- Health muestra `runtimeTarget=easypanel-container`.
+- Health muestra `database.configured=true`.
+- Health muestra `database.reachable=true`.
+- Health muestra `whatsapp.provider=mock`.
+- Health muestra `googleSheets.accessMode=read_only`.
+- Health muestra `googleSheets.writeEnabled=false`.
+- Health muestra `llm.provider=mock`.
+- `/admin/conversations` exige Basic Auth y carga tras autenticar.
+- `/api/webhooks/ycloud` existe.
+- Logs sin secretos ni PII.
+- No se ha enviado WhatsApp real.
+- No se ha escrito en Google Sheets.
+- No se han confirmado pagos ni facturas reales.
 
-## 6. Post-deploy validation
-
-Check:
-
-- `GET /api/health` returns `ok: true`.
-- Health shows `runtimeTarget: easypanel-container`.
-- Health shows `database.configured=true` and `database.reachable=true`.
-- `/admin/conversations` requires Basic Auth and loads after auth.
-- Logs do not print secret values.
-- Sheets access mode is `read_only`.
-- Sheets write enabled is `false`.
-- YCloud webhook endpoint exists at `/api/webhooks/ycloud`.
-
-Webhook mock smoke:
+Smoke HTTP seguro contra la URL publica:
 
 ```bash
-curl -X POST https://<maternaly-domain>/api/webhooks/ycloud \
-  -H "Content-Type: application/json" \
-  -d '{"id":"smoke-001","from":"+34600000001","to":"+34944000000","text":"Hola, quiero informacion sobre AIPAP Agua","type":"text"}'
+SMOKE_BASE_URL=https://<dominio-maternaly> \
+SMOKE_BASIC_AUTH=<base64_usuario_dos_puntos_password> \
+SMOKE_REQUIRE_PRODUCTION_SAFE=true \
+node scripts/smoke-http.mjs
 ```
 
-## 7. Later: YCloud real
+## 7. Activacion posterior de YCloud
 
-After the mock deploy is healthy:
+Solo despues del deploy mock saludable:
 
-1. Add `YCLOUD_API_KEY` and `YCLOUD_WEBHOOK_SECRET`.
-2. Change `WHATSAPP_PROVIDER=ycloud`.
-3. Configure YCloud inbound URL:
+1. Configurar `YCLOUD_API_KEY` y `YCLOUD_WEBHOOK_SECRET` en EasyPanel.
+2. Cambiar `WHATSAPP_PROVIDER=ycloud`.
+3. Configurar webhook publico:
 
 ```text
-https://<maternaly-domain>/api/webhooks/ycloud
+https://<dominio-maternaly>/api/webhooks/ycloud
 ```
 
-4. Test with one controlled inbound message.
-5. Keep Sheets live writes disabled.
+4. Probar un inbound controlado desde un telefono de prueba.
+5. Validar firma exacta de YCloud.
+6. Validar idempotencia con el mismo `message.id`.
+7. Mantener `BOT_SHEETS_LIVE_WRITE_ENABLED=false`.
 
-## 8. Later: Google Sheets editor
+No activar envios reales masivos en esta fase.
 
-1. Share both Sheets as Editor with the service account.
-2. Create or confirm a safe tab named `TEST_BOT_WRITES`.
-3. Keep `BOT_SHEETS_LIVE_WRITE_ENABLED=false`.
-4. Run dry-run write first:
+## 8. Activacion posterior de Google Sheets Editor
+
+Solo despues de validar lectura y panel:
+
+1. Compartir ambos Sheets como Editor con la service account.
+2. Crear o confirmar una pestana segura `TEST_BOT_WRITES`.
+3. Mantener `BOT_SHEETS_LIVE_WRITE_ENABLED=false`.
+4. Ejecutar dry-run:
 
 ```bash
 npm run maternaly:sheets:dry-run-write
 ```
 
-5. Activate live writes only with a small whitelist and after manual review.
+5. Revisar `ReservationWritePlan`.
+6. Activar escritura real solo con whitelist explicita y validacion manual.
 
-## 9. Local production-like checks
+## 9. Checks locales production-like
 
-Without a local Postgres URL, production health is expected to fail because production requires durable DB.
+Sin Postgres local, health en modo production debe fallar porque produccion exige DB durable.
 
-With Postgres:
+Con Postgres local/controlado:
 
 ```bash
 npm run db:migrate
 npm run docker:build
-SMOKE_DATABASE_URL=<postgres-url> npm run smoke:docker
+SMOKE_DATABASE_URL=<postgres-url-controlado> npm run smoke:docker
 ```
 
-Without Postgres:
+Sin Docker:
 
 ```bash
+npm run lint
+npm run test:run
 npm run build
-npm run maternaly:health
 ```
 
-The second command should warn/fail production readiness if `NODE_ENV=production` and `DATABASE_URL` is missing.
+## 10. Guardrails
+
+- No Vercel para Maternaly.
+- No tocar Somos Perros vivo.
+- No tocar `hotel-canino-demo`.
+- No activar `WHATSAPP_PROVIDER=ycloud` hasta prueba controlada.
+- No activar `LLM_PROVIDER=openai` hasta validar coste, prompts y observabilidad.
+- No activar `GOOGLE_SHEETS_ACCESS_MODE=live` ni `BOT_SHEETS_LIVE_WRITE_ENABLED=true` sin `TEST_BOT_WRITES`, whitelist y aprobacion operativa.

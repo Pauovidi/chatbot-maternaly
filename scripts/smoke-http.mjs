@@ -2,19 +2,7 @@
 
 const baseUrl = (process.env.SMOKE_BASE_URL ?? "http://127.0.0.1:3000").replace(/\/$/, "");
 const basicAuth = process.env.SMOKE_BASIC_AUTH;
-const allowRealSheetsSmoke = process.env.SMOKE_ALLOW_REAL_SHEETS === "true";
-const productionAlias = "https://hotel-canino-demo.vercel.app";
-
-const sampleEmail = `Asunto: Solicitud de reserva web
-
-Hola,
-Quería reservar para Luna, una golden retriever muy tranquila.
-Soy Ana López y mi teléfono es 612 345 678.
-Entrada: 29/12/2026 por la mañana.
-Salida: 31/12/2026 por la tarde.
-Sería 1 perro.
-Notas: trae su manta y come pienso propio.
-`;
+const requireProductionSafe = process.env.SMOKE_REQUIRE_PRODUCTION_SAFE === "true";
 
 function assert(condition, message) {
   if (!condition) {
@@ -27,6 +15,7 @@ async function request(path, init) {
   if (basicAuth && !headers.has("authorization")) {
     headers.set("authorization", `Basic ${basicAuth}`);
   }
+
   const response = await fetch(`${baseUrl}${path}`, { ...init, headers });
   const text = await response.text();
   return { response, text };
@@ -34,111 +23,77 @@ async function request(path, init) {
 
 async function checkGet(path) {
   const { response, text } = await request(path);
-  assert(response.ok, `${path} devolvió ${response.status}`);
-  assert(text.length > 0, `${path} respondió vacío`);
+  assert(response.ok, `${path} devolvio ${response.status}: ${text.slice(0, 240)}`);
+  assert(text.length > 0, `${path} respondio vacio`);
   console.log(`[ok] GET ${path}`);
+  return text;
 }
 
-async function checkProcessEndpoint() {
-  if (baseUrl === productionAlias && !allowRealSheetsSmoke) {
-    console.log("[skip] POST /api/demo/process en production requiere SMOKE_ALLOW_REAL_SHEETS=true");
-    return;
-  }
-
-  const { response, text } = await request("/api/demo/process", {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-    },
-    body: JSON.stringify({
-      subject: "Smoke demo",
-      rawText: sampleEmail,
-    }),
-  });
-
-  assert(response.ok, `/api/demo/process devolvió ${response.status}: ${text}`);
+async function checkHealth() {
+  const { response, text } = await request("/api/health");
+  assert(response.ok, `/api/health devolvio ${response.status}: ${text}`);
 
   let json;
   try {
     json = JSON.parse(text);
   } catch {
-    throw new Error(`La respuesta de /api/demo/process no es JSON válido: ${text}`);
+    throw new Error(`/api/health no devolvio JSON valido: ${text}`);
   }
 
-  assert(
-    ["disponible", "confirmada"].includes(json.status),
-    `Se esperaba status "disponible" o "confirmada" y llegó ${json.status}`,
-  );
-  assert(json.availability?.isAvailable === true, "La disponibilidad debería ser true");
-  assert(typeof json.whatsappMessage === "string" && json.whatsappMessage.trim().length > 0, "Falta el mensaje de WhatsApp");
-  assert(json.sheetWritePlan?.prepared === true, "Falta el plan de escritura para Sheets");
-  console.log("[ok] POST /api/demo/process");
-  console.log(`[ok] status=${json.status} price=${json.pricing?.total ?? "n/a"}`);
+  assert(json.ok === true, "Health debe devolver ok=true en el smoke seguro.");
+  assert(json.app === "Maternaly", `Health app inesperada: ${json.app}`);
+  if (requireProductionSafe) {
+    assert(json.database?.configured === true, "DATABASE_URL debe estar configurado para smoke production-like.");
+    assert(json.database?.reachable === true, "La base de datos debe ser alcanzable para smoke production-like.");
+    assert(json.whatsapp?.provider === "mock", "El smoke seguro debe ejecutarse con WHATSAPP_PROVIDER=mock.");
+    assert(json.googleSheets?.accessMode === "read_only", "El smoke seguro debe usar Sheets read_only.");
+    assert(json.googleSheets?.writeEnabled === false, "La escritura real en Sheets debe estar bloqueada.");
+    assert(json.llm?.provider === "mock", "El smoke seguro debe ejecutarse con LLM_PROVIDER=mock.");
+  }
+  console.log("[ok] GET /api/health");
 }
 
-async function checkTwilioWebhookEndpoint() {
+async function checkYCloudWebhookEndpoint() {
   const suffix = String(Date.now()).slice(-8);
-  const phoneNormalized = `346${suffix}`;
-  const sid = `SM_SMOKE_HTTP_${Date.now()}`;
-  const params = new URLSearchParams({
-    From: `whatsapp:+${phoneNormalized}`,
-    To: "whatsapp:+14155238886",
-    Body: "Hola, quiero hablar con una persona",
-    MessageSid: sid,
-  });
-  const token = process.env.TWILIO_WEBHOOK_AUTH_TOKEN;
-  const path = token
-    ? `/api/twilio/whatsapp?token=${encodeURIComponent(token)}`
-    : "/api/twilio/whatsapp";
-  const { response, text } = await request(path, {
+  const payload = {
+    id: `ycloud_smoke_${suffix}`,
+    from: `+346${suffix}`,
+    to: "+34944000000",
+    text: "Hola, quiero informacion sobre AIPAP Agua",
+    type: "text",
+  };
+
+  const { response, text } = await request("/api/webhooks/ycloud", {
     method: "POST",
     headers: {
-      "content-type": "application/x-www-form-urlencoded",
+      "content-type": "application/json",
     },
-    body: params,
+    body: JSON.stringify(payload),
   });
 
-  assert(response.ok, `/api/twilio/whatsapp devolvió ${response.status}: ${text}`);
-  assert(text.startsWith('<?xml version="1.0" encoding="UTF-8"?>'), "Twilio no devolvió XML");
-  assert(text.includes("<Response>") && text.includes("</Response>"), "Twilio no devolvió TwiML Response");
-  assert(text.includes("<Message>"), "Twilio no devolvió respuesta de handoff");
-  console.log("[ok] POST /api/twilio/whatsapp");
+  if (response.status === 401) {
+    console.log("[skip] POST /api/webhooks/ycloud requiere firma configurada");
+    return;
+  }
 
-  const { response: listResponse, text: listText } = await request(
-    `/api/conversations?query=${phoneNormalized}`,
-  );
-  assert(listResponse.ok, `/api/conversations devolvió ${listResponse.status}: ${listText}`);
+  assert(response.ok, `/api/webhooks/ycloud devolvio ${response.status}: ${text}`);
 
-  const json = JSON.parse(listText);
-  assert(json.ok === true, "/api/conversations no devolvió ok=true");
-  assert(
-    json.conversations?.some(
-      (conversation) =>
-        conversation.phoneNormalized === phoneNormalized &&
-        conversation.mode === "human" &&
-        conversation.events?.some((event) => event.eventType === "human_requested"),
-    ),
-    "La conversación Twilio smoke no aparece como handoff humano",
-  );
-  console.log("[ok] GET /api/conversations Twilio handoff");
+  const json = JSON.parse(text);
+  assert(json.ok === true, "/api/webhooks/ycloud no devolvio ok=true");
+  assert(json.provider === "ycloud", "El webhook debe normalizar provider=ycloud");
+  assert(typeof json.conversationId === "string" && json.conversationId.length > 0, "Falta conversationId");
+  console.log("[ok] POST /api/webhooks/ycloud");
 }
 
 async function main() {
-  console.log(`Smoke HTTP contra ${baseUrl}`);
+  console.log(`Smoke HTTP Maternaly contra ${baseUrl}`);
 
   await checkGet("/");
-  await checkGet("/demo");
-  await checkGet("/ops");
-  await checkGet("/internal");
-  await checkGet("/faq-demo");
-  await checkGet("/reservas-demo");
-  await checkGet("/admin");
+  await checkHealth();
   await checkGet("/admin/conversations");
-  await checkGet("/admin/registro-entrada");
-  await checkProcessEndpoint();
-  await checkTwilioWebhookEndpoint();
+  await checkYCloudWebhookEndpoint();
 
-  console.log("[ok] Smoke HTTP completado");
+  console.log("[ok] Smoke HTTP Maternaly completado sin WhatsApp real ni escritura real en Sheets");
 }
 
 main().catch((error) => {

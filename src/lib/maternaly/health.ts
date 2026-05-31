@@ -45,6 +45,18 @@ export async function getMaternalyHealth(env: NodeJS.ProcessEnv = process.env) {
     version: env.APP_VERSION ?? "0.1.0",
     environment: config.appEnv,
     runtimeTarget: productionLike ? "easypanel-container" : "local-development",
+    build: {
+      commit:
+        env.GIT_COMMIT ??
+        env.EASYPANEL_GIT_COMMIT_SHA ??
+        null,
+      source:
+        env.EASYPANEL_GIT_COMMIT_SHA
+          ? "easypanel"
+          : env.GIT_COMMIT
+            ? "env"
+            : "unknown",
+    },
     commit:
       env.GIT_COMMIT ??
       env.EASYPANEL_GIT_COMMIT_SHA ??
@@ -61,6 +73,7 @@ export async function getMaternalyHealth(env: NodeJS.ProcessEnv = process.env) {
     whatsapp: {
       provider: config.whatsappProvider,
       ycloudConfigured: config.configured.ycloud,
+      ycloudWebhookSecretConfigured: config.configured.ycloudWebhookSecret,
     },
     googleSheets: {
       configured: config.configured.googleSheets,
@@ -69,6 +82,7 @@ export async function getMaternalyHealth(env: NodeJS.ProcessEnv = process.env) {
         config.configured.googleSheets || config.sheetIds.length > 0
           ? "configured_or_public_read_candidate"
           : "not_configured",
+      writeEnabled: config.liveSheetsWriteEnabled,
       liveWriteEnabled: config.liveSheetsWriteEnabled,
       sheetIdsConfigured: config.sheetIds.length,
     },

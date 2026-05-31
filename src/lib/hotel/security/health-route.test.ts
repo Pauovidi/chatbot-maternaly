@@ -27,9 +27,16 @@ describe("health route", () => {
       expect.objectContaining({
         provider: "ycloud",
         ycloudConfigured: true,
+        ycloudWebhookSecretConfigured: false,
       }),
     );
     expect(json.database.provider).toBe("postgres");
+    expect(json.build).toEqual(
+      expect.objectContaining({
+        source: expect.any(String),
+      }),
+    );
+    expect(json.googleSheets.writeEnabled).toBe(false);
     expect(serialized).not.toContain("super-secret-token");
     expect(serialized).not.toContain("password@example");
   });

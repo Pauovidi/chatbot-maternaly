@@ -16,7 +16,7 @@ export default async function EntryLogPage() {
           <p className="demo-kicker">Panel protegido</p>
           <h1 className="page-title">Registro de entrada</h1>
           <p className="page-description">
-            Configura HOTEL_PANEL_USERNAME y HOTEL_PANEL_PASSWORD para acceder al
+            Configura PANEL_ADMIN_USERNAME y PANEL_ADMIN_PASSWORD para acceder al
             registro operativo en producción.
           </p>
         </section>

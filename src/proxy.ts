@@ -33,14 +33,14 @@ function unauthorized(message = "Authentication required", status = 401) {
   return new NextResponse(message, {
     status,
     headers: {
-      "WWW-Authenticate": 'Basic realm="Somos Muy Perros operaciones"',
+      "WWW-Authenticate": 'Basic realm="Maternaly operaciones"',
     },
   });
 }
 
 export function proxy(request: NextRequest) {
-  const username = process.env.HOTEL_PANEL_USERNAME;
-  const password = process.env.HOTEL_PANEL_PASSWORD;
+  const username = process.env.PANEL_ADMIN_USERNAME ?? process.env.HOTEL_PANEL_USERNAME;
+  const password = process.env.PANEL_ADMIN_PASSWORD ?? process.env.HOTEL_PANEL_PASSWORD;
 
   if (!username || !password) {
     return canBypassMissingCredentials()

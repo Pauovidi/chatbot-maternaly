@@ -6,6 +6,7 @@ const image = process.env.DOCKER_IMAGE ?? "chatbot-maternaly:local";
 const name = `maternaly-smoke-${Date.now()}`;
 const port = process.env.SMOKE_DOCKER_PORT ?? "3000";
 const databaseUrl = process.env.SMOKE_DATABASE_URL ?? process.env.DATABASE_URL;
+const dockerNetwork = process.env.SMOKE_DOCKER_NETWORK;
 
 if (!databaseUrl?.trim()) {
   console.error("SMOKE_DATABASE_URL or DATABASE_URL is required for production-like Docker smoke.");
@@ -47,9 +48,20 @@ try {
   await run("docker", [
     "run",
     "--rm",
+    ...(dockerNetwork ? ["--network", dockerNetwork] : []),
+    "-e",
+    `DATABASE_URL=${databaseUrl}`,
+    image,
+    "node",
+    "scripts/db-migrate.mjs",
+  ]);
+  await run("docker", [
+    "run",
+    "--rm",
     "-d",
     "--name",
     name,
+    ...(dockerNetwork ? ["--network", dockerNetwork] : []),
     "-p",
     `${port}:3000`,
     "-e",
@@ -80,6 +92,7 @@ try {
       ...process.env,
       SMOKE_BASE_URL: `http://127.0.0.1:${port}`,
       SMOKE_BASIC_AUTH: Buffer.from("smoke:smoke").toString("base64"),
+      SMOKE_REQUIRE_PRODUCTION_SAFE: "true",
     },
   });
 } finally {
