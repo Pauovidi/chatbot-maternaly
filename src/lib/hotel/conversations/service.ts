@@ -80,7 +80,6 @@ export interface ConversationResetResult {
 
 export interface DemoSeedDecisionEnv {
   NODE_ENV?: string;
-  VERCEL_ENV?: string;
   HOTEL_CONVERSATIONS_DEMO_SEED?: string;
 }
 
@@ -143,10 +142,6 @@ export function shouldAutoSeedConversations(
   env: DemoSeedDecisionEnv = process.env,
 ): boolean {
   if (env.HOTEL_CONVERSATIONS_DEMO_SEED === "true") {
-    return true;
-  }
-
-  if (env.VERCEL_ENV === "preview") {
     return true;
   }
 

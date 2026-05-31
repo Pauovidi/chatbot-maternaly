@@ -1,0 +1,85 @@
+{
+  "version": 1,
+  "generated_from": [
+    "reports/maternaly_sheets_audit_202605311628.md",
+    "reports/maternaly_sheets_audit_202605311628.json"
+  ],
+  "default_write_mode": "dry_run",
+  "live_writes_enabled": false,
+  "sheets": [
+    {
+      "id": "163BD-mjKeYGx7bjjUzW_FUYhwMUniLfHlhPnByZWOfI",
+      "role": "informational_session_leads",
+      "access": "public_read",
+      "tabs": [
+        {
+          "gid": 0,
+          "title": "gid-0",
+          "detected_layout": "title_row_then_contact_rows",
+          "columns": {
+            "name": "NOMBRE",
+            "surname": "APELLIDOS",
+            "phone": "TELÉFONO",
+            "payment_or_date_note": "FP",
+            "observations": "OBSERVACIONES"
+          },
+          "read_strategy": "append-like contact list; infer service from title row only",
+          "write_strategy": "blocked",
+          "risks": [
+            "No clear date column",
+            "No clear time column",
+            "No explicit service column",
+            "Do not write until an explicit TEST_BOT_WRITES tab exists"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "1p74UI3SUFgtHCc5mSdW0RnmV2pnGECBTBudJz8YF5Do",
+      "role": "test_or_paid_session_records",
+      "access": "public_read",
+      "tabs": [
+        {
+          "gid": 0,
+          "title": "gid-0",
+          "detected_layout": "participant_rows",
+          "columns": {
+            "name": "NOMBRE",
+            "surname": "APELLIDOS",
+            "phone": "TFNO",
+            "test_date": "F. TEST",
+            "time": "HORA",
+            "staff": "REALIZADO POR",
+            "payment": "PAGO",
+            "payment_date": "FECHA PAGO",
+            "payment_method": "FORMA PAGO",
+            "observations": "OBSERVACIONES"
+          },
+          "read_strategy": "read participant rows and payment context",
+          "write_strategy": "dry_run_append_only_to_TEST_BOT_WRITES",
+          "risks": [
+            "No explicit service column",
+            "Payment fields may contain mixed amount/date semantics",
+            "Live writes require Editor permission and whitelist"
+          ]
+        }
+      ]
+    }
+  ],
+  "safe_write_target": {
+    "tab": "TEST_BOT_WRITES",
+    "operation": "append",
+    "required_columns": [
+      "status",
+      "service",
+      "session",
+      "contact_name",
+      "phone",
+      "email",
+      "people_count",
+      "pregnancy_week",
+      "observations",
+      "idempotency_key"
+    ]
+  }
+}

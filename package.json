@@ -23,7 +23,7 @@
     "maternaly:sheets:dry-run-write": "tsx scripts/maternaly-sheets-dry-run-write.ts",
     "conversations:reset": "tsx scripts/conversations-reset.ts",
     "docker:build": "docker build -t chatbot-maternaly:local .",
-    "docker:run": "docker run --rm -p 3000:3000 --env-file .env.local chatbot-maternaly:local",
+    "docker:run": "docker run --rm -p 3000:3000 chatbot-maternaly:local",
     "smoke:docker": "node scripts/smoke-docker.mjs",
     "db:migrate": "node scripts/db-migrate.mjs",
     "db:setup": "npm run db:migrate",

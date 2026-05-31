@@ -135,14 +135,12 @@ class MemoryConversationStore implements ConversationStore {
 }
 
 describe("conversation service", () => {
-  it("auto-seeds local and preview empty stores without seeding production by default", async () => {
+  it("auto-seeds local empty stores without seeding production by default", async () => {
     expect(shouldAutoSeedConversations({ NODE_ENV: "development" })).toBe(true);
-    expect(shouldAutoSeedConversations({ NODE_ENV: "production", VERCEL_ENV: "preview" })).toBe(true);
-    expect(shouldAutoSeedConversations({ NODE_ENV: "production", VERCEL_ENV: "production" })).toBe(false);
+    expect(shouldAutoSeedConversations({ NODE_ENV: "production" })).toBe(false);
     expect(
       shouldAutoSeedConversations({
         NODE_ENV: "production",
-        VERCEL_ENV: "production",
         HOTEL_CONVERSATIONS_DEMO_SEED: "true",
       }),
     ).toBe(true);
@@ -150,15 +148,13 @@ describe("conversation service", () => {
     const store = new MemoryConversationStore();
     await expect(
       ensureDemoConversationSeed(store, {
-        NODE_ENV: "production",
-        VERCEL_ENV: "preview",
+        NODE_ENV: "development",
       }),
     ).resolves.toBe(true);
     expect((await store.list()).length).toBeGreaterThanOrEqual(3);
     await expect(
       ensureDemoConversationSeed(store, {
-        NODE_ENV: "production",
-        VERCEL_ENV: "preview",
+        NODE_ENV: "development",
       }),
     ).resolves.toBe(false);
 
@@ -166,7 +162,6 @@ describe("conversation service", () => {
     await expect(
       ensureDemoConversationSeed(productionStore, {
         NODE_ENV: "production",
-        VERCEL_ENV: "production",
       }),
     ).resolves.toBe(false);
     expect(await productionStore.list()).toHaveLength(0);
@@ -184,7 +179,6 @@ describe("conversation service", () => {
     await expect(
       ensureDemoConversationSeed(store, {
         NODE_ENV: "production",
-        VERCEL_ENV: "preview",
       }),
     ).resolves.toBe(false);
     expect(await store.list()).toHaveLength(0);

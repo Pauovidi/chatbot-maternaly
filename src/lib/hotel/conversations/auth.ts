@@ -11,6 +11,8 @@ export interface PanelAuthResult {
 type PanelAuthEnv = {
   NODE_ENV?: string;
   VERCEL_ENV?: string;
+  PANEL_ADMIN_USERNAME?: string;
+  PANEL_ADMIN_PASSWORD?: string;
   HOTEL_PANEL_USERNAME?: string;
   HOTEL_PANEL_PASSWORD?: string;
   HOTEL_PANEL_ALLOW_LOCAL_AUTH_BYPASS?: string;
@@ -60,8 +62,8 @@ export function verifyPanelAuthorization(
   authorizationHeader: string | null,
   env: PanelAuthEnv = process.env,
 ): PanelAuthResult {
-  const expectedUsername = env.HOTEL_PANEL_USERNAME;
-  const expectedPassword = env.HOTEL_PANEL_PASSWORD;
+  const expectedUsername = env.PANEL_ADMIN_USERNAME ?? env.HOTEL_PANEL_USERNAME;
+  const expectedPassword = env.PANEL_ADMIN_PASSWORD ?? env.HOTEL_PANEL_PASSWORD;
 
   if (!expectedUsername || !expectedPassword) {
     if (canBypassMissingCredentials(env)) {
@@ -96,7 +98,7 @@ export function verifyPanelAuthorization(
       {
         status: 401,
         headers: {
-          "WWW-Authenticate": 'Basic realm="Somos Muy Perros conversaciones"',
+          "WWW-Authenticate": 'Basic realm="Maternaly operaciones"',
         },
       },
     ),
@@ -116,7 +118,7 @@ export function buildBasicAuthChallengeResponse(): Response {
   return new Response("Authentication required", {
     status: 401,
     headers: {
-      "WWW-Authenticate": 'Basic realm="Somos Muy Perros operaciones"',
+      "WWW-Authenticate": 'Basic realm="Maternaly operaciones"',
     },
   });
 }

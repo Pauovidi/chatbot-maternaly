@@ -11,7 +11,7 @@ export const dynamic = "force-dynamic";
 function validateWebhookToken(request: Request): boolean {
   const expected = process.env.TWILIO_WEBHOOK_AUTH_TOKEN;
   if (!expected) {
-    return process.env.NODE_ENV !== "production" || process.env.VERCEL_ENV === "preview";
+    return process.env.NODE_ENV !== "production";
   }
 
   const url = new URL(request.url);

@@ -1,6 +1,3 @@
-import os from "node:os";
-import path from "node:path";
-
 export type HotelPersistenceProvider = "postgres" | "file-volume" | "file-local" | "file-tmp";
 
 export interface HotelPersistenceConfig {
@@ -9,10 +6,17 @@ export interface HotelPersistenceConfig {
   databaseUrlConfigured: boolean;
   durableFileBaseDir?: string;
   isProduction: boolean;
+  runtimeTarget: "easypanel-container" | "local-development";
+  productionReady: boolean;
+  unsafeReason?: string;
 }
 
 const PRODUCTION_DATA_DIR = "/data";
-const TMP_STORE_DIR = "hotel-canino-demo";
+
+function joinStorePath(dir: string, fileName: string): string {
+  const separator = dir.includes("\\") ? "\\" : "/";
+  return `${dir.replace(/[\\/]+$/, "")}${separator}${fileName}`;
+}
 
 function normalizeProvider(value: string | undefined): HotelPersistenceProvider | undefined {
   const normalized = value?.trim().toLowerCase();
@@ -41,43 +45,33 @@ export function readHotelPersistenceConfig(
   const configuredProvider = env.HOTEL_PERSISTENCE_PROVIDER?.trim();
   const explicitProvider = normalizeProvider(configuredProvider);
   const isProduction = env.NODE_ENV === "production";
-  const isVercelPreview = env.VERCEL_ENV === "preview";
-  const isVercelRuntime = Boolean(env.VERCEL);
   const databaseUrlConfigured = Boolean(env.DATABASE_URL?.trim());
-  const explicitDurableFileBaseDir = Boolean(
-    env.HOTEL_FILE_STORE_DIR?.trim() || env.HOTEL_STORE_DIR?.trim(),
-  );
   const durableFileBaseDir =
     env.HOTEL_FILE_STORE_DIR?.trim() ||
     env.HOTEL_STORE_DIR?.trim() ||
-    (isProduction && !isVercelPreview ? PRODUCTION_DATA_DIR : undefined);
+    (!isProduction ? undefined : PRODUCTION_DATA_DIR);
+  const allowUnsafeProductionFileStore =
+    env.MATERNALY_ALLOW_UNSAFE_PRODUCTION_FILE_STORE === "true";
+  const provider =
+    explicitProvider ??
+    (databaseUrlConfigured || isProduction ? "postgres" : "file-local");
+  const unsafeReason =
+    isProduction && provider !== "postgres"
+      ? "Production on EasyPanel requires Postgres. File stores are disabled unless MATERNALY_ALLOW_UNSAFE_PRODUCTION_FILE_STORE=true."
+      : isProduction && provider === "postgres" && !databaseUrlConfigured
+        ? "DATABASE_URL is required for production on EasyPanel."
+        : undefined;
 
   return {
-    provider:
-      explicitProvider ??
-      (databaseUrlConfigured && isProduction
-        ? "postgres"
-        : isVercelRuntime && !explicitDurableFileBaseDir
-          ? "file-tmp"
-        : isVercelPreview
-          ? "file-tmp"
-          : isProduction
-            ? "file-volume"
-            : "file-local"),
+    provider: unsafeReason && provider !== "postgres" && !allowUnsafeProductionFileStore ? "postgres" : provider,
     configuredProvider,
     databaseUrlConfigured,
     durableFileBaseDir,
     isProduction,
+    runtimeTarget: isProduction ? "easypanel-container" : "local-development",
+    productionReady: !unsafeReason || (provider !== "postgres" && allowUnsafeProductionFileStore),
+    unsafeReason,
   };
-}
-
-function resolveTmpStorePath(fileName: string): string {
-  return path.join(os.tmpdir(), TMP_STORE_DIR, fileName);
-}
-
-function isRootDataPath(value: string): boolean {
-  const normalized = value.replaceAll("\\", "/").replace(/\/+$/, "");
-  return normalized === PRODUCTION_DATA_DIR || normalized.startsWith(`${PRODUCTION_DATA_DIR}/`);
 }
 
 export function resolveJsonStorePath(input: {
@@ -87,23 +81,24 @@ export function resolveJsonStorePath(input: {
   env?: NodeJS.ProcessEnv;
 }): string {
   const env = input.env ?? process.env;
-  const isVercelPreview = env.VERCEL_ENV === "preview";
+  const config = readHotelPersistenceConfig(env);
+  const unsafeFileStoreAllowed =
+    !config.isProduction || env.MATERNALY_ALLOW_UNSAFE_PRODUCTION_FILE_STORE === "true";
+
+  if (!unsafeFileStoreAllowed) {
+    throw new Error(
+      "JSON file store is disabled in production for Maternaly. Configure DATABASE_URL and run migrations.",
+    );
+  }
+
   const explicitPath = input.pathEnv ? env[input.pathEnv]?.trim() : undefined;
   if (explicitPath) {
-    if (isVercelPreview && isRootDataPath(explicitPath)) {
-      return resolveTmpStorePath(path.basename(explicitPath));
-    }
-
     return explicitPath;
   }
 
   const explicitDir = input.dirEnv ? env[input.dirEnv]?.trim() : undefined;
   if (explicitDir) {
-    if (isVercelPreview && isRootDataPath(explicitDir)) {
-      return resolveTmpStorePath(input.fileName);
-    }
-
-    return path.join(explicitDir, input.fileName);
+    return joinStorePath(explicitDir, input.fileName);
   }
 
   const sharedFilePath = env.HOTEL_FILE_STORE_PATH?.trim();
@@ -111,18 +106,9 @@ export function resolveJsonStorePath(input: {
     return sharedFilePath;
   }
 
-  const config = readHotelPersistenceConfig(env);
-  if (config.provider === "file-tmp" || (isVercelPreview && config.provider !== "postgres")) {
-    return resolveTmpStorePath(input.fileName);
-  }
-
   if (config.provider === "file-volume" || config.isProduction) {
-    return path.join(config.durableFileBaseDir ?? PRODUCTION_DATA_DIR, input.fileName);
+    return joinStorePath(config.durableFileBaseDir ?? PRODUCTION_DATA_DIR, input.fileName);
   }
 
-  if (env.VERCEL) {
-    return resolveTmpStorePath(input.fileName);
-  }
-
-  return path.join(".demo-state", input.fileName);
+  return joinStorePath(".demo-state", input.fileName);
 }

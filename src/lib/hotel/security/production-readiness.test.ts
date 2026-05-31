@@ -21,6 +21,7 @@ describe("EasyPanel production readiness", () => {
     expect(dockerfile).toContain('CMD ["node", "server.js"]');
     expect(dockerfile).toContain("EXPOSE 3000");
     expect(dockerfile).toContain("rm -rf .next/standalone/.demo-state");
+    expect(dockerfile).toContain(".next/standalone/bot-maternaly-*.json");
     expect(dockerfile).toContain(".next/standalone/bot-somos-muy-perros-*.json");
   });
 
@@ -30,6 +31,7 @@ describe("EasyPanel production readiness", () => {
     expect(dockerignore).toMatch(/^\.env$/m);
     expect(dockerignore).toMatch(/^\.env\.\*$/m);
     expect(dockerignore).toMatch(/^\.tokens$/m);
+    expect(dockerignore).toMatch(/^bot-maternaly-\*\.json$/m);
     expect(dockerignore).toMatch(/^bot-somos-muy-perros-f72ee12e98cb\.json$/m);
     expect(dockerignore).toMatch(/\*credential\*/);
     expect(dockerignore).toMatch(/\*secret\*/);

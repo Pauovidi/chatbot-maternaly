@@ -18,6 +18,7 @@ RUN rm -rf .next/standalone/.demo-state \
   .next/standalone/*credential* \
   .next/standalone/*credentials* \
   .next/standalone/*secret* \
+  .next/standalone/bot-maternaly-*.json \
   .next/standalone/bot-somos-muy-perros-*.json
 
 FROM node:22-bookworm-slim AS runner

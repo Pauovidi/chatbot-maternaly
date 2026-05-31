@@ -2,9 +2,15 @@
 
 import { spawn } from "node:child_process";
 
-const image = process.env.DOCKER_IMAGE ?? "hotel-canino-demo:local";
-const name = `hotel-canino-demo-smoke-${Date.now()}`;
+const image = process.env.DOCKER_IMAGE ?? "chatbot-maternaly:local";
+const name = `maternaly-smoke-${Date.now()}`;
 const port = process.env.SMOKE_DOCKER_PORT ?? "3000";
+const databaseUrl = process.env.SMOKE_DATABASE_URL ?? process.env.DATABASE_URL;
+
+if (!databaseUrl?.trim()) {
+  console.error("SMOKE_DATABASE_URL or DATABASE_URL is required for production-like Docker smoke.");
+  process.exit(1);
+}
 
 function run(command, args, options = {}) {
   return new Promise((resolve, reject) => {
@@ -21,7 +27,7 @@ function run(command, args, options = {}) {
 
 async function waitForHealth() {
   const url = `http://127.0.0.1:${port}/api/health`;
-  const deadline = Date.now() + 30000;
+  const deadline = Date.now() + 45000;
   while (Date.now() < deadline) {
     try {
       const response = await fetch(url);
@@ -47,21 +53,25 @@ try {
     "-p",
     `${port}:3000`,
     "-e",
+    "APP_NAME=Maternaly",
+    "-e",
+    "APP_ENV=production",
+    "-e",
     "NODE_ENV=production",
     "-e",
-    "HOTEL_PANEL_USERNAME=smoke",
+    "WHATSAPP_PROVIDER=mock",
     "-e",
-    "HOTEL_PANEL_PASSWORD=smoke",
+    "GOOGLE_SHEETS_ACCESS_MODE=read_only",
     "-e",
-    "TWILIO_WEBHOOK_AUTH_TOKEN=smoke-token",
+    "BOT_SHEETS_LIVE_WRITE_ENABLED=false",
     "-e",
-    "HOTEL_CONVERSATIONS_STORE_PATH=/data/conversations.json",
+    "LLM_PROVIDER=mock",
     "-e",
-    "HOTEL_DEMO_STORE_PATH=/data/hotel-store.json",
+    "PANEL_ADMIN_USERNAME=smoke",
     "-e",
-    "HOTEL_DOMAIN_STORE_PATH=/data/hotel-domain.json",
+    "PANEL_ADMIN_PASSWORD=smoke",
     "-e",
-    "HOTEL_EMAIL_STATE_STORE_PATH=/data/email-state.json",
+    `DATABASE_URL=${databaseUrl}`,
     image,
   ]);
   await waitForHealth();
@@ -70,7 +80,6 @@ try {
       ...process.env,
       SMOKE_BASE_URL: `http://127.0.0.1:${port}`,
       SMOKE_BASIC_AUTH: Buffer.from("smoke:smoke").toString("base64"),
-      TWILIO_WEBHOOK_AUTH_TOKEN: "smoke-token",
     },
   });
 } finally {

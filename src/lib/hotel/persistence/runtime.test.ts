@@ -10,98 +10,72 @@ describe("production persistence runtime", () => {
 
     expect(config.provider).toBe("postgres");
     expect(config.databaseUrlConfigured).toBe(true);
+    expect(config.runtimeTarget).toBe("easypanel-container");
+    expect(config.productionReady).toBe(true);
   });
 
-  it("falls back to /data file-volume in production instead of /tmp", () => {
-    const filePath = resolveJsonStorePath({
-      fileName: "hotel-store.json",
-      env: {
-        NODE_ENV: "production",
-        HOTEL_PERSISTENCE_PROVIDER: "file-volume",
-      } as NodeJS.ProcessEnv,
-    });
+  it("requires DATABASE_URL in production instead of silently choosing a file store", () => {
+    const config = readHotelPersistenceConfig({
+      NODE_ENV: "production",
+    } as NodeJS.ProcessEnv);
 
-    const normalized = filePath.replaceAll("\\", "/");
-    expect(normalized).toBe("/data/hotel-store.json");
-    expect(normalized).not.toContain("/tmp");
+    expect(config.provider).toBe("postgres");
+    expect(config.databaseUrlConfigured).toBe(false);
+    expect(config.productionReady).toBe(false);
+    expect(config.unsafeReason).toContain("DATABASE_URL");
+    expect(() =>
+      resolveJsonStorePath({
+        fileName: "hotel-store.json",
+        env: {
+          NODE_ENV: "production",
+        } as NodeJS.ProcessEnv,
+      }),
+    ).toThrow(/JSON file store is disabled/);
   });
 
-  it("uses tmp storage for Vercel Preview instead of trying to create /data", () => {
+  it("does not switch to tmp storage for Vercel Preview", () => {
     const config = readHotelPersistenceConfig({
       NODE_ENV: "production",
       VERCEL: "1",
       VERCEL_ENV: "preview",
     } as NodeJS.ProcessEnv);
-    const filePath = resolveJsonStorePath({
-      fileName: "hotel-conversations.json",
-      env: {
-        NODE_ENV: "production",
-        VERCEL: "1",
-        VERCEL_ENV: "preview",
-      } as NodeJS.ProcessEnv,
-    });
 
-    const normalized = filePath.replaceAll("\\", "/");
-    expect(config.provider).toBe("file-tmp");
-    expect(normalized).toContain("/hotel-canino-demo/hotel-conversations.json");
-    expect(normalized).not.toBe("/data/hotel-conversations.json");
+    expect(config.provider).toBe("postgres");
+    expect(config.runtimeTarget).toBe("easypanel-container");
+    expect(config.productionReady).toBe(false);
   });
 
-  it("uses tmp storage on Vercel production when no durable store is configured", () => {
+  it("blocks explicit file-volume in production unless the unsafe opt-in is set", () => {
     const config = readHotelPersistenceConfig({
       NODE_ENV: "production",
-      VERCEL: "1",
-      VERCEL_ENV: "production",
+      HOTEL_PERSISTENCE_PROVIDER: "file-volume",
     } as NodeJS.ProcessEnv);
-    const filePath = resolveJsonStorePath({
-      fileName: "hotel-canino-domain.json",
-      env: {
-        NODE_ENV: "production",
-        VERCEL: "1",
-        VERCEL_ENV: "production",
-      } as NodeJS.ProcessEnv,
-    });
 
-    const normalized = filePath.replaceAll("\\", "/");
-    expect(config.provider).toBe("file-tmp");
-    expect(normalized).toContain("/hotel-canino-demo/hotel-canino-domain.json");
-    expect(normalized).not.toBe("/data/hotel-canino-domain.json");
+    expect(config.provider).toBe("postgres");
+    expect(config.productionReady).toBe(false);
+    expect(config.unsafeReason).toContain("Postgres");
   });
 
-  it("redirects /data file overrides to tmp on Vercel Preview", () => {
-    const byDir = resolveJsonStorePath({
-      fileName: "hotel-conversations.json",
-      dirEnv: "HOTEL_CONVERSATIONS_STORE_DIR",
-      env: {
-        NODE_ENV: "production",
-        VERCEL: "1",
-        VERCEL_ENV: "preview",
-        HOTEL_CONVERSATIONS_STORE_DIR: "/data",
-      } as NodeJS.ProcessEnv,
-    }).replaceAll("\\", "/");
-    const byPath = resolveJsonStorePath({
+  it("allows explicit production file store only with unsafe opt-in", () => {
+    const filePath = resolveJsonStorePath({
       fileName: "hotel-conversations.json",
       pathEnv: "HOTEL_CONVERSATIONS_STORE_PATH",
       env: {
         NODE_ENV: "production",
-        VERCEL: "1",
-        VERCEL_ENV: "preview",
         HOTEL_CONVERSATIONS_STORE_PATH: "/data/conversations.json",
+        MATERNALY_ALLOW_UNSAFE_PRODUCTION_FILE_STORE: "true",
       } as NodeJS.ProcessEnv,
-    }).replaceAll("\\", "/");
+    });
 
-    expect(byDir).toContain("/hotel-canino-demo/hotel-conversations.json");
-    expect(byPath).toContain("/hotel-canino-demo/conversations.json");
-    expect(byDir).not.toContain("/data/");
-    expect(byPath).not.toContain("/data/");
+    expect(filePath).toBe("/data/conversations.json");
   });
 
-  it("honors explicit durable file paths", () => {
+  it("honors explicit durable file paths in development", () => {
     const filePath = resolveJsonStorePath({
       fileName: "hotel-store.json",
       pathEnv: "HOTEL_DEMO_STORE_PATH",
       env: {
-        NODE_ENV: "production",
+        NODE_ENV: "development",
         HOTEL_DEMO_STORE_PATH: "/data/hotel-store.json",
       } as NodeJS.ProcessEnv,
     });

@@ -9,6 +9,8 @@ Proyecto Next.js para arrancar el chatbot WhatsApp de Maternaly a partir de la b
 - Twilio queda como provider legacy si `WHATSAPP_PROVIDER=twilio`.
 - Persistencia objetivo: Postgres por `DATABASE_URL`.
 - Deploy objetivo: EasyPanel con Docker.
+- Runtime production: contenedor EasyPanel, no Vercel.
+- Produccion requiere Postgres por `DATABASE_URL`; el file store queda solo para desarrollo local.
 - Google Sheets: lectura/auditoria para los dos Sheets reales.
 - Escritura Sheets: bloqueada por defecto; solo `WritePlan` y dry-run.
 - LLM: interprete estructurado con fallback determinista cuando no exista `OPENAI_API_KEY`.
@@ -34,9 +36,23 @@ npm run build
 npm run maternaly:health
 npm run maternaly:sheets:audit
 npm run maternaly:sheets:dry-run-write
+npm run db:migrate
+npm run easypanel:check
 ```
 
 Los scripts `hotel:*` se conservan temporalmente como base tecnica heredada.
+
+## EasyPanel
+
+La guia operativa esta en `docs/easypanel.md`. Primer deploy seguro:
+
+- `WHATSAPP_PROVIDER=mock`
+- `LLM_PROVIDER=mock`
+- `GOOGLE_SHEETS_ACCESS_MODE=read_only`
+- `BOT_SHEETS_LIVE_WRITE_ENABLED=false`
+- `DATABASE_URL` enlazado desde Postgres EasyPanel
+
+No despliegues Maternaly en Vercel ni reutilices el proyecto vivo de Somos Perros.
 
 ## Variables
 

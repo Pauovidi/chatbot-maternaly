@@ -15,8 +15,8 @@ describe("panel auth", () => {
   it("accepts valid basic credentials", () => {
     const result = verifyPanelAuthorization(basic("ops", "secret"), {
       NODE_ENV: "production",
-      HOTEL_PANEL_USERNAME: "ops",
-      HOTEL_PANEL_PASSWORD: "secret",
+      PANEL_ADMIN_USERNAME: "ops",
+      PANEL_ADMIN_PASSWORD: "secret",
     });
     expect(result.ok).toBe(true);
     expect(result.agent).toBe("ops");
@@ -34,10 +34,11 @@ describe("panel auth", () => {
   it("rejects invalid basic credentials", () => {
     const result = verifyPanelAuthorization(basic("ops", "bad"), {
       NODE_ENV: "production",
-      HOTEL_PANEL_USERNAME: "ops",
-      HOTEL_PANEL_PASSWORD: "secret",
+      PANEL_ADMIN_USERNAME: "ops",
+      PANEL_ADMIN_PASSWORD: "secret",
     });
     expect(result.ok).toBe(false);
     expect(result.response?.status).toBe(401);
+    expect(result.response?.headers.get("WWW-Authenticate")).toContain("Maternaly");
   });
 });

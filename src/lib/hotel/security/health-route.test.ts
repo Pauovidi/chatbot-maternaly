@@ -10,7 +10,8 @@ describe("health route", () => {
   });
 
   it("returns app, WhatsApp and persistence status without secrets", async () => {
-    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("NODE_ENV", "development");
+    process.env.APP_ENV = "development";
     process.env.WHATSAPP_PROVIDER = "ycloud";
     process.env.YCLOUD_API_KEY = "super-secret-token";
     process.env.DATABASE_URL = "postgres://user:password@example.test/db";
@@ -31,5 +32,22 @@ describe("health route", () => {
     expect(json.database.provider).toBe("postgres");
     expect(serialized).not.toContain("super-secret-token");
     expect(serialized).not.toContain("password@example");
+  });
+
+  it("fails production health when EasyPanel Postgres is not configured", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    process.env.APP_ENV = "production";
+    process.env.APP_NAME = "Maternaly";
+    process.env.WHATSAPP_PROVIDER = "mock";
+    delete process.env.DATABASE_URL;
+
+    const response = await GET();
+    const json = await response.json();
+
+    expect(response.status).toBe(503);
+    expect(json.ok).toBe(false);
+    expect(json.runtimeTarget).toBe("easypanel-container");
+    expect(json.database.productionReady).toBe(false);
+    expect(json.database.warning).toContain("DATABASE_URL");
   });
 });
