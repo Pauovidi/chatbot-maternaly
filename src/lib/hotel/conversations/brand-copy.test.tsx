@@ -63,9 +63,36 @@ describe("conversations panel visible demo copy", () => {
     expect(shellHtml).toContain("Maternaly");
     expect(shellHtml).toContain("Panel conversaciones");
     expect(shellHtml).toContain("Web Maternaly");
+    expect(shellHtml).not.toContain("<footer");
+    expect(shellHtml).not.toContain("El bot no confirma");
     expect(shellHtml).not.toContain("Demo hotel canino");
     expect(shellHtml).not.toContain("Formulario real");
     expect(shellHtml).not.toMatch(/>SM</);
+  });
+
+  it("keeps the visible shell on the Maternaly brand system", () => {
+    const surfaces = [
+      "src/app/layout.tsx",
+      "src/app/globals.css",
+      "src/components/public-site-header.tsx",
+      "src/components/site-shell.tsx",
+      "src/components/product-shell.tsx",
+      "src/components/public-chat-widget.tsx",
+    ]
+      .map(readSurface)
+      .join("\n");
+    const siteShell = readSurface("src/components/site-shell.tsx");
+    const productShell = readSurface("src/components/product-shell.tsx");
+    const header = readSurface("src/components/public-site-header.tsx");
+
+    expect(surfaces).toContain("Quicksand");
+    expect(surfaces).toContain("--primary: #d6aac7");
+    expect(surfaces).toContain("var(--primary");
+    expect(siteShell).not.toContain("PublicSiteFooter");
+    expect(productShell).not.toContain("PublicSiteFooter");
+    expect(header).not.toContain("HeartPulse");
+    expect(header).not.toContain("rounded-full bg-[#201911]");
+    expect(surfaces).not.toContain("El bot no confirma");
   });
 
   it("renders a non-empty Maternaly inbox with mock WhatsApp notice", () => {

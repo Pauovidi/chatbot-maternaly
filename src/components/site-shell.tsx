@@ -1,5 +1,4 @@
 import { demoOperationalBanner } from "@/components/demo-data";
-import { PublicSiteFooter } from "@/components/public-site-footer";
 import { PublicSiteHeader } from "@/components/public-site-header";
 
 export function SiteShell({
@@ -17,7 +16,6 @@ export function SiteShell({
         {compact ? null : <div className="demo-banner">{demoOperationalBanner}</div>}
         <div className="demo-main">{children}</div>
       </main>
-      <PublicSiteFooter />
     </div>
   );
 }

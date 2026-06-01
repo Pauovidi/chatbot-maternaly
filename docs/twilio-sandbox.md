@@ -62,6 +62,16 @@ Si `TWILIO_WEBHOOK_AUTH_TOKEN` esta definido, el endpoint exige `?token=...`, `x
 6. Abrir `/admin/conversations` y verificar que la conversacion aparece con canal `twilio_sandbox`, mensaje del usuario y respuesta del bot.
 7. Revisar logs de EasyPanel sin imprimir secretos.
 
+## Si no responde
+
+1. Comprobar `GET /api/twilio/whatsapp`. Debe devolver JSON con `ok=true`, `expectedMethod=POST`, `provider=twilio`, `tokenConfigured=true` y `mode=sandbox`.
+2. En Twilio Sandbox, confirmar que el webhook inbound apunta exactamente a `/api/twilio/whatsapp?token=<TWILIO_WEBHOOK_AUTH_TOKEN>` y que el metodo es `POST`.
+3. Revisar `GET /api/health`: `whatsapp.provider=twilio`, `whatsapp.twilio.configured=true`, `fromConfigured=true`, `webhookProtected=true` y `mode=sandbox`.
+4. Si Twilio muestra `401`, el token no coincide o falta en la URL/header. No imprimir el valor del token en logs ni capturas.
+5. Si Twilio muestra `404` o `5xx`, confirmar que EasyPanel ha redeployado la rama actual y revisar los logs del contenedor buscando entradas `[twilio:webhook]`.
+6. Si llega el webhook pero no aparece conversacion, verificar que `From`, `To`, `Body` y `MessageSid` llegan como `application/x-www-form-urlencoded`.
+7. Repetir con un `MessageSid` nuevo. El mismo `MessageSid` se deduplica para evitar duplicados por reintentos de Twilio.
+
 ## 5. Guardrails
 
 - Mantener `LLM_PROVIDER=mock`.

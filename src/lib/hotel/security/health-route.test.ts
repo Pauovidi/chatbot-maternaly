@@ -134,4 +134,31 @@ describe("health route", () => {
     expect(json.whatsapp.twilio.webhookProtected).toBe(false);
     expect(json.whatsapp.twilio.warning).toContain("TWILIO_WEBHOOK_AUTH_TOKEN");
   });
+
+  it("warns when Twilio is active without sender credentials", async () => {
+    vi.stubEnv("NODE_ENV", "development");
+    process.env.APP_ENV = "development";
+    process.env.WHATSAPP_PROVIDER = "twilio";
+    process.env.TWILIO_WEBHOOK_AUTH_TOKEN = "webhook-secret";
+    delete process.env.TWILIO_ACCOUNT_SID;
+    delete process.env.TWILIO_AUTH_TOKEN;
+    delete process.env.TWILIO_WHATSAPP_FROM;
+
+    const response = await GET();
+    const json = await response.json();
+    const serialized = JSON.stringify(json);
+
+    expect(response.status).toBe(200);
+    expect(json.whatsapp.twilio).toEqual(
+      expect.objectContaining({
+        configured: false,
+        fromConfigured: false,
+        webhookProtected: true,
+        mode: "unknown",
+        active: true,
+      }),
+    );
+    expect(json.whatsapp.twilio.warning).toContain("Twilio is active");
+    expect(serialized).not.toContain("webhook-secret");
+  });
 });

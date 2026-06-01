@@ -119,6 +119,8 @@ export async function getMaternalyHealth(env: NodeJS.ProcessEnv = process.env) {
   const twilioWebhookProtected = Boolean(env.TWILIO_WEBHOOK_AUTH_TOKEN?.trim());
   const twilioActiveWithoutWebhookProtection =
     productionLike && config.whatsappProvider === "twilio" && !twilioWebhookProtected;
+  const twilioActiveWithoutConfig =
+    config.whatsappProvider === "twilio" && !config.configured.twilio;
 
   return {
     ok,
@@ -180,7 +182,9 @@ export async function getMaternalyHealth(env: NodeJS.ProcessEnv = process.env) {
         active: config.whatsappProvider === "twilio",
         warning: twilioActiveWithoutWebhookProtection
           ? "TWILIO_WEBHOOK_AUTH_TOKEN is required when WHATSAPP_PROVIDER=twilio in production."
-          : undefined,
+          : twilioActiveWithoutConfig
+            ? "Twilio is active but TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN and sender configuration are incomplete."
+            : undefined,
       },
     },
     googleSheets: {

@@ -116,19 +116,19 @@ export function PublicChatWidget({
   }
 
   const widgetCard = (
-    <div className="flex h-[min(72vh,640px)] w-full flex-col overflow-hidden rounded-[30px] border border-black/8 bg-white shadow-[0_24px_80px_rgba(34,49,35,0.16)]">
-      <div className="flex items-center justify-between border-b border-black/8 bg-[#fffaf1] px-5 py-4">
+    <div className="flex h-[min(72vh,640px)] w-full flex-col overflow-hidden rounded-[30px] border border-[var(--primary-border)] bg-white shadow-[0_24px_80px_rgba(110,63,92,0.14)]">
+      <div className="flex items-center justify-between border-b border-[var(--primary-border)] bg-[var(--primary-soft)] px-5 py-4">
         <div>
-          <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[#8d6b51]">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[var(--primary-muted)]">
             WhatsApp V1
           </p>
-          <p className="text-sm font-semibold text-[#201911]">Maternaly</p>
+          <p className="text-sm font-semibold text-[var(--primary-text)]">Maternaly</p>
         </div>
         <div className="flex items-center gap-2">
           <button
             type="button"
             onClick={resetChat}
-            className="inline-flex items-center gap-1 rounded-full border border-black/8 bg-white px-3 py-1.5 text-xs font-medium text-[#4c3a2d] transition-colors hover:bg-[#f7f2e8]"
+            className="inline-flex items-center gap-1 rounded-full border border-[var(--primary-border)] bg-white px-3 py-1.5 text-xs font-medium text-[var(--primary-text)] transition-colors hover:bg-[var(--primary-soft-2)]"
           >
             <RotateCcw size={12} />
             Reiniciar chat
@@ -138,7 +138,7 @@ export function PublicChatWidget({
               type="button"
               onClick={() => setIsOpen(false)}
               aria-label="Cerrar chat"
-              className="text-[#4c3a2d]"
+              className="text-[var(--primary-text)]"
             >
               <X size={16} />
             </button>
@@ -148,7 +148,7 @@ export function PublicChatWidget({
 
       <div
         ref={messagesContainerRef}
-        className="flex-1 space-y-3 overflow-y-auto bg-[#f8f4ec] p-5"
+        className="flex-1 space-y-3 overflow-y-auto bg-[var(--primary-soft-2)] p-5"
         onScroll={() => {
           shouldAutoScrollRef.current = isNearBottom();
         }}
@@ -158,8 +158,8 @@ export function PublicChatWidget({
             key={`${message.role}-${index}`}
             className={`max-w-[90%] space-y-3 rounded-[24px] px-4 py-3.5 text-sm leading-6 whitespace-pre-line ${
               message.role === "user"
-                ? "ml-auto bg-[#201911] text-[#fffaf1]"
-                : "border border-black/8 bg-white text-[#201911] shadow-[0_6px_20px_rgba(34,49,35,0.08)]"
+                ? "ml-auto bg-[var(--primary)] text-white"
+                : "border border-[var(--primary-border)] bg-white text-[var(--primary-ink)] shadow-[0_6px_20px_rgba(110,63,92,0.08)]"
             }`}
           >
             <p>{message.text}</p>
@@ -169,7 +169,7 @@ export function PublicChatWidget({
                   <a
                     key={`${action.label}-${action.url}`}
                     href={action.url}
-                    className="rounded-full border border-[#d8c7b0] bg-[#fffaf1] px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-[#6f543d] transition-colors hover:bg-[#f2e4ce]"
+                    className="rounded-full border border-[var(--primary-border)] bg-[var(--primary-soft)] px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--primary-text)] transition-colors hover:bg-[var(--primary-soft-2)]"
                   >
                     {action.label}
                   </a>
@@ -179,15 +179,15 @@ export function PublicChatWidget({
           </div>
         ))}
         {loading ? (
-          <p className="text-xs uppercase tracking-[0.18em] text-[#8d6b51]">
+          <p className="text-xs uppercase tracking-[0.18em] text-[var(--primary-muted)]">
             Escribiendo...
           </p>
         ) : null}
         <div ref={bottomRef} aria-hidden="true" />
       </div>
 
-      <div className="border-t border-black/8 bg-white p-4">
-        <p className="mb-3 text-[11px] font-semibold uppercase tracking-[0.22em] text-[#8d6b51]">
+      <div className="border-t border-[var(--primary-border)] bg-white p-4">
+        <p className="mb-3 text-[11px] font-semibold uppercase tracking-[0.22em] text-[var(--primary-muted)]">
           Preguntas rápidas
         </p>
         <div className="mb-4 flex flex-wrap gap-2">
@@ -195,7 +195,7 @@ export function PublicChatWidget({
             <button
               key={action}
               type="button"
-              className="rounded-full border border-black/8 bg-[#fffaf1] px-3 py-2 text-xs font-medium text-[#4c3a2d] transition-colors hover:bg-[#f7f2e8]"
+              className="rounded-full border border-[var(--primary-border)] bg-[var(--primary-soft)] px-3 py-2 text-xs font-medium text-[var(--primary-text)] transition-colors hover:bg-[var(--primary-soft-2)]"
               onClick={() => sendMessage(action)}
               disabled={loading}
             >
@@ -212,7 +212,7 @@ export function PublicChatWidget({
           }}
         >
           <input
-            className="h-12 flex-1 rounded-2xl border border-black/10 bg-[#fffdf8] px-4 text-sm text-[#201911] outline-none transition-colors placeholder:text-[#8d6b51] focus:border-[#b98f67]"
+            className="public-chat-input h-12 flex-1 rounded-2xl border border-[var(--primary-border)] bg-white px-4 text-sm text-[var(--primary-ink)] outline-none transition-colors placeholder:text-[var(--primary-muted)] focus:border-[var(--primary)]"
             value={input}
             onChange={(event) => setInput(event.target.value)}
             placeholder="Escribe tu duda sobre servicios Maternaly"
@@ -220,7 +220,7 @@ export function PublicChatWidget({
           />
           <button
             type="submit"
-            className="inline-flex h-12 items-center justify-center gap-2 rounded-2xl bg-[#201911] px-4 text-sm font-semibold text-[#fffaf1] transition-transform hover:-translate-y-0.5 disabled:opacity-60"
+            className="public-chat-send-button inline-flex h-12 items-center justify-center gap-2 rounded-2xl bg-[var(--primary)] px-4 text-sm font-semibold text-white transition-transform hover:-translate-y-0.5 disabled:opacity-60"
             disabled={loading}
           >
             <Send size={16} />
@@ -245,7 +245,7 @@ export function PublicChatWidget({
           shouldAutoScrollRef.current = true;
           setIsOpen((prev) => !prev);
         }}
-        className="flex h-14 w-14 items-center justify-center rounded-full bg-[#201911] text-white shadow-lg"
+        className="flex h-14 w-14 items-center justify-center rounded-full bg-[var(--primary)] text-white shadow-lg"
         aria-label="Abrir chat"
       >
         <MessageCircle size={24} />

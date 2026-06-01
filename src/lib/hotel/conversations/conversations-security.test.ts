@@ -2,9 +2,12 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { POST as postTwilioWebhook } from "../../../app/api/twilio/whatsapp/route";
+import {
+  GET as getTwilioWebhook,
+  POST as postTwilioWebhook,
+} from "../../../app/api/twilio/whatsapp/route";
 import { POST as postConversationsReset } from "../../../app/api/conversations/reset/route";
 
 import { createStaticClientDirectory } from "@/lib/hotel/clients";
@@ -19,10 +22,18 @@ import { getConversationStore, resetConversationStoreForTests } from "./file-sto
 describe("conversations security", () => {
   let tempDir: string | undefined;
 
+  beforeEach(() => {
+    vi.spyOn(console, "info").mockImplementation(() => undefined);
+  });
+
   afterEach(() => {
+    vi.restoreAllMocks();
     vi.unstubAllEnvs();
     resetConversationStoreForTests();
     delete process.env.TWILIO_WEBHOOK_AUTH_TOKEN;
+    delete process.env.TWILIO_ACCOUNT_SID;
+    delete process.env.TWILIO_AUTH_TOKEN;
+    delete process.env.TWILIO_WHATSAPP_FROM;
     delete process.env.TWILIO_PROVIDER_MODE;
     delete process.env.WHATSAPP_PROVIDER;
     delete process.env.LLM_PROVIDER;
@@ -213,21 +224,66 @@ describe("conversations security", () => {
 
   it("rejects Twilio webhook calls with an invalid configured token", async () => {
     process.env.TWILIO_WEBHOOK_AUTH_TOKEN = "expected-token";
+    const infoSpy = vi.mocked(console.info);
 
     const response = await postTwilioWebhook(
       new Request("https://example.test/api/twilio/whatsapp", {
         method: "POST",
         headers: {
+          "content-type": "application/x-www-form-urlencoded",
           "x-hotel-webhook-token": "wrong-token",
         },
+        body: new URLSearchParams({
+          From: "whatsapp:+34600000099",
+          Body: "Mensaje privado que no debe salir en logs",
+          MessageSid: "SM_INVALID_TOKEN_001",
+        }),
       }),
     );
+
+    const logs = infoSpy.mock.calls.flat().join("\n");
 
     expect(response.status).toBe(401);
     expect(response.headers.get("Content-Type")).toContain("text/xml");
     expect(await response.text()).toBe(
       '<?xml version="1.0" encoding="UTF-8"?><Response></Response>',
     );
+    expect(logs).toContain("[twilio:webhook]");
+    expect(logs).toContain('"result":"rejected"');
+    expect(logs).toContain('"tokenPresent":true');
+    expect(logs).toContain('"tokenValidated":false');
+    expect(logs).not.toContain("wrong-token");
+    expect(logs).not.toContain("expected-token");
+    expect(logs).not.toContain("+34600000099");
+    expect(logs).not.toContain("Mensaje privado");
+  });
+
+  it("exposes a safe Twilio webhook diagnostic for console checks", async () => {
+    process.env.TWILIO_WEBHOOK_AUTH_TOKEN = "expected-token";
+    process.env.TWILIO_ACCOUNT_SID = "AC_safe_diagnostic";
+    process.env.TWILIO_AUTH_TOKEN = "twilio-secret";
+    process.env.TWILIO_WHATSAPP_FROM = "whatsapp:+14155238886";
+    process.env.TWILIO_PROVIDER_MODE = "sandbox";
+
+    const response = getTwilioWebhook();
+    const json = await response.json();
+    const serialized = JSON.stringify(json);
+
+    expect(response.status).toBe(200);
+    expect(json).toEqual(
+      expect.objectContaining({
+        ok: true,
+        endpoint: "/api/twilio/whatsapp",
+        expectedMethod: "POST",
+        provider: "twilio",
+        providerAvailable: true,
+        tokenConfigured: true,
+        mode: "sandbox",
+      }),
+    );
+    expect(serialized).not.toContain("expected-token");
+    expect(serialized).not.toContain("twilio-secret");
+    expect(serialized).not.toContain("AC_safe_diagnostic");
   });
 
   it("rejects production Twilio webhook calls when token is not configured", async () => {
@@ -267,6 +323,7 @@ describe("conversations security", () => {
     tempDir = mkdtempSync(path.join(os.tmpdir(), "hotel-twilio-webhook-"));
     process.env.HOTEL_CONVERSATIONS_STORE_DIR = tempDir;
     process.env.TWILIO_WEBHOOK_AUTH_TOKEN = "expected-token";
+    const infoSpy = vi.mocked(console.info);
 
     const response = await postTwilioWebhook(
       new Request("https://example.test/api/twilio/whatsapp", {
@@ -289,6 +346,7 @@ describe("conversations security", () => {
     const payload = JSON.parse(
       readFileSync(path.join(tempDir, "hotel-conversations.json"), "utf8"),
     );
+    const logs = infoSpy.mock.calls.flat().join("\n");
 
     expect(response.status).toBe(200);
     expect(response.headers.get("Content-Type")).toContain("text/xml");
@@ -307,6 +365,13 @@ describe("conversations security", () => {
         expect.objectContaining({ eventType: "human_requested" }),
       ]),
     );
+    expect(logs).toContain('"result":"accepted"');
+    expect(logs).toContain('"tokenPresent":true');
+    expect(logs).toContain('"tokenValidated":true');
+    expect(logs).toContain('"from":"+34…01"');
+    expect(logs).not.toContain("expected-token");
+    expect(logs).not.toContain("+34600000001");
+    expect(logs).not.toContain("Hola, quiero hablar con recepción");
   });
 
   it("returns valid TwiML, stores bot reply and deduplicates Twilio retries by MessageSid", async () => {
