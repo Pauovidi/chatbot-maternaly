@@ -486,6 +486,20 @@ export async function listConversationDashboard(
   };
 }
 
+export function createEmptyConversationDashboard(): ConversationDashboard {
+  return {
+    conversations: [],
+    stats: {
+      total: 0,
+      unread: 0,
+      pending: 0,
+      human: 0,
+      read: 0,
+      archived: 0,
+    },
+  };
+}
+
 export async function resetConversations(
   options: { dryRun?: boolean; confirm?: string } = {},
   store: ConversationStore = getConversationStore(),

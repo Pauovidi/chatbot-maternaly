@@ -1,7 +1,10 @@
 import { ConversationsPanel } from "./panel";
 import { SiteShell } from "@/components/site-shell";
 import { verifyPanelPageAccess } from "@/lib/hotel/conversations/auth";
-import { listConversationDashboard } from "@/lib/hotel/conversations/service";
+import {
+  createEmptyConversationDashboard,
+  listConversationDashboard,
+} from "@/lib/hotel/conversations/service";
 import { readMaternalyRuntimeConfig } from "@/lib/maternaly/config/env";
 
 export const dynamic = "force-dynamic";
@@ -25,8 +28,16 @@ export default async function ConversationsAdminPage() {
     );
   }
 
-  const dashboard = await listConversationDashboard();
+  let dashboard = createEmptyConversationDashboard();
+  let initialLoadError: string | undefined;
+  try {
+    dashboard = await listConversationDashboard();
+  } catch {
+    initialLoadError =
+      "No se pudo cargar la store de conversaciones. Revisa /api/health y ejecuta migraciones si falta Postgres.";
+  }
   const runtimeConfig = readMaternalyRuntimeConfig();
+  const initialLastUpdatedAt = new Date().toISOString();
 
   return (
     <SiteShell compact>
@@ -39,6 +50,11 @@ export default async function ConversationsAdminPage() {
       </section>
       <ConversationsPanel
         initialDashboard={dashboard}
+        initialLastUpdatedAt={initialLastUpdatedAt}
+        initialLoadError={initialLoadError}
+        llmProvider={runtimeConfig.llmProvider}
+        sheetsAccessMode={runtimeConfig.sheetsAccessMode}
+        sheetsWriteEnabled={runtimeConfig.liveSheetsWriteEnabled}
         whatsAppProviderMode={runtimeConfig.whatsappProvider}
       />
     </SiteShell>

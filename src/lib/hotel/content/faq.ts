@@ -67,7 +67,7 @@ function inferCta(entry: (typeof FAQ_KNOWLEDGE_ENTRIES)[number]) {
   if (entry.actionPresets.includes("reservations_demo")) {
     return {
       ctaLabel: "Ver flujo interno",
-      ctaUrl: "/ops",
+      ctaUrl: "/admin/conversations",
     };
   }
 

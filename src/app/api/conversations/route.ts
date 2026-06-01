@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requirePanelAuth } from "@/lib/hotel/conversations/auth";
 import {
+  createEmptyConversationDashboard,
   listConversationDashboard,
   handleInboundWhatsApp,
   redactConversationSensitiveText,
@@ -43,9 +44,21 @@ export async function GET(request: Request) {
     ),
     mode: (url.searchParams.get("mode") as ConversationListFilters["mode"]) ?? "all",
   };
-  const dashboard = await listConversationDashboard(filters);
+  try {
+    const dashboard = await listConversationDashboard(filters);
 
-  return NextResponse.json({ ok: true, ...dashboard });
+    return NextResponse.json({ ok: true, ...dashboard });
+  } catch {
+    return NextResponse.json(
+      {
+        ok: false,
+        error:
+          "No se pudo cargar el panel de conversaciones. Revisa /api/health y migraciones.",
+        ...createEmptyConversationDashboard(),
+      },
+      { status: 503 },
+    );
+  }
 }
 
 export async function POST(request: Request) {

@@ -187,16 +187,22 @@ describe("conversations security", () => {
     }
   });
 
-  it("protects admin, internal and ops pages with page access checks and proxy matcher", () => {
-    for (const routeFile of ["src/app/admin/page.tsx", "src/app/internal/page.tsx", "src/app/ops/page.tsx"]) {
+  it("protects admin/internal pages and keeps ops as a redirect to the conversations panel", () => {
+    for (const routeFile of ["src/app/admin/page.tsx", "src/app/internal/page.tsx"]) {
       const source = readFileSync(path.join(process.cwd(), routeFile), "utf8");
       expect(source, routeFile).toContain("verifyPanelPageAccess");
       expect(source, routeFile).toContain("if (!auth.ok)");
     }
 
+    const opsSource = readFileSync(path.join(process.cwd(), "src/app/ops/page.tsx"), "utf8");
+    expect(opsSource).toContain('redirect("/admin/conversations")');
+    expect(opsSource).not.toContain("ReservationLab");
+
     const proxySource = readFileSync(path.join(process.cwd(), "src/proxy.ts"), "utf8");
     expect(proxySource).toContain("/admin/:path*");
     expect(proxySource).toContain("/internal/:path*");
+    expect(proxySource).not.toContain('"/ops"');
+    expect(proxySource).not.toContain('"/ops/:path*"');
     expect(proxySource).toContain("/api/ops/:path*");
   });
 

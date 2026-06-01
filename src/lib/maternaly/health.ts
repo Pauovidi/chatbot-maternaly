@@ -1,9 +1,38 @@
 import { Pool } from "pg";
+import { readHotelPersistenceConfig } from "@/lib/hotel/persistence/runtime";
 import { readMaternalyRuntimeConfig } from "@/lib/maternaly/config/env";
 
-async function checkDatabaseReachability(databaseUrl: string | undefined): Promise<boolean | null> {
+const REQUIRED_MIGRATION_IDS = [1, 2, 3, 4, 5] as const;
+
+interface DatabaseDiagnostics {
+  reachable: boolean | null;
+  migrations: {
+    checked: boolean;
+    applied: number[];
+    missing: number[];
+    ready: boolean;
+    warning?: string;
+  };
+}
+
+function emptyMigrationStatus(warning?: string): DatabaseDiagnostics["migrations"] {
+  return {
+    checked: false,
+    applied: [],
+    missing: [...REQUIRED_MIGRATION_IDS],
+    ready: false,
+    warning,
+  };
+}
+
+async function checkDatabaseDiagnostics(
+  databaseUrl: string | undefined,
+): Promise<DatabaseDiagnostics> {
   if (!databaseUrl?.trim()) {
-    return null;
+    return {
+      reachable: null,
+      migrations: emptyMigrationStatus("DATABASE_URL is not configured."),
+    };
   }
 
   const pool = new Pool({
@@ -14,9 +43,39 @@ async function checkDatabaseReachability(databaseUrl: string | undefined): Promi
 
   try {
     await pool.query("SELECT 1");
-    return true;
+    try {
+      const result = await pool.query<{ id: number }>(
+        "SELECT id FROM hotel_schema_migrations ORDER BY id ASC",
+      );
+      const applied = result.rows.map((row) => Number(row.id));
+      const missing = REQUIRED_MIGRATION_IDS.filter((id) => !applied.includes(id));
+
+      return {
+        reachable: true,
+        migrations: {
+          checked: true,
+          applied,
+          missing,
+          ready: missing.length === 0,
+        },
+      };
+    } catch {
+      return {
+        reachable: true,
+        migrations: {
+          checked: true,
+          applied: [],
+          missing: [...REQUIRED_MIGRATION_IDS],
+          ready: false,
+          warning: "migration_table_unavailable_run_node_scripts_db_migrate_mjs",
+        },
+      };
+    }
   } catch {
-    return false;
+    return {
+      reachable: false,
+      migrations: emptyMigrationStatus("database_unreachable"),
+    };
   } finally {
     await pool.end().catch(() => undefined);
   }
@@ -24,20 +83,37 @@ async function checkDatabaseReachability(databaseUrl: string | undefined): Promi
 
 export async function getMaternalyHealth(env: NodeJS.ProcessEnv = process.env) {
   const config = readMaternalyRuntimeConfig(env);
-  const databaseReachable = await checkDatabaseReachability(env.DATABASE_URL);
+  const persistence = readHotelPersistenceConfig(env);
+  const databaseDiagnostics = await checkDatabaseDiagnostics(env.DATABASE_URL);
+  const databaseReachable = databaseDiagnostics.reachable;
   const productionLike =
     env.NODE_ENV === "production" || config.appEnv.toLowerCase() === "production";
   const databaseUrlConfigured = Boolean(env.DATABASE_URL?.trim());
-  const provider = productionLike || databaseUrlConfigured ? "postgres" : "file-local";
-  const productionReady = !productionLike || (databaseUrlConfigured && databaseReachable === true);
+  const provider = persistence.provider;
+  const productionReady =
+    !productionLike ||
+    (provider === "postgres" &&
+      databaseUrlConfigured &&
+      databaseReachable === true &&
+      databaseDiagnostics.migrations.ready);
   const databaseWarning =
-    productionLike && !databaseUrlConfigured
+    persistence.unsafeReason ??
+    (productionLike && !databaseUrlConfigured
       ? "DATABASE_URL is required for production on EasyPanel."
-      : undefined;
+      : databaseDiagnostics.migrations.warning);
   const databaseReady =
     !productionLike ||
-    (provider === "postgres" && databaseUrlConfigured && databaseReachable === true);
-  const ok = databaseReady && productionReady;
+    (provider === "postgres" &&
+      databaseUrlConfigured &&
+      databaseReachable === true &&
+      databaseDiagnostics.migrations.ready);
+  const panelReady =
+    !productionLike ||
+    (provider === "postgres" &&
+      databaseUrlConfigured &&
+      databaseReachable === true &&
+      databaseDiagnostics.migrations.ready);
+  const ok = databaseReady && productionReady && panelReady;
 
   return {
     ok,
@@ -69,6 +145,21 @@ export async function getMaternalyHealth(env: NodeJS.ProcessEnv = process.env) {
       reachable: databaseReachable,
       productionReady,
       warning: databaseWarning,
+      migrations: databaseDiagnostics.migrations,
+    },
+    conversationsStore: {
+      provider: persistence.provider,
+      runtimeTarget: persistence.runtimeTarget,
+      productionReady: persistence.productionReady,
+      unsafeReason: persistence.unsafeReason,
+    },
+    panel: {
+      route: "/admin/conversations",
+      ready: panelReady,
+      fallback: "empty_dashboard_on_store_error",
+      notes: panelReady
+        ? "Panel can load."
+        : "Run database migrations before exposing the panel in production.",
     },
     whatsapp: {
       provider: config.whatsappProvider,

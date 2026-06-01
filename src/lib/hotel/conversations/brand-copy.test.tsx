@@ -53,7 +53,8 @@ describe("conversations panel visible demo copy", () => {
     expect(headerHtml).toContain("Maternaly");
     expect(headerHtml).toContain("WhatsApp bot");
     expect(headerHtml).toContain("Inicio");
-    expect(headerHtml).toContain("Operativa");
+    expect(headerHtml).not.toContain("Operativa");
+    expect(headerHtml).not.toContain('href="/ops"');
     expect(headerHtml).toContain("Panel conversaciones");
     expect(headerHtml).toContain("Web Maternaly");
     expect(headerHtml).not.toContain("Formulario oficial");
@@ -208,6 +209,8 @@ describe("conversations panel visible demo copy", () => {
     expect(surfaces).toContain("Adjuntar vídeo");
     expect(surfaces).toContain("media-mock");
     expect(surfaces).toContain("Web Maternaly");
+    expect(surfaces).not.toContain('href="/ops"');
+    expect(surfaces).not.toContain('href: "/ops"');
     expect(surfaces).not.toContain("Panel reservas");
     expect(surfaces).not.toContain("Panel de reservas");
     expect(surfaces).not.toContain("Formulario oficial");

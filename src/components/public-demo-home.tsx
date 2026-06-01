@@ -34,10 +34,10 @@ export function PublicDemoHome() {
 
               <div className="flex flex-col items-start gap-3">
                 <Link
-                  href="/ops"
+                  href="/admin/conversations"
                   className="inline-flex min-h-[3.5rem] items-center justify-center rounded-full border border-black/10 bg-white px-6 py-3.5 text-sm font-semibold tracking-[0.02em] text-[#201911] shadow-[0_16px_34px_rgba(32,25,17,0.08)] transition-transform hover:-translate-y-0.5 hover:bg-[#fffaf1] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#201911]"
                 >
-                  Ir a operativa
+                  Abrir panel de conversaciones
                 </Link>
                 <p className="text-sm leading-7 text-[#6a5746]">
                   En esta V1 la escritura real en Sheets esta bloqueada por defecto.

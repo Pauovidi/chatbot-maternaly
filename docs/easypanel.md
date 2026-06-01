@@ -74,6 +74,14 @@ Si se ejecuta desde el checkout completo tambien sirve:
 npm run db:migrate
 ```
 
+En EasyPanel, abrir la terminal/shell de la app ya desplegada y ejecutar:
+
+```bash
+node scripts/db-migrate.mjs
+```
+
+Despues de migrar, `GET /api/health` debe mostrar `database.migrations.ready=true` y `panel.ready=true`.
+
 Migraciones actuales:
 
 - `001_init.sql`
@@ -105,11 +113,14 @@ Validar antes de exponer trafico real:
 - Health muestra `runtimeTarget=easypanel-container`.
 - Health muestra `database.configured=true`.
 - Health muestra `database.reachable=true`.
+- Health muestra `database.migrations.ready=true`.
+- Health muestra `panel.ready=true`.
 - Health muestra `whatsapp.provider=mock`.
 - Health muestra `googleSheets.accessMode=read_only`.
 - Health muestra `googleSheets.writeEnabled=false`.
 - Health muestra `llm.provider=mock`.
 - `/admin/conversations` exige Basic Auth y carga tras autenticar.
+- `/ops` ya no es una pantalla operativa: redirige a `/admin/conversations`.
 - `/api/webhooks/ycloud` existe.
 - Logs sin secretos ni PII.
 - No se ha enviado WhatsApp real.
@@ -125,7 +136,19 @@ SMOKE_REQUIRE_PRODUCTION_SAFE=true \
 node scripts/smoke-http.mjs
 ```
 
-## 7. Activacion posterior de YCloud
+## 7. Debug rapido del panel
+
+Si `/admin/conversations` da error o sale vacio en EasyPanel:
+
+1. Revisar `/api/health`.
+2. Si `database.reachable=false`, corregir `DATABASE_URL` o el servicio Postgres.
+3. Si `database.migrations.ready=false`, ejecutar `node scripts/db-migrate.mjs` dentro del contenedor.
+4. Revisar logs de EasyPanel para el servicio de la app, buscando errores de `hotel_conversations`, `hotel_conversation_messages` o `hotel_schema_migrations`.
+5. Mantener `WHATSAPP_PROVIDER=mock`, `LLM_PROVIDER=mock`, `GOOGLE_SHEETS_ACCESS_MODE=read_only` y `BOT_SHEETS_LIVE_WRITE_ENABLED=false` hasta que health y smoke queden verdes.
+
+El panel esta preparado para cargar vacio si la store falla, pero health debe quedar verde antes de exponer trafico real.
+
+## 8. Activacion posterior de YCloud
 
 Solo despues del deploy mock saludable:
 
@@ -144,7 +167,7 @@ https://<dominio-maternaly>/api/webhooks/ycloud
 
 No activar envios reales masivos en esta fase.
 
-## 8. Activacion posterior de Google Sheets Editor
+## 9. Activacion posterior de Google Sheets Editor
 
 Solo despues de validar lectura y panel:
 
@@ -160,7 +183,7 @@ npm run maternaly:sheets:dry-run-write
 5. Revisar `ReservationWritePlan`.
 6. Activar escritura real solo con whitelist explicita y validacion manual.
 
-## 9. Checks locales production-like
+## 10. Checks locales production-like
 
 Sin Postgres local, health en modo production debe fallar porque produccion exige DB durable.
 
@@ -180,7 +203,7 @@ npm run test:run
 npm run build
 ```
 
-## 10. Guardrails
+## 11. Guardrails
 
 - No Vercel para Maternaly.
 - No tocar Somos Perros vivo.

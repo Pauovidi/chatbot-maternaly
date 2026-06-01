@@ -24,6 +24,11 @@ import type {
 
 interface ConversationsPanelProps {
   initialDashboard: ConversationDashboard;
+  initialLastUpdatedAt?: string;
+  initialLoadError?: string;
+  llmProvider?: "mock" | "openai";
+  sheetsAccessMode?: "read_only" | "dry_run" | "live";
+  sheetsWriteEnabled?: boolean;
   whatsAppProviderMode?: "mock" | "ycloud" | "twilio";
 }
 
@@ -88,6 +93,14 @@ function formatSender(value: string) {
   return labels[value] ?? value;
 }
 
+function formatUpdatedAt(value: string) {
+  return new Date(value).toLocaleTimeString("es-ES", {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+}
+
 function conversationTitle(conversation: ConversationRecord) {
   return conversation.clientName ?? conversation.customerName ?? conversation.displayName ?? conversation.phoneE164;
 }
@@ -104,6 +117,11 @@ function conversationSubtitle(conversation: ConversationRecord) {
 
 export function ConversationsPanel({
   initialDashboard,
+  initialLastUpdatedAt = "",
+  initialLoadError,
+  llmProvider = "mock",
+  sheetsAccessMode = "read_only",
+  sheetsWriteEnabled = false,
   whatsAppProviderMode = "mock",
 }: ConversationsPanelProps) {
   const [dashboard, setDashboard] = useState(initialDashboard);
@@ -113,9 +131,9 @@ export function ConversationsPanel({
   const [query, setQuery] = useState("");
   const [mode, setMode] = useState<FilterMode>("all");
   const [reply, setReply] = useState("");
-  const [error, setError] = useState("");
+  const [error, setError] = useState(initialLoadError ?? "");
   const [pollError, setPollError] = useState("");
-  const [lastUpdatedAt, setLastUpdatedAt] = useState(() => new Date());
+  const [lastUpdatedAt, setLastUpdatedAt] = useState(initialLastUpdatedAt);
   const [isPending, setIsPending] = useState(false);
   const timelineRef = useRef<HTMLDivElement | null>(null);
   const refreshPromiseRef = useRef<Promise<void> | null>(null);
@@ -212,7 +230,7 @@ export function ConversationsPanel({
           : data.conversations[0]?.id ?? "",
       );
       setPollError("");
-      setLastUpdatedAt(new Date());
+      setLastUpdatedAt(new Date().toISOString());
       if (shouldAutoScroll) {
         requestAnimationFrame(() => scrollTimelineToBottom(options.silent ? "auto" : "smooth"));
       }
@@ -388,6 +406,18 @@ export function ConversationsPanel({
             <Circle size={10} fill="currentColor" />
             Proveedor: WhatsApp · {formatProviderMode(whatsAppProviderMode)}
           </span>
+          <span className="conversation-transport conversation-transport-mock">
+            <Circle size={10} fill="currentColor" />
+            LLM: {llmProvider === "mock" ? "Mock" : "OpenAI"}
+          </span>
+          <span className="conversation-transport conversation-transport-mock">
+            <Circle size={10} fill="currentColor" />
+            Sheets: {formatSheetsAccessMode(sheetsAccessMode)}
+          </span>
+          <span className="conversation-transport conversation-transport-mock">
+            <Circle size={10} fill="currentColor" />
+            Writes: {sheetsWriteEnabled ? "activados" : "bloqueados"}
+          </span>
         </details>
       </div>
 
@@ -429,12 +459,12 @@ export function ConversationsPanel({
             </button>
           </div>
           <div className="conversation-poll-status" role="status" aria-live="polite">
-            {pollError || `Actualizado ${lastUpdatedAt.toLocaleTimeString("es-ES", {
-              hour: "2-digit",
-              minute: "2-digit",
-              second: "2-digit",
-            })}`}
+            {pollError ||
+              (lastUpdatedAt
+                ? `Actualizado ${formatUpdatedAt(lastUpdatedAt)}`
+                : "Actualizado")}
           </div>
+          {error ? <div className="conversation-error">{error}</div> : null}
 
           <div className="conversation-tabs" role="tablist" aria-label="Filtros">
             {filters.map((filter) => (
@@ -456,8 +486,10 @@ export function ConversationsPanel({
             ) : null}
             {dashboard.conversations.length === 0 ? (
               <div className="conversation-empty">
-                <strong>No hay conversaciones para este filtro.</strong>
-                <span>Prueba con otro filtro o espera al siguiente WhatsApp entrante.</span>
+                <strong>Aún no hay conversaciones.</strong>
+                <span>
+                  El panel está listo en modo seguro y mostrará aquí los próximos mensajes de WhatsApp.
+                </span>
               </div>
             ) : (
               dashboard.conversations.map((conversation) => (
@@ -584,7 +616,6 @@ export function ConversationsPanel({
                 </div>
               </details>
 
-              {error ? <div className="conversation-error">{error}</div> : null}
               {selected.clientWarnings?.length ? (
                 <div className="conversation-client-alerts">
                   {selected.clientWarnings.map((warning) => (
@@ -663,7 +694,8 @@ export function ConversationsPanel({
             </>
           ) : (
             <div className="conversation-empty conversation-empty-large">
-              Selecciona o crea una conversación demo para empezar.
+              <strong>Aún no hay conversaciones.</strong>
+              <span>Cuando llegue el primer mensaje, aparecerá aquí el timeline.</span>
             </div>
           )}
         </div>
@@ -677,6 +709,16 @@ function formatProviderMode(mode: NonNullable<ConversationsPanelProps["whatsAppP
     mock: "Mock",
     twilio: "Twilio legacy",
     ycloud: "YCloud",
+  };
+
+  return labels[mode];
+}
+
+function formatSheetsAccessMode(mode: NonNullable<ConversationsPanelProps["sheetsAccessMode"]>) {
+  const labels: Record<NonNullable<ConversationsPanelProps["sheetsAccessMode"]>, string> = {
+    dry_run: "dry-run",
+    live: "live",
+    read_only: "read-only",
   };
 
   return labels[mode];

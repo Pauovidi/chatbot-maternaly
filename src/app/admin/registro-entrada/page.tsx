@@ -29,7 +29,7 @@ export default async function EntryLogPage() {
   return (
     <SiteShell compact>
       <section className="page-intro">
-        <p className="demo-kicker">Operativa</p>
+        <p className="demo-kicker">Registro interno</p>
         <h1 className="page-title">Registro de entrada</h1>
         <p className="page-description">
           Lista de reservas y solicitudes que el equipo debe revisar antes de

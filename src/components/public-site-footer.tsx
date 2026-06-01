@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { demoFormUrl } from "@/components/demo-data";
 
 export function PublicSiteFooter() {
@@ -21,12 +20,6 @@ export function PublicSiteFooter() {
           >
             Contacto
           </a>
-          <Link
-            href="/ops"
-            className="text-xs uppercase tracking-[0.18em] text-[#6f543d] transition-colors hover:text-[#201911]"
-          >
-            Operativa
-          </Link>
         </nav>
 
         <p className="text-xs uppercase tracking-[0.18em] text-[#8d6b51]">

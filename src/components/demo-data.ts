@@ -11,7 +11,6 @@ export const demoOperationalBanner =
 
 export const demoNavItems = [
   { href: "/", label: "Inicio" },
-  { href: "/ops", label: "Operativa" },
   { href: "/admin/conversations", label: "Panel conversaciones" },
 ];
 
@@ -20,11 +19,6 @@ export const demoRoutes = [
     href: "/",
     label: "Inicio",
     description: "Chatbot WhatsApp-first con respuestas seguras y derivacion humana.",
-  },
-  {
-    href: "/ops",
-    label: "Operativa",
-    description: "Zona para revisar disponibilidad, escritura dry-run y estado de integraciones.",
   },
   {
     href: "/admin/conversations",

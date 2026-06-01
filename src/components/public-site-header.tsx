@@ -31,12 +31,6 @@ export function PublicSiteHeader() {
             Inicio
           </Link>
           <Link
-            href="/ops"
-            className="text-xs font-bold uppercase tracking-[0.18em] text-[#4c3a2d] transition-colors hover:text-[#201911]"
-          >
-            Operativa
-          </Link>
-          <Link
             href="/admin/conversations"
             className="text-xs font-bold uppercase tracking-[0.18em] text-[#4c3a2d] transition-colors hover:text-[#201911]"
           >

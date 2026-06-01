@@ -53,6 +53,21 @@ async function checkHealth() {
   console.log("[ok] GET /api/health");
 }
 
+async function checkOpsRedirect() {
+  const { response } = await request("/ops", { redirect: "manual" });
+  assert(
+    response.status === 307 || response.status === 308,
+    `/ops debe redirigir al panel y devolvio ${response.status}`,
+  );
+
+  const location = response.headers.get("location") ?? "";
+  assert(
+    location === "/admin/conversations" || location.endsWith("/admin/conversations"),
+    `/ops redirigio a destino inesperado: ${location}`,
+  );
+  console.log("[ok] GET /ops -> /admin/conversations");
+}
+
 async function checkYCloudWebhookEndpoint() {
   const suffix = String(Date.now()).slice(-8);
   const payload = {
@@ -90,6 +105,7 @@ async function main() {
 
   await checkGet("/");
   await checkHealth();
+  await checkOpsRedirect();
   await checkGet("/admin/conversations");
   await checkYCloudWebhookEndpoint();
 

@@ -31,6 +31,23 @@ describe("health route", () => {
       }),
     );
     expect(json.database.provider).toBe("postgres");
+    expect(json.database.migrations).toEqual(
+      expect.objectContaining({
+        ready: false,
+        missing: expect.arrayContaining([1, 2, 3, 4, 5]),
+      }),
+    );
+    expect(json.panel).toEqual(
+      expect.objectContaining({
+        route: "/admin/conversations",
+        ready: true,
+      }),
+    );
+    expect(json.conversationsStore).toEqual(
+      expect.objectContaining({
+        provider: "postgres",
+      }),
+    );
     expect(json.build).toEqual(
       expect.objectContaining({
         source: expect.any(String),
@@ -56,5 +73,7 @@ describe("health route", () => {
     expect(json.runtimeTarget).toBe("easypanel-container");
     expect(json.database.productionReady).toBe(false);
     expect(json.database.warning).toContain("DATABASE_URL");
+    expect(json.database.migrations.ready).toBe(false);
+    expect(json.panel.ready).toBe(false);
   });
 });
