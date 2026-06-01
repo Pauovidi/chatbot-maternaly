@@ -40,13 +40,16 @@ export interface MaternalyRuntimeConfig {
   llmProvider: LlmProviderMode;
   llmModel?: string;
   panelAdminUsername?: string;
-  configured: {
-    database: boolean;
-    ycloud: boolean;
-    ycloudWebhookSecret: boolean;
-    googleSheets: boolean;
-    llm: boolean;
-  };
+    configured: {
+      database: boolean;
+      ycloud: boolean;
+      ycloudWebhookSecret: boolean;
+      twilio: boolean;
+      twilioFrom: boolean;
+      twilioWebhookToken: boolean;
+      googleSheets: boolean;
+      llm: boolean;
+    };
 }
 
 export function readMaternalyRuntimeConfig(
@@ -78,6 +81,13 @@ export function readMaternalyRuntimeConfig(
       database: Boolean(env.DATABASE_URL?.trim()),
       ycloud: Boolean(env.YCLOUD_API_KEY?.trim()),
       ycloudWebhookSecret: Boolean(env.YCLOUD_WEBHOOK_SECRET?.trim()),
+      twilio: Boolean(
+        env.TWILIO_ACCOUNT_SID?.trim() &&
+          env.TWILIO_AUTH_TOKEN?.trim() &&
+          (env.TWILIO_WHATSAPP_FROM?.trim() || env.TWILIO_MESSAGING_SERVICE_SID?.trim()),
+      ),
+      twilioFrom: Boolean(env.TWILIO_WHATSAPP_FROM?.trim()),
+      twilioWebhookToken: Boolean(env.TWILIO_WEBHOOK_AUTH_TOKEN?.trim()),
       googleSheets: Boolean(
         env.GOOGLE_SERVICE_ACCOUNT_JSON_BASE64?.trim() ||
           env.GOOGLE_APPLICATION_CREDENTIALS?.trim(),

@@ -73,7 +73,9 @@ export function readTwilioWhatsAppConfig(
   );
   const explicitMock = parseBoolean(env.HOTEL_CONVERSATIONS_MOCK_TWILIO, !hasCredentials);
   const mock = explicitMock || !hasCredentials;
-  const providerModeOverride = parseProviderMode(env.TWILIO_WHATSAPP_PROVIDER_MODE);
+  const providerModeOverride = parseProviderMode(
+    env.TWILIO_PROVIDER_MODE ?? env.TWILIO_WHATSAPP_PROVIDER_MODE,
+  );
 
   return {
     accountSid: env.TWILIO_ACCOUNT_SID,

@@ -4,7 +4,7 @@ const requiredNonSecret = {
   APP_NAME: "Maternaly",
   APP_ENV: "production",
   NODE_ENV: "production",
-  WHATSAPP_PROVIDER: "mock|ycloud",
+  WHATSAPP_PROVIDER: "mock|ycloud|twilio",
   GOOGLE_SHEETS_ACCESS_MODE: "read_only|dry_run",
   BOT_SHEETS_LIVE_WRITE_ENABLED: "false",
   MATERNALY_SHEET_IDS: "comma-separated sheet ids",
@@ -21,6 +21,9 @@ const requiredSecrets = [
 const optionalSecrets = [
   "YCLOUD_API_KEY",
   "YCLOUD_WEBHOOK_SECRET",
+  "TWILIO_ACCOUNT_SID",
+  "TWILIO_AUTH_TOKEN",
+  "TWILIO_WEBHOOK_AUTH_TOKEN",
   "OPENAI_API_KEY",
   "GOOGLE_SERVICE_ACCOUNT_JSON_BASE64 or GOOGLE_APPLICATION_CREDENTIALS",
 ];
@@ -58,6 +61,21 @@ if (process.env.BOT_SHEETS_LIVE_WRITE_ENABLED !== "false") {
 
 if (process.env.WHATSAPP_PROVIDER === "ycloud" && !process.env.YCLOUD_API_KEY?.trim()) {
   missing.push("YCLOUD_API_KEY when WHATSAPP_PROVIDER=ycloud");
+}
+
+if (process.env.WHATSAPP_PROVIDER === "twilio") {
+  if (!process.env.TWILIO_ACCOUNT_SID?.trim()) {
+    missing.push("TWILIO_ACCOUNT_SID when WHATSAPP_PROVIDER=twilio");
+  }
+  if (!process.env.TWILIO_AUTH_TOKEN?.trim()) {
+    missing.push("TWILIO_AUTH_TOKEN when WHATSAPP_PROVIDER=twilio");
+  }
+  if (!process.env.TWILIO_WHATSAPP_FROM?.trim() && !process.env.TWILIO_MESSAGING_SERVICE_SID?.trim()) {
+    missing.push("TWILIO_WHATSAPP_FROM or TWILIO_MESSAGING_SERVICE_SID when WHATSAPP_PROVIDER=twilio");
+  }
+  if (!process.env.TWILIO_WEBHOOK_AUTH_TOKEN?.trim()) {
+    warnings.push("TWILIO_WEBHOOK_AUTH_TOKEN should protect the Twilio Sandbox webhook.");
+  }
 }
 
 if (process.env.LLM_PROVIDER === "openai" && !process.env.OPENAI_API_KEY?.trim()) {

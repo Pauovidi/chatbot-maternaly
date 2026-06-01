@@ -100,6 +100,42 @@ async function checkYCloudWebhookEndpoint() {
   console.log("[ok] POST /api/webhooks/ycloud");
 }
 
+async function checkTwilioWebhookEndpoint() {
+  const suffix = String(Date.now()).slice(-8);
+  const token = process.env.TWILIO_WEBHOOK_AUTH_TOKEN;
+  const url = token
+    ? `/api/twilio/whatsapp?token=${encodeURIComponent(token)}`
+    : "/api/twilio/whatsapp";
+  const payload = new URLSearchParams({
+    From: `whatsapp:+346${suffix}`,
+    To: "whatsapp:+14155238886",
+    Body: "Hola, quiero información sobre AIPAP Agua",
+    MessageSid: `SM_SMOKE_${suffix}`,
+    ProfileName: "Smoke Sandbox",
+  });
+
+  const { response, text } = await request(url, {
+    method: "POST",
+    headers: {
+      "content-type": "application/x-www-form-urlencoded",
+    },
+    body: payload,
+  });
+
+  if (response.status === 401) {
+    console.log("[skip] POST /api/twilio/whatsapp requiere TWILIO_WEBHOOK_AUTH_TOKEN");
+    return;
+  }
+
+  assert(response.ok, `/api/twilio/whatsapp devolvio ${response.status}: ${text}`);
+  assert(text.includes("<Response>"), "/api/twilio/whatsapp no devolvio TwiML Response");
+  assert(
+    response.headers.get("content-type")?.includes("text/xml"),
+    "/api/twilio/whatsapp debe devolver text/xml",
+  );
+  console.log("[ok] POST /api/twilio/whatsapp");
+}
+
 async function main() {
   console.log(`Smoke HTTP Maternaly contra ${baseUrl}`);
 
@@ -107,6 +143,7 @@ async function main() {
   await checkHealth();
   await checkOpsRedirect();
   await checkGet("/admin/conversations");
+  await checkTwilioWebhookEndpoint();
   await checkYCloudWebhookEndpoint();
 
   console.log("[ok] Smoke HTTP Maternaly completado sin WhatsApp real ni escritura real en Sheets");

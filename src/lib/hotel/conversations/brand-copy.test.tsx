@@ -145,7 +145,7 @@ describe("conversations panel visible demo copy", () => {
     expect(ycloud).toContain("Proveedor: WhatsApp");
     expect(ycloud).toContain("YCloud");
     expect(ycloud).toContain("YCloud configurado como provider principal");
-    expect(legacy).toContain("Twilio legacy");
+    expect(legacy).toContain("Twilio Sandbox");
   });
 
   it("renders client directory badges without exposing NIF", () => {

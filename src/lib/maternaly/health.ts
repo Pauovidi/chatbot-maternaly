@@ -1,5 +1,6 @@
 import { Pool } from "pg";
 import { readHotelPersistenceConfig } from "@/lib/hotel/persistence/runtime";
+import { readTwilioWhatsAppConfig } from "@/lib/hotel/twilio/client";
 import { readMaternalyRuntimeConfig } from "@/lib/maternaly/config/env";
 
 const REQUIRED_MIGRATION_IDS = [1, 2, 3, 4, 5] as const;
@@ -83,6 +84,7 @@ async function checkDatabaseDiagnostics(
 
 export async function getMaternalyHealth(env: NodeJS.ProcessEnv = process.env) {
   const config = readMaternalyRuntimeConfig(env);
+  const twilioConfig = readTwilioWhatsAppConfig(env);
   const persistence = readHotelPersistenceConfig(env);
   const databaseDiagnostics = await checkDatabaseDiagnostics(env.DATABASE_URL);
   const databaseReachable = databaseDiagnostics.reachable;
@@ -114,6 +116,9 @@ export async function getMaternalyHealth(env: NodeJS.ProcessEnv = process.env) {
       databaseReachable === true &&
       databaseDiagnostics.migrations.ready);
   const ok = databaseReady && productionReady && panelReady;
+  const twilioWebhookProtected = Boolean(env.TWILIO_WEBHOOK_AUTH_TOKEN?.trim());
+  const twilioActiveWithoutWebhookProtection =
+    productionLike && config.whatsappProvider === "twilio" && !twilioWebhookProtected;
 
   return {
     ok,
@@ -165,6 +170,18 @@ export async function getMaternalyHealth(env: NodeJS.ProcessEnv = process.env) {
       provider: config.whatsappProvider,
       ycloudConfigured: config.configured.ycloud,
       ycloudWebhookSecretConfigured: config.configured.ycloudWebhookSecret,
+      ycloudAvailable: config.configured.ycloud,
+      twilio: {
+        configured: config.configured.twilio,
+        fromConfigured: config.configured.twilioFrom,
+        messagingServiceConfigured: Boolean(env.TWILIO_MESSAGING_SERVICE_SID?.trim()),
+        webhookProtected: twilioWebhookProtected,
+        mode: config.configured.twilio ? twilioConfig.providerMode : "unknown",
+        active: config.whatsappProvider === "twilio",
+        warning: twilioActiveWithoutWebhookProtection
+          ? "TWILIO_WEBHOOK_AUTH_TOKEN is required when WHATSAPP_PROVIDER=twilio in production."
+          : undefined,
+      },
     },
     googleSheets: {
       configured: config.configured.googleSheets,

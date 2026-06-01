@@ -31,6 +31,7 @@ export interface InboundWhatsAppPayload {
   body: string;
   messageSid?: string;
   displayName?: string;
+  channel?: string;
   rawPayload?: unknown;
 }
 
@@ -389,6 +390,7 @@ async function getOrCreateConversation(
   store: ConversationStore,
   phone: string,
   displayName?: string,
+  channel = "whatsapp",
 ): Promise<ConversationRecord> {
   const normalized = normalizePhone(phone);
   const existing = await store.getByPhone(normalized.phoneNormalized);
@@ -406,10 +408,14 @@ async function getOrCreateConversation(
       return (await store.getById(existing.id)) ?? reopened;
     }
 
-    if (displayName && existing.displayName !== displayName) {
+    if (
+      (displayName && existing.displayName !== displayName) ||
+      (channel && existing.channel !== channel)
+    ) {
       return store.replaceConversation({
         ...existing,
-        displayName,
+        displayName: displayName || existing.displayName,
+        channel: channel || existing.channel,
         updatedAt: nowIso(),
       });
     }
@@ -424,7 +430,7 @@ async function getOrCreateConversation(
     phoneNormalized: normalized.phoneNormalized,
     displayName,
     sourceType: "whatsapp",
-    channel: "whatsapp",
+    channel,
     status: "open",
     priority: "normal",
     tags: [],
@@ -436,7 +442,12 @@ async function getOrCreateConversation(
   };
 
   const record = await store.upsertConversation(conversation);
-  await store.addEvent(createEvent(record.id, "conversation_created", { sourceType: "whatsapp" }));
+  await store.addEvent(
+    createEvent(record.id, "conversation_created", {
+      sourceType: "whatsapp",
+      channel,
+    }),
+  );
   return (await store.getById(record.id)) ?? record;
 }
 
@@ -559,7 +570,12 @@ export async function handleInboundWhatsApp(
   clientDirectory: ClientDirectory = getClientDirectory(),
   reservationBridgeDeps?: WhatsAppReservationBridgeDeps,
 ): Promise<InboundResult> {
-  const conversation = await getOrCreateConversation(store, payload.from, payload.displayName);
+  const conversation = await getOrCreateConversation(
+    store,
+    payload.from,
+    payload.displayName,
+    payload.channel,
+  );
   const safeBody = redactConversationSensitiveText(payload.body);
   if (payload.messageSid) {
     const existing = conversation.messages.find(

@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import type { OutboundSender } from "@/lib/hotel/conversations/service";
+import { sendTwilioWhatsAppText } from "@/lib/hotel/twilio/client";
 import { createTwilioWhatsAppSender } from "@/lib/hotel/twilio/whatsapp";
 import { readMaternalyRuntimeConfig } from "@/lib/maternaly/config/env";
 import type { InternalMessage } from "@/lib/maternaly/domain/types";
@@ -172,8 +173,50 @@ export class YCloudProvider implements WhatsAppProvider {
   }
 }
 
+export class TwilioProvider implements WhatsAppProvider {
+  async sendText(input: WhatsAppSendInput): Promise<WhatsAppSendResult> {
+    const result = await sendTwilioWhatsAppText({
+      to: input.to,
+      body: input.text ?? "",
+    });
+
+    return {
+      ok: result.ok,
+      provider: "twilio",
+      mode: result.mode,
+      messageId: result.sid,
+      sid: result.sid,
+      error: result.error,
+    };
+  }
+
+  async sendMedia(input: WhatsAppSendInput): Promise<WhatsAppSendResult> {
+    return this.sendText({
+      to: input.to,
+      text: input.text ?? input.linkUrl ?? input.mediaUrl ?? "",
+    });
+  }
+
+  normalizeInbound(payload: unknown): InternalMessage {
+    const raw = (payload ?? {}) as Record<string, unknown>;
+    return {
+      id: String(raw.MessageSid ?? raw.SmsMessageSid ?? raw.messageSid ?? `twilio_${Date.now()}`),
+      provider: "twilio",
+      from: normalizePhone(String(raw.From ?? raw.from ?? "")),
+      to: raw.To || raw.to ? normalizePhone(String(raw.To ?? raw.to)) : undefined,
+      text: typeof raw.Body === "string" ? raw.Body : String(raw.body ?? ""),
+      occurredAt: new Date().toISOString(),
+      raw,
+    };
+  }
+}
+
 export function createMaternalyWhatsAppProvider(): WhatsAppProvider {
   const config = readMaternalyRuntimeConfig();
+  if (config.whatsappProvider === "twilio") {
+    return new TwilioProvider();
+  }
+
   if (config.whatsappProvider === "ycloud") {
     return new YCloudProvider();
   }

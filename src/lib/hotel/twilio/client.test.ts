@@ -40,6 +40,16 @@ describe("twilio whatsapp client", () => {
         HOTEL_CONVERSATIONS_MOCK_TWILIO: "false",
       }).providerMode,
     ).toBe("real");
+    expect(
+      readTwilioWhatsAppConfig({
+        NODE_ENV: "test",
+        TWILIO_ACCOUNT_SID: "AC_test",
+        TWILIO_AUTH_TOKEN: "token",
+        TWILIO_WHATSAPP_FROM: "whatsapp:+34600111222",
+        TWILIO_PROVIDER_MODE: "sandbox",
+        HOTEL_CONVERSATIONS_MOCK_TWILIO: "false",
+      }).providerMode,
+    ).toBe("sandbox");
   });
 
   it("returns a non-throwing failure when Twilio rejects", async () => {

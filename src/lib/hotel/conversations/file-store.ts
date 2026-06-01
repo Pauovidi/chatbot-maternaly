@@ -47,6 +47,8 @@ function normalizeMessage(
         ? senderType
         : "user",
     transport: "whatsapp",
+    externalMessageSid:
+      typeof value.externalMessageSid === "string" ? value.externalMessageSid : undefined,
     body: String(value.body ?? value.text ?? ""),
     rawPayload: value.rawPayload,
     createdAt: String(value.createdAt ?? value.at ?? new Date().toISOString()),
@@ -115,7 +117,9 @@ function normalizeRecord(value: unknown): ConversationRecord | undefined {
       channel === "reservation" ||
       channel === "whatsapp"
         ? channel
-        : "unknown",
+        : channel.startsWith("twilio")
+          ? "whatsapp"
+          : "unknown",
     sourceRecordId:
       typeof record.sourceRecordId === "string"
         ? record.sourceRecordId
@@ -295,6 +299,15 @@ export class FileConversationStore implements ConversationStore {
 
     if (!record) {
       throw new Error(`Conversation ${message.conversationId} not found`);
+    }
+
+    if (message.externalMessageSid) {
+      const duplicate = record.messages.find(
+        (item) => item.externalMessageSid === message.externalMessageSid,
+      );
+      if (duplicate) {
+        return duplicate;
+      }
     }
 
     record.messages.push(message);

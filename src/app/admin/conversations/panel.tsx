@@ -688,7 +688,7 @@ export function ConversationsPanel({
                     ? "Modo demo: se guarda en el timeline, no sale por WhatsApp real."
                     : whatsAppProviderMode === "ycloud"
                       ? "YCloud configurado como provider principal: revisa el mensaje antes de enviarlo."
-                      : "Twilio legacy activo: revisa el mensaje antes de enviarlo."}
+                      : "Twilio Sandbox activo: revisa el mensaje antes de enviarlo."}
                 </small>
               </div>
             </>
@@ -707,7 +707,7 @@ export function ConversationsPanel({
 function formatProviderMode(mode: NonNullable<ConversationsPanelProps["whatsAppProviderMode"]>) {
   const labels: Record<NonNullable<ConversationsPanelProps["whatsAppProviderMode"]>, string> = {
     mock: "Mock",
-    twilio: "Twilio legacy",
+    twilio: "Twilio Sandbox",
     ycloud: "YCloud",
   };
 

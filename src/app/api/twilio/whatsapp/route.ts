@@ -4,6 +4,7 @@ import {
   handleInboundWhatsApp,
   redactConversationSensitiveText,
 } from "@/lib/hotel/conversations/service";
+import { readTwilioWhatsAppConfig } from "@/lib/hotel/twilio/client";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -57,6 +58,11 @@ function sanitizeTwilioPayload(raw: Record<string, string>): Record<string, stri
   );
 }
 
+function getTwilioInboundChannel() {
+  const mode = readTwilioWhatsAppConfig().providerMode;
+  return mode === "real" ? "twilio" : "twilio_sandbox";
+}
+
 export async function POST(request: Request) {
   if (!validateWebhookToken(request)) {
     return new NextResponse(buildTwilioMessageResponse(), {
@@ -96,6 +102,7 @@ export async function POST(request: Request) {
     body,
     messageSid,
     displayName: String(raw.ProfileName ?? raw.profileName ?? ""),
+    channel: getTwilioInboundChannel(),
     rawPayload: sanitizeTwilioPayload(raw),
   });
 

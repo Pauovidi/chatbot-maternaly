@@ -28,6 +28,16 @@ describe("health route", () => {
         provider: "ycloud",
         ycloudConfigured: true,
         ycloudWebhookSecretConfigured: false,
+        ycloudAvailable: true,
+      }),
+    );
+    expect(json.whatsapp.twilio).toEqual(
+      expect.objectContaining({
+        configured: false,
+        fromConfigured: false,
+        webhookProtected: false,
+        mode: "unknown",
+        active: false,
       }),
     );
     expect(json.database.provider).toBe("postgres");
@@ -75,5 +85,53 @@ describe("health route", () => {
     expect(json.database.warning).toContain("DATABASE_URL");
     expect(json.database.migrations.ready).toBe(false);
     expect(json.panel.ready).toBe(false);
+  });
+
+  it("reports Twilio Sandbox readiness without exposing secrets", async () => {
+    vi.stubEnv("NODE_ENV", "development");
+    process.env.APP_ENV = "development";
+    process.env.WHATSAPP_PROVIDER = "twilio";
+    process.env.TWILIO_ACCOUNT_SID = "AC_secret";
+    process.env.TWILIO_AUTH_TOKEN = "twilio-secret-token";
+    process.env.TWILIO_WHATSAPP_FROM = "whatsapp:+14155238886";
+    process.env.TWILIO_WEBHOOK_AUTH_TOKEN = "webhook-secret";
+    process.env.TWILIO_PROVIDER_MODE = "sandbox";
+
+    const response = await GET();
+    const json = await response.json();
+    const serialized = JSON.stringify(json);
+
+    expect(response.status).toBe(200);
+    expect(json.whatsapp.provider).toBe("twilio");
+    expect(json.whatsapp.twilio).toEqual(
+      expect.objectContaining({
+        configured: true,
+        fromConfigured: true,
+        webhookProtected: true,
+        mode: "sandbox",
+        active: true,
+      }),
+    );
+    expect(serialized).not.toContain("AC_secret");
+    expect(serialized).not.toContain("twilio-secret-token");
+    expect(serialized).not.toContain("webhook-secret");
+  });
+
+  it("warns when Twilio is active in production without webhook token", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    process.env.APP_ENV = "production";
+    process.env.WHATSAPP_PROVIDER = "twilio";
+    process.env.TWILIO_ACCOUNT_SID = "AC_secret";
+    process.env.TWILIO_AUTH_TOKEN = "twilio-secret-token";
+    process.env.TWILIO_WHATSAPP_FROM = "whatsapp:+14155238886";
+    delete process.env.TWILIO_WEBHOOK_AUTH_TOKEN;
+    delete process.env.DATABASE_URL;
+
+    const response = await GET();
+    const json = await response.json();
+
+    expect(response.status).toBe(503);
+    expect(json.whatsapp.twilio.webhookProtected).toBe(false);
+    expect(json.whatsapp.twilio.warning).toContain("TWILIO_WEBHOOK_AUTH_TOKEN");
   });
 });

@@ -23,6 +23,11 @@ describe("conversations security", () => {
     vi.unstubAllEnvs();
     resetConversationStoreForTests();
     delete process.env.TWILIO_WEBHOOK_AUTH_TOKEN;
+    delete process.env.TWILIO_PROVIDER_MODE;
+    delete process.env.WHATSAPP_PROVIDER;
+    delete process.env.LLM_PROVIDER;
+    delete process.env.GOOGLE_SHEETS_ACCESS_MODE;
+    delete process.env.BOT_SHEETS_LIVE_WRITE_ENABLED;
     delete process.env.VERCEL_ENV;
     delete process.env.HOTEL_CONVERSATIONS_STORE_DIR;
     delete process.env.HOTEL_PANEL_USERNAME;
@@ -292,6 +297,7 @@ describe("conversations security", () => {
     expect(payload.conversations[0]).toEqual(
       expect.objectContaining({
         phoneNormalized: "34600000001",
+        channel: "twilio_sandbox",
         mode: "human",
         humanRequested: true,
       }),
@@ -301,6 +307,75 @@ describe("conversations security", () => {
         expect.objectContaining({ eventType: "human_requested" }),
       ]),
     );
+  });
+
+  it("returns valid TwiML, stores bot reply and deduplicates Twilio retries by MessageSid", async () => {
+    tempDir = mkdtempSync(path.join(os.tmpdir(), "hotel-twilio-idempotent-"));
+    process.env.HOTEL_CONVERSATIONS_STORE_DIR = tempDir;
+    process.env.TWILIO_WEBHOOK_AUTH_TOKEN = "expected-token";
+    process.env.TWILIO_PROVIDER_MODE = "sandbox";
+    process.env.WHATSAPP_PROVIDER = "mock";
+    process.env.LLM_PROVIDER = "mock";
+    process.env.GOOGLE_SHEETS_ACCESS_MODE = "read_only";
+    process.env.BOT_SHEETS_LIVE_WRITE_ENABLED = "false";
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+
+    const request = () =>
+      postTwilioWebhook(
+        new Request("https://example.test/api/twilio/whatsapp?token=expected-token", {
+          method: "POST",
+          headers: {
+            "content-type": "application/x-www-form-urlencoded",
+          },
+          body: new URLSearchParams({
+            From: "whatsapp:+34600000004",
+            To: "whatsapp:+14155238886",
+            Body: "Hola, quiero información sobre AIPAP Agua",
+            MessageSid: "SM_IDEMPOTENT_001",
+            ProfileName: "Cliente Twilio",
+          }),
+        }),
+      );
+
+    const first = await request();
+    const second = await request();
+    const firstText = await first.text();
+    const secondText = await second.text();
+    const payload = JSON.parse(
+      readFileSync(path.join(tempDir, "hotel-conversations.json"), "utf8"),
+    );
+    const conversation = payload.conversations[0];
+
+    expect(first.status).toBe(200);
+    expect(first.headers.get("Content-Type")).toContain("text/xml");
+    expect(firstText).toContain("<?xml version=\"1.0\" encoding=\"UTF-8\"?>");
+    expect(firstText).toContain("<Response><Message>");
+    expect(secondText).toBe('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
+    expect(conversation).toEqual(
+      expect.objectContaining({
+        phoneE164: "+34600000004",
+        phoneNormalized: "34600000004",
+        channel: "twilio_sandbox",
+        sourceType: "whatsapp",
+      }),
+    );
+    expect(conversation.messages).toHaveLength(2);
+    expect(conversation.messages).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          direction: "inbound",
+          senderType: "user",
+          externalMessageSid: "SM_IDEMPOTENT_001",
+          body: "Hola, quiero información sobre AIPAP Agua",
+        }),
+        expect.objectContaining({
+          direction: "outbound",
+          senderType: "bot",
+        }),
+      ]),
+    );
+    expect(fetchSpy).not.toHaveBeenCalled();
+    fetchSpy.mockRestore();
   });
 
   it("accepts Twilio webhook token by query param for console webhooks", async () => {
