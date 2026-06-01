@@ -1,19 +1,21 @@
 import Link from "next/link";
+import Image from "next/image";
 import { demoFormUrl } from "@/components/demo-data";
 
 export function PublicSiteHeader() {
   return (
     <header className="sticky top-0 z-40 border-b border-[var(--primary-border)] bg-[rgba(251,247,250,0.95)] backdrop-blur-sm">
       <div className="mx-auto grid min-h-[5rem] max-w-6xl grid-cols-[auto_1fr_auto] items-center gap-6 px-6 py-3 lg:px-10">
-        <Link href="/" className="flex items-center gap-3" aria-label="Maternaly">
-          <span>
-            <strong className="block text-xl font-bold text-[var(--primary-text)]">
-              Maternaly
-            </strong>
-            <small className="text-xs font-semibold uppercase tracking-[0.2em] text-[var(--primary-muted)]">
-              WhatsApp bot
-            </small>
-          </span>
+        <Link href="/" className="flex items-center" aria-label="Maternaly">
+          <Image
+            src="/brand/maternaly-logo.webp"
+            alt="Maternaly"
+            width={275}
+            height={69}
+            priority
+            className="h-12 w-auto object-contain sm:h-14"
+          />
+          <span className="sr-only">Maternaly WhatsApp bot</span>
         </Link>
 
         <nav

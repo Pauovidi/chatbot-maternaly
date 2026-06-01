@@ -1,7 +1,7 @@
-Coloca aqui el logo final de Maternaly cuando este disponible.
+Logo final de Maternaly usado en el header publico y en los shells compartidos.
 
-Ruta recomendada:
+Ruta activa:
 
-- `public/brand/maternaly-logo.svg`
+- `public/brand/maternaly-logo.webp`
 
 Alt text en la interfaz: `Maternaly`.

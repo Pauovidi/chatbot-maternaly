@@ -52,6 +52,8 @@ describe("conversations panel visible demo copy", () => {
 
     expect(headerHtml).toContain("Maternaly");
     expect(headerHtml).toContain("WhatsApp bot");
+    expect(headerHtml).toContain("%2Fbrand%2Fmaternaly-logo.webp");
+    expect(headerHtml).toContain('alt="Maternaly"');
     expect(headerHtml).toContain("Inicio");
     expect(headerHtml).not.toContain("Operativa");
     expect(headerHtml).not.toContain('href="/ops"');
@@ -88,6 +90,8 @@ describe("conversations panel visible demo copy", () => {
     expect(surfaces).toContain("Quicksand");
     expect(surfaces).toContain("--primary: #d6aac7");
     expect(surfaces).toContain("var(--primary");
+    expect(header).toContain("next/image");
+    expect(header).toContain("/brand/maternaly-logo.webp");
     expect(siteShell).not.toContain("PublicSiteFooter");
     expect(productShell).not.toContain("PublicSiteFooter");
     expect(header).not.toContain("HeartPulse");
