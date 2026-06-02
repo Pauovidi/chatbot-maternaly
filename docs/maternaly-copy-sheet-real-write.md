@@ -45,6 +45,14 @@ Genera:
 
 El informe redacta PII y detecta pestañas, encabezados, ultima fila valida, columnas candidatas, formulas, columnas no tocables, riesgos y mapping propuesto.
 
+En Vercel tambien puede ejecutarse mediante el endpoint protegido:
+
+```bash
+GET /api/maternaly/admin/sheets/copy-audit
+```
+
+Requiere `MATERNALY_ADMIN_TASK_TOKEN` y devuelve JSON redactado sin escribir informes en disco.
+
 ## Escritura demo
 
 ```bash
@@ -56,6 +64,14 @@ La operacion es `append` sobre una nueva fila en la estructura real detectada. A
 `BACKUP_BOT_<YYYYMMDD_HHMM>_<TAB_NAME>`
 
 Si no puede duplicar, crea snapshot JSON en `reports/`. Si no hay backup/snapshot, no escribe.
+
+En Vercel la escritura controlada del flujo Test ADN / Detesex se ejecuta con:
+
+```bash
+POST /api/maternaly/admin/demo-flow/test-adn-write
+```
+
+Requiere `MATERNALY_ADMIN_TASK_TOKEN`; si no se envia payload, usa un caso demo redactado en la respuesta.
 
 ## Reglas de seguridad
 

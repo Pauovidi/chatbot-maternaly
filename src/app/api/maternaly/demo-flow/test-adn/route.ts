@@ -17,7 +17,7 @@ export async function POST(request: Request) {
       message,
       previousState: state,
       fallbackPhone: typeof body.phone === "string" ? body.phone : undefined,
-      executeWrite: body.executeWrite !== false,
+      executeWrite: false,
     });
     if (!result.handled || !result.reply) {
       return NextResponse.json({ ok: false, message, error: "Message not handled by Test ADN demo flow." }, { status: 400 });

@@ -17,9 +17,11 @@ Simula:
 
 Si no hay copias o credenciales, el flujo mantiene dry-run/write-plan y reporta que la escritura queda pendiente de revision humana.
 
-## API interna
+## API interna de simulacion
 
 `POST /api/maternaly/demo-flow/test-adn`
+
+Esta ruta no ejecuta escritura real. Devuelve el flujo conversacional y el plan simulado para poder probar la demo sin tocar Sheets.
 
 Payload ejemplo:
 
@@ -43,6 +45,15 @@ El webhook de Twilio/YCloud usa el mismo flujo y guarda el estado en eventos de 
 - `maternaly_test_adn_write_plan`
 
 No requiere Postgres si el store de conversaciones esta en Google Sheets demo.
+
+## Escritura real controlada
+
+La ejecucion real desde Vercel se hace solo con token administrativo:
+
+- `GET|POST /api/maternaly/admin/sheets/copy-audit`
+- `POST /api/maternaly/admin/demo-flow/test-adn-write`
+
+Ambas rutas requieren `MATERNALY_ADMIN_TASK_TOKEN` por `Authorization: Bearer <token>` o `x-maternaly-admin-task-token`. Las respuestas redactan IDs de Sheet y datos de cliente.
 
 ## Calculo correlativo
 
