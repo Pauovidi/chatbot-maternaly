@@ -11,7 +11,7 @@ import {
   summarizeWritePlanForEvent,
 } from "@/lib/maternaly/demo/test-adn-flow";
 import { writeCopyWriteResultReports } from "@/lib/maternaly/sheets/copy-real-write";
-import { buildMaternalyWhatsAppReply } from "./response-engine";
+import { MATERNALY_SAFE_FALLBACK, buildMaternalyWhatsAppReply, ensureMaternalySafeReply } from "./response-engine";
 
 function nowIso() {
   return new Date().toISOString();
@@ -51,6 +51,55 @@ function createEvent(conversationId: string, eventType: string, payload?: unknow
     createdAt: nowIso(),
     at: nowIso(),
   };
+}
+
+function normalizeIntentText(text: string): string {
+  return text
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .trim()
+    .toLowerCase();
+}
+
+export function buildDeterministicMaternalyDemoReply(message: string): {
+  reply: string;
+  intent: string;
+} | undefined {
+  const text = normalizeIntentText(message);
+
+  if (/\b(hablar con|persona|recepcion|humano|humana|equipo)\b/.test(text)) {
+    return undefined;
+  }
+
+  if (/^(hola|buenos dias|buenas|kaixo|quiero informacion)\b/.test(text)) {
+    return {
+      intent: "demo_greeting",
+      reply: MATERNALY_SAFE_FALLBACK,
+    };
+  }
+
+  if (/\bpilates\b/.test(text)) {
+    return {
+      intent: "demo_pilates",
+      reply: "Puedo ayudarte con Pilates de Maternaly. Para orientarte mejor, dime si te interesa Bilbao o Erandio, o si quieres que revise horarios disponibles.",
+    };
+  }
+
+  if (/\baipap\b/.test(text)) {
+    return {
+      intent: "demo_aipap",
+      reply: "Puedo ayudarte con AIPAP de Maternaly. ¿Te interesa AIPAP Agua o AIPAP Terra?",
+    };
+  }
+
+  if (/\bfactura|justificante\b/.test(text)) {
+    return {
+      intent: "demo_invoice",
+      reply: "Lo dejo anotado para que el equipo de Maternaly pueda revisarlo y emitir la factura cuando el pago esté validado.",
+    };
+  }
+
+  return undefined;
 }
 
 async function getOrCreateMaternalyConversation(
@@ -173,13 +222,6 @@ export async function handleInboundMaternalyWhatsApp(
   );
 
   const latest = (await store.getById(conversation.id)) ?? conversation;
-  if (latest.mode === "human") {
-    await store.addEvent(createEvent(latest.id, "auto_reply_skipped_human_mode"));
-    return {
-      conversation: (await store.getById(latest.id)) ?? latest,
-      inbound,
-    };
-  }
 
   const demoFlow = await advanceTestAdnDemoFlow({
     message: safeBody,
@@ -243,6 +285,78 @@ export async function handleInboundMaternalyWhatsApp(
     };
   }
 
+  const deterministic = buildDeterministicMaternalyDemoReply(safeBody);
+  if (deterministic) {
+    const reply = ensureMaternalySafeReply(deterministic.reply);
+    const updated = await store.replaceConversation({
+      ...latest,
+      serviceDetected:
+        deterministic.intent === "demo_pilates"
+          ? "Pilates Embarazo"
+          : deterministic.intent === "demo_aipap"
+            ? "AIPAP"
+            : latest.serviceDetected,
+      tags: Array.from(new Set([...(latest.tags ?? []), "maternaly", "demo-deterministic"])),
+      updatedAt: nowIso(),
+    });
+    await store.addEvent(
+      createEvent(latest.id, "maternaly_demo_deterministic_reply", {
+        intent: deterministic.intent,
+      }),
+    );
+    await store.addEvent(
+      createEvent(latest.id, "maternaly_intent_detected", {
+        botDomain: "maternaly",
+        intent:
+          deterministic.intent === "demo_greeting"
+            ? "greeting"
+            : deterministic.intent === "demo_pilates" || deterministic.intent === "demo_aipap"
+              ? "service_question"
+              : "unknown",
+        serviceCandidate:
+          deterministic.intent === "demo_pilates"
+            ? "pilates"
+            : deterministic.intent === "demo_aipap"
+              ? "aipap"
+              : undefined,
+        deterministic: true,
+      }),
+    );
+    const botReply = await store.addMessage(
+      createMessage({
+        conversationId: latest.id,
+        direction: "outbound",
+        senderType: "bot",
+        body: reply,
+      }),
+    );
+
+    return {
+      conversation: (await store.getById(latest.id)) ?? updated,
+      inbound,
+      botReply,
+      twiml: buildTwilioMessageResponse(reply),
+    };
+  }
+
+  if (latest.mode === "human") {
+    await store.addEvent(createEvent(latest.id, "auto_reply_safe_fallback_human_mode"));
+    const botReply = await store.addMessage(
+      createMessage({
+        conversationId: latest.id,
+        direction: "outbound",
+        senderType: "bot",
+        body: MATERNALY_SAFE_FALLBACK,
+      }),
+    );
+    return {
+      conversation: (await store.getById(latest.id)) ?? latest,
+      inbound,
+      botReply,
+      twiml: buildTwilioMessageResponse(MATERNALY_SAFE_FALLBACK),
+    };
+  }
+
   const maternaly = await buildMaternalyWhatsAppReply(safeBody);
   const needsHuman = maternaly.intent.should_handoff || maternaly.intent.intent === "handoff_request";
   const updated = await store.replaceConversation(applyMaternalyIntent(latest, maternaly.intent));
@@ -285,6 +399,6 @@ export async function handleInboundMaternalyWhatsApp(
     conversation: (await store.getById(latest.id)) ?? updated,
     inbound,
     botReply,
-    twiml: buildTwilioMessageResponse(maternaly.reply),
+    twiml: buildTwilioMessageResponse(ensureMaternalySafeReply(maternaly.reply)),
   };
 }

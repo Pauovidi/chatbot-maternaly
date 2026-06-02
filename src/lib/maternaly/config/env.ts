@@ -119,7 +119,7 @@ export function readMaternalyRuntimeConfig(
 }
 
 export function getGoogleServiceAccountJson(
-  env: NodeJS.ProcessEnv = process.env,
+  env: Partial<NodeJS.ProcessEnv> = process.env,
 ): string | null {
   const rawJson =
     env.MATERNALY_GOOGLE_SHEETS_SERVICE_ACCOUNT_JSON?.trim() ||

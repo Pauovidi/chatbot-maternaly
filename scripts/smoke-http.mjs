@@ -109,39 +109,48 @@ async function checkTwilioWebhookEndpoint() {
   const url = token
     ? `/api/twilio/whatsapp?token=${encodeURIComponent(token)}`
     : "/api/twilio/whatsapp";
-  const payload = new URLSearchParams({
-    From: `whatsapp:+346${suffix}`,
-    To: "whatsapp:+14155238886",
-    Body: "Hola, quiero información sobre AIPAP Agua",
-    MessageSid: `SM_SMOKE_${suffix}`,
-    ProfileName: "Smoke Sandbox",
-  });
+  const cases = [
+    ["hola", "Maternaly"],
+    ["Pilates", "Pilates"],
+    ["Quiero reservar Test ADN", "18:20"],
+  ];
 
-  const { response, text } = await request(url, {
-    method: "POST",
-    headers: {
-      "content-type": "application/x-www-form-urlencoded",
-    },
-    body: payload,
-  });
+  for (const [body, expected] of cases) {
+    const payload = new URLSearchParams({
+      From: `whatsapp:+346${suffix}`,
+      To: "whatsapp:+14155238886",
+      Body: body,
+      MessageSid: `SM_SMOKE_${suffix}_${body.length}`,
+      ProfileName: "Smoke Sandbox",
+    });
 
-  if (response.status === 401) {
-    console.log("[skip] POST /api/twilio/whatsapp requiere TWILIO_WEBHOOK_AUTH_TOKEN");
-    return;
+    const { response, text } = await request(url, {
+      method: "POST",
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+      },
+      body: payload,
+    });
+
+    if (response.status === 401) {
+      console.log("[skip] POST /api/twilio/whatsapp requiere TWILIO_WEBHOOK_AUTH_TOKEN");
+      return;
+    }
+
+    assert(response.ok, `/api/twilio/whatsapp devolvio ${response.status}: ${text}`);
+    assert(text.includes("<Response>"), "/api/twilio/whatsapp no devolvio TwiML Response");
+    assert(text.includes("<Message>"), "/api/twilio/whatsapp no devolvio TwiML Message");
+    assert(text.includes(expected), `/api/twilio/whatsapp no devolvio ${expected}`);
+    assert(
+      !legacyHotelResponsePattern.test(text),
+      "/api/twilio/whatsapp devolvio texto heredado de hotel/perros",
+    );
+    assert(
+      response.headers.get("content-type")?.includes("text/xml"),
+      "/api/twilio/whatsapp debe devolver text/xml",
+    );
   }
-
-  assert(response.ok, `/api/twilio/whatsapp devolvio ${response.status}: ${text}`);
-  assert(text.includes("<Response>"), "/api/twilio/whatsapp no devolvio TwiML Response");
-  assert(text.includes("AIPAP") || text.includes("Maternaly"), "/api/twilio/whatsapp no devolvio respuesta Maternaly");
-  assert(
-    !legacyHotelResponsePattern.test(text),
-    "/api/twilio/whatsapp devolvio texto heredado de hotel/perros",
-  );
-  assert(
-    response.headers.get("content-type")?.includes("text/xml"),
-    "/api/twilio/whatsapp debe devolver text/xml",
-  );
-  console.log("[ok] POST /api/twilio/whatsapp");
+  console.log("[ok] POST /api/twilio/whatsapp multi-turn");
 }
 
 async function main() {

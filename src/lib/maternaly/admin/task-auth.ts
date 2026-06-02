@@ -36,7 +36,7 @@ function tokensMatch(expected: string, presented: string): boolean {
 
 export function verifyMaternalyAdminTaskRequest(
   request: Request,
-  env: NodeJS.ProcessEnv = process.env,
+  env: Partial<NodeJS.ProcessEnv> = process.env,
 ): AdminTaskAuthResult {
   const expected = env.MATERNALY_ADMIN_TASK_TOKEN?.trim();
   if (!expected) {

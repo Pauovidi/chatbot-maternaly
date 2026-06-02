@@ -3,7 +3,7 @@ import { MaternalyConversationInterpreter } from "@/lib/maternaly/llm/interprete
 import type { StructuredIntent } from "@/lib/maternaly/llm/interpreter";
 
 export const MATERNALY_SAFE_FALLBACK =
-  "Hola, soy el asistente de Maternaly. Puedo orientarte sobre Pilates, AIPAP Agua, AIPAP Terra, Preparación al Parto, Suelo Pélvico, Lactancia, Diagnóstico Prenatal y talleres. ¿Sobre qué servicio necesitas información?";
+  "Disculpa, estoy revisando tu solicitud con el equipo de Maternaly. Puedo ayudarte con Pilates, AIPAP Agua, AIPAP Terra, Preparación al Parto, Suelo Pélvico, Lactancia, Diagnóstico Prenatal y Test ADN. ¿Sobre qué servicio necesitas información?";
 
 const LEGACY_HOTEL_PATTERNS = [
   /\bhotel(?:es)?\b/i,

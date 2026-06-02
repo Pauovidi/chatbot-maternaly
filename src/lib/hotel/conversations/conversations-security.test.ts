@@ -248,9 +248,7 @@ describe("conversations security", () => {
 
     expect(response.status).toBe(401);
     expect(response.headers.get("Content-Type")).toContain("text/xml");
-    expect(await response.text()).toBe(
-      '<?xml version="1.0" encoding="UTF-8"?><Response></Response>',
-    );
+    expect(await response.text()).toContain("<Response><Message>");
     expect(logs).toContain("[twilio:webhook]");
     expect(logs).toContain('"result":"rejected"');
     expect(logs).toContain('"tokenPresent":true');
@@ -403,7 +401,7 @@ describe("conversations security", () => {
     expect(responses[1]).toContain("nombre y apellidos");
     expect(responses[2]).toContain("reserva fijada pendiente de pago");
     expect(lastReply).toContain("https://app.uelzpay.com/checkout/cml6qypoi00g0qy01fkfdapmh");
-    expect(lastReply).toContain("reserva fijada como pendiente de pago");
+    expect(lastReply).toContain("reserva fijada pendiente de pago");
     expect(lastReply).not.toMatch(/reserva confirmada|pago confirmado|factura enviada|plaza confirmada/i);
     expect(conversation.serviceDetected).toBe("TEST ADN / DETESEX");
     expect(conversation.maternalyReservationStatus).toBe("pending");
@@ -436,9 +434,7 @@ describe("conversations security", () => {
       );
 
       expect(response.status).toBe(401);
-      expect(await response.text()).toBe(
-        '<?xml version="1.0" encoding="UTF-8"?><Response></Response>',
-      );
+      expect(await response.text()).toContain("<Response><Message>");
     } finally {
       if (previousNodeEnv === undefined) {
         vi.unstubAllEnvs();
@@ -544,7 +540,7 @@ describe("conversations security", () => {
     expect(first.headers.get("Content-Type")).toContain("text/xml");
     expect(firstText).toContain("<?xml version=\"1.0\" encoding=\"UTF-8\"?>");
     expect(firstText).toContain("<Response><Message>");
-    expect(secondText).toBe('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
+    expect(secondText).toContain("<Response><Message>");
     expect(conversation).toEqual(
       expect.objectContaining({
         phoneE164: "+34600000004",

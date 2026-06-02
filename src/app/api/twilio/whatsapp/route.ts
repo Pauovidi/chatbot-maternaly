@@ -5,11 +5,24 @@ import {
 } from "@/lib/hotel/conversations/service";
 import { readTwilioWhatsAppConfig } from "@/lib/hotel/twilio/client";
 import { handleInboundMaternalyWhatsApp } from "@/lib/maternaly/conversation/twilio-inbound";
+import {
+  MATERNALY_SAFE_FALLBACK,
+  containsLegacyHotelKnowledge,
+} from "@/lib/maternaly/conversation/response-engine";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const TWILIO_XML_HEADERS = { "Content-Type": "text/xml; charset=utf-8" };
+
+function buildSafeMaternalyTwilioResponse(twiml?: string): string {
+  const message = twiml?.match(/<Message>([\s\S]*?)<\/Message>/)?.[1]?.trim();
+  if (!message || containsLegacyHotelKnowledge(twiml ?? "")) {
+    return buildTwilioMessageResponse(MATERNALY_SAFE_FALLBACK);
+  }
+
+  return twiml ?? buildTwilioMessageResponse(MATERNALY_SAFE_FALLBACK);
+}
 
 function getTokenStatus(request: Request): {
   configured: boolean;
@@ -150,7 +163,7 @@ export async function POST(request: Request) {
       result: "rejected",
       reason: "invalid_token",
     });
-    return new NextResponse(buildTwilioMessageResponse(), {
+    return new NextResponse(buildTwilioMessageResponse(MATERNALY_SAFE_FALLBACK), {
       status: 401,
       headers: TWILIO_XML_HEADERS,
     });
@@ -165,7 +178,7 @@ export async function POST(request: Request) {
       result: "error",
       reason: "payload_parse_failed",
     });
-    return new NextResponse(buildTwilioMessageResponse(), {
+    return new NextResponse(buildTwilioMessageResponse(MATERNALY_SAFE_FALLBACK), {
       status: 400,
       headers: TWILIO_XML_HEADERS,
     });
@@ -188,7 +201,7 @@ export async function POST(request: Request) {
       result: "accepted",
       reason: "empty_from_or_body",
     });
-    return new NextResponse(buildTwilioMessageResponse(), {
+    return new NextResponse(buildTwilioMessageResponse(MATERNALY_SAFE_FALLBACK), {
       headers: TWILIO_XML_HEADERS,
     });
   }
@@ -211,17 +224,17 @@ export async function POST(request: Request) {
       duplicate: Boolean(messageSid && !result.botReply),
     });
 
-    return new NextResponse(result.twiml ?? buildTwilioMessageResponse(), {
+    return new NextResponse(buildSafeMaternalyTwilioResponse(result.twiml), {
       headers: TWILIO_XML_HEADERS,
     });
-  } catch {
+  } catch (error) {
     logTwilioWebhook({
       ...requestLog,
       result: "error",
       reason: "handler_failed",
+      errorType: error instanceof Error ? error.name : typeof error,
     });
-    return new NextResponse(buildTwilioMessageResponse(), {
-      status: 500,
+    return new NextResponse(buildTwilioMessageResponse(MATERNALY_SAFE_FALLBACK), {
       headers: TWILIO_XML_HEADERS,
     });
   }

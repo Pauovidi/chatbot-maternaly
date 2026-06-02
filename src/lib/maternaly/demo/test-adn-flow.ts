@@ -285,7 +285,7 @@ export async function advanceTestAdnDemoFlow({
       state,
       writeReport,
       reply: ensureSafeDemoReply(
-        `Perfecto, dejo tu reserva fijada como pendiente de pago para el ${state.proposedDate} a las ${state.proposedTime} en ${state.selectedLocation === "ERANDIO" ? "Erandio" : "Bilbao"}.\n\nPara completar la reserva, puedes realizar el pago aquí:\n${state.paymentLink}${writeWarning}`,
+        `Perfecto, dejo tu reserva fijada pendiente de pago para el ${state.proposedDate} a las ${state.proposedTime} en ${state.selectedLocation === "ERANDIO" ? "Erandio" : "Bilbao"}.\n\nPara completar la reserva, puedes realizar el pago aquí:\n${state.paymentLink}${writeWarning}`,
       ),
     };
   }

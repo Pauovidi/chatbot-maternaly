@@ -37,7 +37,7 @@ describe("Test ADN / Detesex demo conversation flow", () => {
       executeWrite: false,
     });
     expect(final.state?.phase).toBe("completed");
-    expect(final.reply).toContain("reserva fijada como pendiente de pago");
+    expect(final.reply).toContain("reserva fijada pendiente de pago");
     expect(final.reply).toContain("https://app.uelzpay.com/checkout/cml6qypoi00g0qy01fkfdapmh");
     expect(final.reply).not.toMatch(/reserva confirmada|pago confirmado|factura enviada|plaza confirmada/i);
   });
