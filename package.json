@@ -24,6 +24,7 @@
     "maternaly:sheets:copy-audit": "tsx scripts/maternaly-copy-sheets-audit.ts",
     "maternaly:sheets:copy-write": "tsx scripts/maternaly-copy-sheets-write.ts",
     "maternaly:demo-flow:test-adn": "tsx scripts/maternaly-demo-flow-test-adn.ts",
+    "maternaly:conversations:seed-demo": "tsx scripts/maternaly-conversations-seed-demo.ts",
     "conversations:reset": "tsx scripts/conversations-reset.ts",
     "docker:build": "docker build -t chatbot-maternaly:local .",
     "docker:run": "docker run --rm -p 3000:3000 chatbot-maternaly:local",

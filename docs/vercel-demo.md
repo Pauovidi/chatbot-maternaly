@@ -105,6 +105,14 @@ GET /api/maternaly/admin/conversations-store/debug
 
 Si `MATERNALY_ADMIN_TASK_TOKEN` existe, requiere `Authorization: Bearer <token>` o `x-maternaly-admin-task-token`. Si no existe, requiere el acceso seguro del panel. La respuesta solo expone provider, runtime, pestana, flags de credenciales/configuracion, conteos y tipo/codigo de error; no devuelve secretos ni contenido de conversaciones.
 
+El seed protegido de conversaciones demo esta en:
+
+```text
+POST /api/maternaly/admin/conversations/seed-demo
+```
+
+Requiere `x-maternaly-admin-task-token: <token>` y usa `seedBatchId=maternaly-demo-panel-seed-v1` por defecto. Es idempotente: no duplica si el batch ya existe y solo reemplaza conversaciones del mismo batch cuando se envia `{ "force": true }`. No envia WhatsApp ni toca los Sheets originales de servicios.
+
 ## 7. Limitaciones
 
 - Demo temporal en Vercel.

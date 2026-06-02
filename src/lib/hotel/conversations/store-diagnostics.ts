@@ -3,6 +3,7 @@ import {
   diagnoseGoogleSheetsConversationStore,
   getGoogleSheetsConversationStoreConfig,
 } from "./google-sheets-store";
+import { MATERNALY_DEMO_PANEL_SEED_BATCH_ID } from "./maternaly-demo-seed";
 import { readConversationStoreRuntimeConfig } from "@/lib/hotel/persistence/runtime";
 
 export interface ConversationStoreDiagnostics {
@@ -18,6 +19,9 @@ export interface ConversationStoreDiagnostics {
   conversationCount: number;
   parseErrors: number;
   panelShouldLoad: boolean;
+  demoSeedAvailable: boolean;
+  demoSeedBatchId: string;
+  demoSeedEndpointProtected: boolean;
   error?: {
     type: string;
     code?: string;
@@ -98,6 +102,9 @@ export async function diagnoseConversationStore(): Promise<ConversationStoreDiag
       conversationCount: sheetsDiagnostics.conversationCount,
       parseErrors: sheetsDiagnostics.parseErrors,
       panelShouldLoad: sheetsDiagnostics.panelShouldLoad,
+      demoSeedAvailable: true,
+      demoSeedBatchId: MATERNALY_DEMO_PANEL_SEED_BATCH_ID,
+      demoSeedEndpointProtected: true,
       error: sheetsDiagnostics.error,
     };
   }
@@ -115,6 +122,9 @@ export async function diagnoseConversationStore(): Promise<ConversationStoreDiag
     conversationCount: 0,
     parseErrors: 0,
     panelShouldLoad: false,
+    demoSeedAvailable: true,
+    demoSeedBatchId: MATERNALY_DEMO_PANEL_SEED_BATCH_ID,
+    demoSeedEndpointProtected: true,
   };
 
   try {
