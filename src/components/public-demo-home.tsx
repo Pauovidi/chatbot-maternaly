@@ -23,7 +23,7 @@ export function PublicDemoHome() {
                 <p className="text-xs font-semibold uppercase tracking-[0.24em] text-[#8d6b51]">
                   Maternaly
                 </p>
-                <h1 className="max-w-3xl font-serif text-5xl leading-[0.95] tracking-[-0.04em] md:text-6xl">
+                <h1 className="max-w-3xl text-5xl font-semibold leading-[1.02] tracking-normal md:text-6xl">
                   Chatbot WhatsApp para reservas asistidas
                 </h1>
                 <p className="max-w-2xl text-base leading-8 text-[#5d4a3a] md:text-lg">
@@ -89,7 +89,7 @@ export function PublicDemoHome() {
             <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[#8d6b51]">
               1. Preguntas frecuentes
             </p>
-            <h2 className="mt-3 font-serif text-3xl tracking-[-0.03em]">
+            <h2 className="mt-3 text-3xl font-semibold tracking-normal">
               Separa servicios y sedes
             </h2>
             <p className="mt-4 leading-7 text-[#5d4a3a]">
@@ -101,7 +101,7 @@ export function PublicDemoHome() {
             <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[#8d6b51]">
               2. Reserva
             </p>
-            <h2 className="mt-3 font-serif text-3xl tracking-[-0.03em]">
+            <h2 className="mt-3 text-3xl font-semibold tracking-normal">
               Consulta fuentes operativas
             </h2>
               <p className="mt-4 leading-7 text-[#5d4a3a]">
@@ -113,7 +113,7 @@ export function PublicDemoHome() {
             <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[#8d6b51]">
               3. Recepción
             </p>
-            <h2 className="mt-3 font-serif text-3xl tracking-[-0.03em]">
+            <h2 className="mt-3 text-3xl font-semibold tracking-normal">
               El equipo conserva control
             </h2>
             <p className="mt-4 leading-7 text-[#5d4a3a]">

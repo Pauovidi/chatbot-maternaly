@@ -52,7 +52,7 @@ describe("conversations panel visible demo copy", () => {
 
     expect(headerHtml).toContain("Maternaly");
     expect(headerHtml).toContain("WhatsApp bot");
-    expect(headerHtml).toContain("%2Fbrand%2Fmaternaly-logo.webp");
+    expect(headerHtml).toContain("%2Fbrand%2Fmaternaly-logo-fondo-transparente.png");
     expect(headerHtml).toContain('alt="Maternaly"');
     expect(headerHtml).toContain("Inicio");
     expect(headerHtml).not.toContain("Operativa");
@@ -77,6 +77,7 @@ describe("conversations panel visible demo copy", () => {
       "src/app/layout.tsx",
       "src/app/globals.css",
       "src/components/public-site-header.tsx",
+      "src/components/public-demo-home.tsx",
       "src/components/site-shell.tsx",
       "src/components/product-shell.tsx",
       "src/components/public-chat-widget.tsx",
@@ -91,7 +92,10 @@ describe("conversations panel visible demo copy", () => {
     expect(surfaces).toContain("--primary: #d6aac7");
     expect(surfaces).toContain("var(--primary");
     expect(header).toContain("next/image");
-    expect(header).toContain("/brand/maternaly-logo.webp");
+    expect(header).toContain("/brand/maternaly-logo-fondo-transparente.png");
+    expect(header).not.toContain("/brand/maternaly-logo.webp");
+    expect(surfaces).not.toContain("font-serif");
+    expect(surfaces).not.toMatch(/tracking-\[-/);
     expect(siteShell).not.toContain("PublicSiteFooter");
     expect(productShell).not.toContain("PublicSiteFooter");
     expect(header).not.toContain("HeartPulse");
