@@ -576,17 +576,14 @@ export class CopySheetsRealWriteService {
     const targetAudit = input.spreadsheetId
       ? audits.find((audit) => audit.spreadsheetId === input.spreadsheetId)
       : audits.find((audit) => audit.access === "read");
+    const fallbackAudit = targetAudit ?? audits[0] ?? {
+      spreadsheetId: input.spreadsheetId ?? "",
+      spreadsheetIdRedacted: input.spreadsheetId ? redactSheetId(input.spreadsheetId) : "[missing]",
+      access: "not_configured" as const,
+      tabs: [],
+    };
     if (!targetAudit) {
-      const plan = this.buildPlanFromAudit(
-        {
-          spreadsheetId: input.spreadsheetId ?? "",
-          spreadsheetIdRedacted: input.spreadsheetId ? redactSheetId(input.spreadsheetId) : "[missing]",
-          access: "not_configured",
-          tabs: [],
-        },
-        input,
-        config,
-      );
+      const plan = this.buildPlanFromAudit(fallbackAudit, input, config);
       return { generatedAt: new Date().toISOString(), plan, applied: false, error: "No readable target copy audit." };
     }
 
@@ -706,8 +703,13 @@ export async function writeCopyAuditReports(
   const markdownPath = path.join(reportsDir, `maternaly_copy_sheets_write_audit_${timestamp}.md`);
   const jsonPath = path.join(reportsDir, `maternaly_copy_sheets_write_audit_${timestamp}.json`);
 
+  const redactedAudits = audits.map((audit) => ({
+    ...audit,
+    spreadsheetId: audit.spreadsheetIdRedacted,
+  }));
+
   await fs.writeFile(markdownPath, renderCopyAuditMarkdown(audits, now.toISOString()), "utf8");
-  await fs.writeFile(jsonPath, `${JSON.stringify({ generatedAt: now.toISOString(), audits }, null, 2)}\n`, "utf8");
+  await fs.writeFile(jsonPath, `${JSON.stringify({ generatedAt: now.toISOString(), audits: redactedAudits }, null, 2)}\n`, "utf8");
   return { markdownPath, jsonPath };
 }
 

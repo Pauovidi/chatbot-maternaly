@@ -1,9 +1,9 @@
 {
-  "generatedAt": "2026-06-02T06:29:43.695Z",
+  "generatedAt": "2026-06-02T06:41:09.568Z",
   "plan": {
     "operation": "append",
-    "targetSpreadsheetId": "[missing]",
-    "targetSpreadsheetIdRedacted": "[missing]",
+    "targetSpreadsheetId": "1brcTb...mQlw",
+    "targetSpreadsheetIdRedacted": "1brcTb...mQlw",
     "targetTab": "UNKNOWN",
     "sourceLastRowReference": {
       "rowNumber": 1,
@@ -49,8 +49,8 @@
     "originalSheetProtected": true,
     "copyOnly": true,
     "backupCreated": false,
-    "allowedByPolicy": false,
-    "blockedReason": "No copy spreadsheet ID configured. | MATERNALY_REAL_STRUCTURE_WRITE_ENABLED is not true. | MATERNALY_REAL_STRUCTURE_WRITE_MODE must be copy_only."
+    "allowedByPolicy": true,
+    "blockedReason": "No target tab detected."
   },
   "applied": false,
   "error": "No readable target copy audit."
