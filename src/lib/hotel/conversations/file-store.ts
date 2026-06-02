@@ -1,6 +1,10 @@
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
-import { readHotelPersistenceConfig, resolveJsonStorePath } from "@/lib/hotel/persistence/runtime";
+import {
+  readConversationStoreRuntimeConfig,
+  resolveJsonStorePath,
+} from "@/lib/hotel/persistence/runtime";
+import { GoogleSheetsConversationStore } from "./google-sheets-store";
 import { PostgresConversationStore } from "./postgres-store";
 import type {
   Conversation,
@@ -370,11 +374,13 @@ let storeSingleton: ConversationStore | undefined;
 
 export function getConversationStore(): ConversationStore {
   if (!storeSingleton) {
-    const persistence = readHotelPersistenceConfig();
+    const persistence = readConversationStoreRuntimeConfig();
     storeSingleton =
-      persistence.provider === "postgres"
-        ? new PostgresConversationStore()
-        : new FileConversationStore();
+      persistence.provider === "google_sheets"
+        ? new GoogleSheetsConversationStore()
+        : persistence.provider === "postgres"
+          ? new PostgresConversationStore()
+          : new FileConversationStore();
   }
 
   return storeSingleton;

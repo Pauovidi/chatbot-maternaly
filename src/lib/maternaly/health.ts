@@ -1,5 +1,8 @@
 import { Pool } from "pg";
-import { readHotelPersistenceConfig } from "@/lib/hotel/persistence/runtime";
+import {
+  readConversationStoreRuntimeConfig,
+  readHotelPersistenceConfig,
+} from "@/lib/hotel/persistence/runtime";
 import { readTwilioWhatsAppConfig } from "@/lib/hotel/twilio/client";
 import { readMaternalyRuntimeConfig } from "@/lib/maternaly/config/env";
 
@@ -86,31 +89,42 @@ export async function getMaternalyHealth(env: NodeJS.ProcessEnv = process.env) {
   const config = readMaternalyRuntimeConfig(env);
   const twilioConfig = readTwilioWhatsAppConfig(env);
   const persistence = readHotelPersistenceConfig(env);
+  const conversationsStore = readConversationStoreRuntimeConfig(env);
   const databaseDiagnostics = await checkDatabaseDiagnostics(env.DATABASE_URL);
   const databaseReachable = databaseDiagnostics.reachable;
   const productionLike =
     env.NODE_ENV === "production" || config.appEnv.toLowerCase() === "production";
   const databaseUrlConfigured = Boolean(env.DATABASE_URL?.trim());
   const provider = persistence.provider;
+  const vercelGoogleSheetsDemo =
+    productionLike &&
+    conversationsStore.provider === "google_sheets" &&
+    conversationsStore.demoVercelMode;
+  const databaseRequired = !vercelGoogleSheetsDemo;
   const productionReady =
     !productionLike ||
+    vercelGoogleSheetsDemo ||
     (provider === "postgres" &&
       databaseUrlConfigured &&
       databaseReachable === true &&
       databaseDiagnostics.migrations.ready);
   const databaseWarning =
-    persistence.unsafeReason ??
+    (vercelGoogleSheetsDemo ? "demo mode, no Postgres" : persistence.unsafeReason) ??
     (productionLike && !databaseUrlConfigured
       ? "DATABASE_URL is required for production on EasyPanel."
       : databaseDiagnostics.migrations.warning);
   const databaseReady =
     !productionLike ||
+    vercelGoogleSheetsDemo ||
     (provider === "postgres" &&
       databaseUrlConfigured &&
       databaseReachable === true &&
       databaseDiagnostics.migrations.ready);
   const panelReady =
     !productionLike ||
+    (conversationsStore.provider === "google_sheets" &&
+      conversationsStore.configured &&
+      conversationsStore.productionReady) ||
     (provider === "postgres" &&
       databaseUrlConfigured &&
       databaseReachable === true &&
@@ -127,7 +141,9 @@ export async function getMaternalyHealth(env: NodeJS.ProcessEnv = process.env) {
     app: config.appName,
     version: env.APP_VERSION ?? "0.1.0",
     environment: config.appEnv,
-    runtimeTarget: productionLike ? "easypanel-container" : "local-development",
+    runtimeTarget: productionLike
+      ? conversationsStore.runtimeTarget
+      : "local-development",
     build: {
       commit:
         env.GIT_COMMIT ??
@@ -148,6 +164,7 @@ export async function getMaternalyHealth(env: NodeJS.ProcessEnv = process.env) {
     database: {
       configured: config.configured.database,
       provider,
+      required: databaseRequired,
       databaseUrlConfigured,
       reachable: databaseReachable,
       productionReady,
@@ -155,9 +172,14 @@ export async function getMaternalyHealth(env: NodeJS.ProcessEnv = process.env) {
       migrations: databaseDiagnostics.migrations,
     },
     conversationsStore: {
-      provider: persistence.provider,
-      runtimeTarget: persistence.runtimeTarget,
-      productionReady: persistence.productionReady,
+      provider: conversationsStore.provider,
+      runtimeTarget: conversationsStore.runtimeTarget,
+      durable: conversationsStore.durable,
+      configured: conversationsStore.configured,
+      productionReady: conversationsStore.productionReady,
+      sheetName: conversationsStore.sheetName,
+      spreadsheetIdConfigured: conversationsStore.spreadsheetIdConfigured,
+      warning: conversationsStore.warning,
       unsafeReason: persistence.unsafeReason,
     },
     panel: {

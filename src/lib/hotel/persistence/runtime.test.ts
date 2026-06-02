@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { readHotelPersistenceConfig, resolveJsonStorePath } from "./runtime";
+import {
+  readConversationStoreRuntimeConfig,
+  readHotelPersistenceConfig,
+  resolveJsonStorePath,
+} from "./runtime";
 
 describe("production persistence runtime", () => {
   it("selects postgres in production when DATABASE_URL is configured", () => {
@@ -81,5 +85,45 @@ describe("production persistence runtime", () => {
     });
 
     expect(filePath).toBe("/data/hotel-store.json");
+  });
+
+  it("selects Google Sheets conversations store from Maternaly aliases first", () => {
+    const config = readConversationStoreRuntimeConfig({
+      NODE_ENV: "production",
+      APP_ENV: "production",
+      MATERNALY_CONVERSATIONS_STORE_PROVIDER: "google_sheets",
+      HOTEL_CONVERSATIONS_STORE_PROVIDER: "postgres",
+      MATERNALY_CONVERSATIONS_SHEET_NAME: "CONVERSATIONS",
+      HOTEL_CONVERSATIONS_SHEET_NAME: "HOTEL_CONVERSATIONS",
+      MATERNALY_GOOGLE_SHEETS_SPREADSHEET_ID: "maternaly-sheet-id",
+      HOTEL_GOOGLE_SHEETS_SPREADSHEET_ID: "hotel-sheet-id",
+      MATERNALY_DEMO_VERCEL_GOOGLE_SHEETS_STORE_ENABLED: "true",
+    } as NodeJS.ProcessEnv);
+
+    expect(config.provider).toBe("google_sheets");
+    expect(config.sourceEnv).toBe("MATERNALY_CONVERSATIONS_STORE_PROVIDER");
+    expect(config.sheetName).toBe("CONVERSATIONS");
+    expect(config.spreadsheetIdConfigured).toBe(true);
+    expect(config.spreadsheetIdSource).toBe("MATERNALY_GOOGLE_SHEETS_SPREADSHEET_ID");
+    expect(config.runtimeTarget).toBe("vercel-demo");
+    expect(config.durable).toBe(true);
+    expect(config.warning).toContain("demo mode");
+  });
+
+  it("keeps legacy HOTEL conversation store variables compatible", () => {
+    const config = readConversationStoreRuntimeConfig({
+      NODE_ENV: "production",
+      APP_ENV: "production",
+      HOTEL_CONVERSATIONS_STORE_PROVIDER: "google_sheets",
+      HOTEL_CONVERSATIONS_SHEET_NAME: "CONVERSATIONS",
+      HOTEL_GOOGLE_SHEETS_SPREADSHEET_ID: "legacy-sheet-id",
+      MATERNALY_DEMO_VERCEL_GOOGLE_SHEETS_STORE_ENABLED: "true",
+    } as NodeJS.ProcessEnv);
+
+    expect(config.provider).toBe("google_sheets");
+    expect(config.sourceEnv).toBe("HOTEL_CONVERSATIONS_STORE_PROVIDER");
+    expect(config.sheetName).toBe("CONVERSATIONS");
+    expect(config.spreadsheetIdSource).toBe("HOTEL_GOOGLE_SHEETS_SPREADSHEET_ID");
+    expect(config.productionReady).toBe(true);
   });
 });

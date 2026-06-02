@@ -90,7 +90,16 @@ export function readMaternalyRuntimeConfig(
       twilioWebhookToken: Boolean(env.TWILIO_WEBHOOK_AUTH_TOKEN?.trim()),
       googleSheets: Boolean(
         env.GOOGLE_SERVICE_ACCOUNT_JSON_BASE64?.trim() ||
-          env.GOOGLE_APPLICATION_CREDENTIALS?.trim(),
+          env.GOOGLE_APPLICATION_CREDENTIALS?.trim() ||
+          env.MATERNALY_GOOGLE_SHEETS_SERVICE_ACCOUNT_JSON?.trim() ||
+          env.HOTEL_GOOGLE_SHEETS_SERVICE_ACCOUNT_JSON?.trim() ||
+          env.GOOGLE_SERVICE_ACCOUNT_JSON?.trim() ||
+          (env.MATERNALY_GOOGLE_SHEETS_SERVICE_ACCOUNT_EMAIL?.trim() &&
+            env.MATERNALY_GOOGLE_SHEETS_PRIVATE_KEY?.trim()) ||
+          (env.HOTEL_GOOGLE_SHEETS_SERVICE_ACCOUNT_EMAIL?.trim() &&
+            env.HOTEL_GOOGLE_SHEETS_PRIVATE_KEY?.trim()) ||
+          (env.GOOGLE_SERVICE_ACCOUNT_EMAIL?.trim() &&
+            env.GOOGLE_PRIVATE_KEY?.trim()),
       ),
       llm: llmProvider === "mock" || Boolean(env.OPENAI_API_KEY?.trim()),
     },
