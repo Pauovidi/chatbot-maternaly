@@ -50,11 +50,30 @@ describe("conversation panel operational UI", () => {
     );
 
     expect(html).toContain("Aún no hay conversaciones.");
-    expect(html).toContain("modo seguro");
+    expect(html).toContain("Cuando llegue el primer mensaje de WhatsApp, aparecerá aquí.");
     expect(html).toContain("No se pudo cargar la store de conversaciones.");
     expect(html).toContain("LLM:");
     expect(html).toContain("Sheets:");
     expect(html).toContain("Writes:");
+    expect(html).not.toContain("Registro de entrada");
+  });
+
+  it("hides the entry registry link by default and shows it only behind the feature flag", () => {
+    const hidden = renderToStaticMarkup(
+      <ConversationsPanel initialDashboard={emptyDashboard} whatsAppProviderMode="mock" />,
+    );
+    const visible = renderToStaticMarkup(
+      <ConversationsPanel
+        initialDashboard={emptyDashboard}
+        whatsAppProviderMode="mock"
+        entryRegistryVisible
+      />,
+    );
+
+    expect(hidden).not.toContain("Registro de entrada");
+    expect(hidden).not.toContain("/admin/registro-entrada");
+    expect(visible).toContain("Registro de entrada");
+    expect(visible).toContain("/admin/registro-entrada");
   });
 
   it("shows only the human takeover action while the bot owns the conversation", () => {

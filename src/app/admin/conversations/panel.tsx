@@ -30,6 +30,7 @@ interface ConversationsPanelProps {
   sheetsAccessMode?: "read_only" | "dry_run" | "live";
   sheetsWriteEnabled?: boolean;
   whatsAppProviderMode?: "mock" | "ycloud" | "twilio";
+  entryRegistryVisible?: boolean;
 }
 
 type FilterMode = NonNullable<ConversationListFilters["mode"]>;
@@ -123,6 +124,7 @@ export function ConversationsPanel({
   sheetsAccessMode = "read_only",
   sheetsWriteEnabled = false,
   whatsAppProviderMode = "mock",
+  entryRegistryVisible = false,
 }: ConversationsPanelProps) {
   const [dashboard, setDashboard] = useState(initialDashboard);
   const [selectedId, setSelectedId] = useState(
@@ -395,10 +397,12 @@ export function ConversationsPanel({
     <section className="conversations-panel" aria-busy={isPending}>
       <div className="conversation-panel-toolbar">
         <div className="conversation-panel-actions">
-          <Link href="/admin/registro-entrada" className="conversation-top-link">
-            Registro de entrada
-            <ExternalLink size={14} />
-          </Link>
+          {entryRegistryVisible ? (
+            <Link href="/admin/registro-entrada" className="conversation-top-link">
+              Registro de entrada
+              <ExternalLink size={14} />
+            </Link>
+          ) : null}
         </div>
         <details className="conversation-technical-status">
           <summary>Estado técnico</summary>
@@ -487,9 +491,7 @@ export function ConversationsPanel({
             {dashboard.conversations.length === 0 ? (
               <div className="conversation-empty">
                 <strong>Aún no hay conversaciones.</strong>
-                <span>
-                  El panel está listo en modo seguro y mostrará aquí los próximos mensajes de WhatsApp.
-                </span>
+                <span>Cuando llegue el primer mensaje de WhatsApp, aparecerá aquí.</span>
               </div>
             ) : (
               dashboard.conversations.map((conversation) => (
@@ -695,7 +697,7 @@ export function ConversationsPanel({
           ) : (
             <div className="conversation-empty conversation-empty-large">
               <strong>Aún no hay conversaciones.</strong>
-              <span>Cuando llegue el primer mensaje, aparecerá aquí el timeline.</span>
+              <span>Cuando llegue el primer mensaje de WhatsApp, aparecerá aquí.</span>
             </div>
           )}
         </div>

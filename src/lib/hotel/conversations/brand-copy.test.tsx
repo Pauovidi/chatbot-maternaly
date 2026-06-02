@@ -129,7 +129,7 @@ describe("conversations panel visible demo copy", () => {
     expect(html).toContain("Proveedor: WhatsApp");
     expect(html).toContain("Estado técnico");
     expect(html).toContain("Mock");
-    expect(html).toContain("Registro de entrada");
+    expect(html).not.toContain("Registro de entrada");
     expect(html).toContain("Pendientes");
     expect(html).toContain("Humano");
     expect(html).not.toContain("En humano");
@@ -240,7 +240,7 @@ describe("conversations panel visible demo copy", () => {
     expect(surfaces).toContain("Panel de conversaciones");
     expect(surfaces).toContain("Centraliza WhatsApp, handoffs del bot, servicio detectado");
     expect(surfaces).toContain("Proveedor: WhatsApp");
-    expect(surfaces).toContain("Registro de entrada");
+    expect(surfaces).toContain("entryRegistryVisible");
     expect(surfaces).toContain("Adjuntar vídeo");
     expect(surfaces).toContain("media-mock");
     expect(surfaces).toContain("Web Maternaly");

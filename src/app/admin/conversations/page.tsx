@@ -5,7 +5,14 @@ import {
   createEmptyConversationDashboard,
   listConversationDashboard,
 } from "@/lib/hotel/conversations/service";
-import { readMaternalyRuntimeConfig } from "@/lib/maternaly/config/env";
+import {
+  buildConversationStoreErrorMessage,
+  logConversationStoreFailure,
+} from "@/lib/hotel/conversations/store-diagnostics";
+import {
+  isMaternalyEntryRegistryVisible,
+  readMaternalyRuntimeConfig,
+} from "@/lib/maternaly/config/env";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -32,9 +39,9 @@ export default async function ConversationsAdminPage() {
   let initialLoadError: string | undefined;
   try {
     dashboard = await listConversationDashboard();
-  } catch {
-    initialLoadError =
-      "No se pudo cargar la store de conversaciones. Revisa /api/health y ejecuta migraciones si falta Postgres.";
+  } catch (error) {
+    initialLoadError = buildConversationStoreErrorMessage();
+    logConversationStoreFailure(error, "admin_conversations_page");
   }
   const runtimeConfig = readMaternalyRuntimeConfig();
   const initialLastUpdatedAt = new Date().toISOString();
@@ -56,6 +63,7 @@ export default async function ConversationsAdminPage() {
         sheetsAccessMode={runtimeConfig.sheetsAccessMode}
         sheetsWriteEnabled={runtimeConfig.liveSheetsWriteEnabled}
         whatsAppProviderMode={runtimeConfig.whatsappProvider}
+        entryRegistryVisible={isMaternalyEntryRegistryVisible()}
       />
     </SiteShell>
   );

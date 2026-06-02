@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { verifyPanelAuthorization } from "@/lib/hotel/conversations/auth";
 
 export interface AdminTaskAuthFailure {
   ok: false;
@@ -62,4 +63,35 @@ export function verifyMaternalyAdminTaskRequest(
   }
 
   return { ok: true };
+}
+
+export function verifyMaternalyAdminDebugRequest(
+  request: Request,
+  env: Partial<NodeJS.ProcessEnv> = process.env,
+): AdminTaskAuthResult {
+  const expected = env.MATERNALY_ADMIN_TASK_TOKEN?.trim();
+  if (expected) {
+    return verifyMaternalyAdminTaskRequest(request, env);
+  }
+
+  const panelAuth = verifyPanelAuthorization(
+    request.headers.get("authorization"),
+    env as NodeJS.ProcessEnv,
+  );
+  if (panelAuth.ok) {
+    return { ok: true };
+  }
+
+  const status = panelAuth.response?.status ?? 401;
+  return {
+    ok: false,
+    status,
+    body: {
+      ok: false,
+      error:
+        status === 503
+          ? "MATERNALY_ADMIN_TASK_TOKEN or panel credentials are required."
+          : "Unauthorized admin debug request.",
+    },
+  };
 }

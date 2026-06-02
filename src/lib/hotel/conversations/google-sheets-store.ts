@@ -23,6 +23,31 @@ interface SheetsConnection {
   spreadsheetId: string;
 }
 
+interface SanitizedGoogleSheetsError {
+  type: string;
+  code?: string;
+}
+
+export interface GoogleSheetsConversationStoreDiagnostics {
+  provider: "google_sheets";
+  sheetName: string;
+  spreadsheetConfigured: boolean;
+  googleCredentialsConfigured: boolean;
+  tabExists?: boolean;
+  canRead: boolean;
+  canWrite: boolean;
+  rowCount: number;
+  conversationCount: number;
+  parseErrors: number;
+  panelShouldLoad: boolean;
+  error?: SanitizedGoogleSheetsError;
+}
+
+export interface ConversationRowsParseResult {
+  snapshot: ConversationSnapshot;
+  parseErrors: number;
+}
+
 export interface GoogleSheetsConversationStoreIo {
   ensureSheet(sheetName: string): Promise<void>;
   readRows(sheetName: string): Promise<string[][]>;
@@ -226,6 +251,25 @@ function parsePayload<T>(value: string | undefined): T | undefined {
   }
 }
 
+function sanitizeGoogleSheetsError(error: unknown): SanitizedGoogleSheetsError {
+  const record = error as {
+    code?: unknown;
+    status?: unknown;
+    response?: { status?: unknown };
+    name?: unknown;
+  };
+  const rawCode = record?.code ?? record?.status ?? record?.response?.status;
+  return {
+    type:
+      error instanceof Error
+        ? error.name || "Error"
+        : typeof error === "string"
+          ? "Error"
+          : "UnknownError",
+    code: rawCode === undefined ? undefined : String(rawCode),
+  };
+}
+
 function snapshotToRows(snapshot: ConversationSnapshot): string[][] {
   const updatedAt = new Date().toISOString();
   const metadata = {
@@ -246,16 +290,21 @@ function snapshotToRows(snapshot: ConversationSnapshot): string[][] {
   ];
 }
 
-function rowsToSnapshot(rows: string[][]): ConversationSnapshot {
+export function parseConversationRows(rows: string[][]): ConversationRowsParseResult {
   const dataRows =
     rows[0]?.join("|") === CONVERSATIONS_HEADERS.join("|") ? rows.slice(1) : rows;
   let metadata: Partial<ConversationSnapshot> = {};
   const conversations: ConversationRecord[] = [];
+  let parseErrors = 0;
 
   for (const row of dataRows) {
     const [kind, , , payloadJson] = row;
     if (kind === META_ROW_KIND) {
-      metadata = parsePayload<Partial<ConversationSnapshot>>(payloadJson) ?? {};
+      const parsedMetadata = parsePayload<Partial<ConversationSnapshot>>(payloadJson);
+      if (payloadJson && !parsedMetadata) {
+        parseErrors += 1;
+      }
+      metadata = parsedMetadata ?? {};
       continue;
     }
 
@@ -267,19 +316,62 @@ function rowsToSnapshot(rows: string[][]): ConversationSnapshot {
           messages: Array.isArray(conversation.messages) ? conversation.messages : [],
           events: Array.isArray(conversation.events) ? conversation.events : [],
         });
+      } else {
+        parseErrors += 1;
       }
     }
   }
 
   return {
-    conversations,
-    updatedAt:
-      typeof metadata.updatedAt === "string"
-        ? metadata.updatedAt
-        : new Date().toISOString(),
-    suppressDemoSeed: metadata.suppressDemoSeed === true,
-    resetAt: typeof metadata.resetAt === "string" ? metadata.resetAt : undefined,
+    snapshot: {
+      conversations,
+      updatedAt:
+        typeof metadata.updatedAt === "string"
+          ? metadata.updatedAt
+          : new Date().toISOString(),
+      suppressDemoSeed: metadata.suppressDemoSeed === true,
+      resetAt: typeof metadata.resetAt === "string" ? metadata.resetAt : undefined,
+    },
+    parseErrors,
   };
+}
+
+function rowsToSnapshot(rows: string[][]): ConversationSnapshot {
+  return parseConversationRows(rows).snapshot;
+}
+
+export async function diagnoseGoogleSheetsConversationStore(): Promise<GoogleSheetsConversationStoreDiagnostics> {
+  const config = getGoogleSheetsConversationStoreConfig();
+  const diagnostics: GoogleSheetsConversationStoreDiagnostics = {
+    provider: "google_sheets",
+    sheetName: config.sheetName,
+    spreadsheetConfigured: Boolean(config.spreadsheetId),
+    googleCredentialsConfigured: Boolean(config.accessToken || config.serviceAccountJson),
+    canRead: false,
+    canWrite: false,
+    rowCount: 0,
+    conversationCount: 0,
+    parseErrors: 0,
+    panelShouldLoad: false,
+  };
+
+  try {
+    const io = new GoogleSheetsConversationStoreApi();
+    await io.ensureSheet(config.sheetName);
+    diagnostics.canWrite = true;
+    diagnostics.tabExists = true;
+    const rows = await io.readRows(config.sheetName);
+    const parsed = parseConversationRows(rows);
+    diagnostics.canRead = true;
+    diagnostics.rowCount = rows.length;
+    diagnostics.conversationCount = parsed.snapshot.conversations.length;
+    diagnostics.parseErrors = parsed.parseErrors;
+    diagnostics.panelShouldLoad = true;
+  } catch (error) {
+    diagnostics.error = sanitizeGoogleSheetsError(error);
+  }
+
+  return diagnostics;
 }
 
 export class GoogleSheetsConversationStore implements ConversationStore {

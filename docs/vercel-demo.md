@@ -27,6 +27,7 @@ MATERNALY_CONVERSATIONS_STORE_PROVIDER=google_sheets
 MATERNALY_CONVERSATIONS_SHEET_NAME=CONVERSATIONS
 MATERNALY_DEMO_VERCEL_GOOGLE_SHEETS_STORE_ENABLED=true
 MATERNALY_GOOGLE_SHEETS_SPREADSHEET_ID=<sheet-id-store-conversaciones>
+MATERNALY_ENTRY_REGISTRY_VISIBLE=false
 ```
 
 Compatibilidad heredada: si ya existen, `HOTEL_CONVERSATIONS_STORE_PROVIDER=google_sheets`, `HOTEL_CONVERSATIONS_SHEET_NAME=CONVERSATIONS` y `HOTEL_GOOGLE_SHEETS_SPREADSHEET_ID=<sheet-id>` siguen funcionando. Si hay variables Maternaly y Hotel a la vez, se leen primero las Maternaly.
@@ -95,6 +96,14 @@ Comportamiento esperado:
 - `llm.provider=mock`
 
 Si aparece `file-tmp` o `/tmp` como store principal, la demo no esta bien configurada. `/tmp` solo puede quedar como fallback auxiliar con warning, nunca como fuente durable del panel.
+
+El diagnostico protegido del store esta en:
+
+```text
+GET /api/maternaly/admin/conversations-store/debug
+```
+
+Si `MATERNALY_ADMIN_TASK_TOKEN` existe, requiere `Authorization: Bearer <token>` o `x-maternaly-admin-task-token`. Si no existe, requiere el acceso seguro del panel. La respuesta solo expone provider, runtime, pestana, flags de credenciales/configuracion, conteos y tipo/codigo de error; no devuelve secretos ni contenido de conversaciones.
 
 ## 7. Limitaciones
 

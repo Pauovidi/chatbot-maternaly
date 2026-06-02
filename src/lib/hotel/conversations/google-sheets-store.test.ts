@@ -4,8 +4,10 @@ import { POST as postTwilioWebhook } from "@/app/api/twilio/whatsapp/route";
 import { resetConversationStoreForTests } from "./file-store";
 import {
   GoogleSheetsConversationStore,
+  parseConversationRows,
   type GoogleSheetsConversationStoreIo,
 } from "./google-sheets-store";
+import { buildConversationStoreErrorMessage } from "./store-diagnostics";
 import type { ConversationRecord, Message } from "./types";
 
 const googleSheetsMockState = vi.hoisted(() => ({
@@ -157,6 +159,19 @@ describe("Google Sheets conversation store", () => {
     expect(io.rows.some((row) => row[0] === "conversation" && row[1] === "conv_1")).toBe(true);
   });
 
+  it("skips corrupt conversation rows and reports parse errors", () => {
+    const parsed = parseConversationRows([
+      ["kind", "conversationId", "updatedAt", "payloadJson"],
+      ["meta", "", "2026-06-02T10:00:00.000Z", "{\"updatedAt\":\"2026-06-02T10:00:00.000Z\"}"],
+      ["conversation", "broken", "2026-06-02T10:01:00.000Z", "{not-json"],
+      ["conversation", "conv_1", "2026-06-02T10:02:00.000Z", JSON.stringify(baseConversation())],
+    ]);
+
+    expect(parsed.parseErrors).toBe(1);
+    expect(parsed.snapshot.conversations).toHaveLength(1);
+    expect(parsed.snapshot.conversations[0].id).toBe("conv_1");
+  });
+
   it("lets the Twilio webhook persist inbound conversations through the configured Sheets store", async () => {
     vi.spyOn(console, "info").mockImplementation(() => undefined);
     vi.stubEnv("NODE_ENV", "production");
@@ -215,5 +230,19 @@ describe("Google Sheets conversation store", () => {
     const page = await ConversationsAdminPage();
 
     expect(page).toBeTruthy();
+  });
+
+  it("uses a Sheets-specific admin load error in Vercel demo mode", () => {
+    vi.stubEnv("NODE_ENV", "production");
+    process.env.APP_ENV = "production";
+    process.env.MATERNALY_CONVERSATIONS_STORE_PROVIDER = "google_sheets";
+    process.env.MATERNALY_GOOGLE_SHEETS_SPREADSHEET_ID = "sheet-id";
+    process.env.MATERNALY_DEMO_VERCEL_GOOGLE_SHEETS_STORE_ENABLED = "true";
+
+    const message = buildConversationStoreErrorMessage();
+
+    expect(message).toContain("Google Sheets");
+    expect(message).not.toContain("Postgres");
+    expect(message).not.toContain("migraciones");
   });
 });

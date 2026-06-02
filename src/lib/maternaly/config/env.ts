@@ -118,6 +118,12 @@ export function readMaternalyRuntimeConfig(
   };
 }
 
+export function isMaternalyEntryRegistryVisible(
+  env: Partial<NodeJS.ProcessEnv> = process.env,
+): boolean {
+  return boolFromEnv(env.MATERNALY_ENTRY_REGISTRY_VISIBLE, false);
+}
+
 export function getGoogleServiceAccountJson(
   env: Partial<NodeJS.ProcessEnv> = process.env,
 ): string | null {

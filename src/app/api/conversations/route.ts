@@ -6,6 +6,10 @@ import {
   handleInboundWhatsApp,
   redactConversationSensitiveText,
 } from "@/lib/hotel/conversations/service";
+import {
+  buildConversationStoreErrorMessage,
+  logConversationStoreFailure,
+} from "@/lib/hotel/conversations/store-diagnostics";
 import type { ConversationListFilters } from "@/lib/hotel/conversations/types";
 
 export const runtime = "nodejs";
@@ -48,12 +52,12 @@ export async function GET(request: Request) {
     const dashboard = await listConversationDashboard(filters);
 
     return NextResponse.json({ ok: true, ...dashboard });
-  } catch {
+  } catch (error) {
+    logConversationStoreFailure(error, "api_conversations_get");
     return NextResponse.json(
       {
         ok: false,
-        error:
-          "No se pudo cargar el panel de conversaciones. Revisa /api/health y migraciones.",
+        error: buildConversationStoreErrorMessage(),
         ...createEmptyConversationDashboard(),
       },
       { status: 503 },
