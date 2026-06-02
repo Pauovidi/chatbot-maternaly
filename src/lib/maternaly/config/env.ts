@@ -121,9 +121,36 @@ export function readMaternalyRuntimeConfig(
 export function getGoogleServiceAccountJson(
   env: NodeJS.ProcessEnv = process.env,
 ): string | null {
+  const rawJson =
+    env.MATERNALY_GOOGLE_SHEETS_SERVICE_ACCOUNT_JSON?.trim() ||
+    env.HOTEL_GOOGLE_SHEETS_SERVICE_ACCOUNT_JSON?.trim() ||
+    env.GOOGLE_SERVICE_ACCOUNT_JSON?.trim();
+  if (rawJson) {
+    return rawJson;
+  }
+
   const base64 = env.GOOGLE_SERVICE_ACCOUNT_JSON_BASE64?.trim();
   if (base64) {
     return Buffer.from(base64, "base64").toString("utf8");
+  }
+
+  const clientEmail =
+    env.MATERNALY_GOOGLE_SHEETS_SERVICE_ACCOUNT_EMAIL?.trim() ||
+    env.HOTEL_GOOGLE_SHEETS_SERVICE_ACCOUNT_EMAIL?.trim() ||
+    env.GOOGLE_SERVICE_ACCOUNT_EMAIL?.trim();
+  const privateKey =
+    env.MATERNALY_GOOGLE_SHEETS_PRIVATE_KEY?.trim() ||
+    env.HOTEL_GOOGLE_SHEETS_PRIVATE_KEY?.trim() ||
+    env.GOOGLE_PRIVATE_KEY?.trim();
+  if (clientEmail && privateKey) {
+    return JSON.stringify({
+      project_id:
+        env.MATERNALY_GOOGLE_PROJECT_ID?.trim() ||
+        env.HOTEL_GOOGLE_PROJECT_ID?.trim() ||
+        env.GOOGLE_PROJECT_ID?.trim(),
+      client_email: clientEmail,
+      private_key: privateKey.replace(/\\n/g, "\n"),
+    });
   }
 
   return null;
