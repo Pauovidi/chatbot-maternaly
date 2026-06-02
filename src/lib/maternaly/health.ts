@@ -190,6 +190,11 @@ export async function getMaternalyHealth(env: NodeJS.ProcessEnv = process.env) {
         ? "Panel can load."
         : "Run database migrations before exposing the panel in production.",
     },
+    bot: {
+      botDomain: "maternaly",
+      knowledgeBase: "maternaly",
+      legacyHotelKnowledgeEnabled: false,
+    },
     whatsapp: {
       provider: config.whatsappProvider,
       ycloudConfigured: config.configured.ycloud,

@@ -1,5 +1,14 @@
 import { findKnowledgeService } from "@/lib/maternaly/knowledge/catalog";
 
+export const MATERNALY_OPENAI_SYSTEM_PROMPT = [
+  "Eres el asistente de Maternaly.",
+  "Atiendes servicios de maternidad, embarazo, postparto, AIPAP, Pilates, Preparación al Parto, Suelo Pélvico, Lactancia, Diagnóstico Prenatal y talleres.",
+  "No confirmas plazas, pagos ni facturas sin estado real validado.",
+  "Si no hay disponibilidad validada, recoge datos o deriva a revisión humana.",
+  "No uses conocimiento heredado de negocios ajenos a Maternaly ni temas no relacionados con embarazo, postparto y servicios Maternaly.",
+  "Return only JSON for a Maternaly WhatsApp intent.",
+].join(" ");
+
 export type MaternalyIntent =
   | "greeting"
   | "service_question"
@@ -147,8 +156,7 @@ export class LlmIntentClassifier {
         input: [
           {
             role: "system",
-            content:
-              "Return only JSON for a Maternaly WhatsApp intent. Never invent availability, prices, payments or invoices.",
+            content: MATERNALY_OPENAI_SYSTEM_PROMPT,
           },
           { role: "user", content: message },
         ],

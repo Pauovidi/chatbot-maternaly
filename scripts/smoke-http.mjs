@@ -10,6 +10,9 @@ function assert(condition, message) {
   }
 }
 
+const legacyHotelResponsePattern =
+  /\b(?:hotel|perros|canino|vacunas|comida|visitas|residencia|qu[eé]\s+traer)\b/i;
+
 async function request(path, init) {
   const headers = new Headers(init?.headers);
   if (basicAuth && !headers.has("authorization")) {
@@ -129,6 +132,11 @@ async function checkTwilioWebhookEndpoint() {
 
   assert(response.ok, `/api/twilio/whatsapp devolvio ${response.status}: ${text}`);
   assert(text.includes("<Response>"), "/api/twilio/whatsapp no devolvio TwiML Response");
+  assert(text.includes("AIPAP") || text.includes("Maternaly"), "/api/twilio/whatsapp no devolvio respuesta Maternaly");
+  assert(
+    !legacyHotelResponsePattern.test(text),
+    "/api/twilio/whatsapp devolvio texto heredado de hotel/perros",
+  );
   assert(
     response.headers.get("content-type")?.includes("text/xml"),
     "/api/twilio/whatsapp debe devolver text/xml",

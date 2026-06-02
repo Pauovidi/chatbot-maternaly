@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import {
-  handleInboundWhatsApp,
   redactConversationSensitiveText,
 } from "@/lib/hotel/conversations/service";
+import { handleInboundMaternalyWhatsApp } from "@/lib/maternaly/conversation/twilio-inbound";
 import { MaternalyConversationInterpreter } from "@/lib/maternaly/llm/interpreter";
 import { YCloudProvider } from "@/lib/maternaly/whatsapp/provider";
 
@@ -43,12 +43,13 @@ export async function POST(request: Request) {
 
   const interpreter = new MaternalyConversationInterpreter();
   const intent = await interpreter.interpret(inbound.text);
-  const result = await handleInboundWhatsApp({
+  const result = await handleInboundMaternalyWhatsApp({
     from: inbound.from,
     to: inbound.to,
     body: inbound.text,
     messageSid: inbound.id,
     displayName: inbound.from,
+    channel: "ycloud",
     rawPayload: sanitizePayload({
       ...(inbound.raw ?? {}),
       maternalyIntent: intent,

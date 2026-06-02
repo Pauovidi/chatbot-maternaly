@@ -53,6 +53,11 @@ describe("health route", () => {
         ready: true,
       }),
     );
+    expect(json.bot).toEqual({
+      botDomain: "maternaly",
+      knowledgeBase: "maternaly",
+      legacyHotelKnowledgeEnabled: false,
+    });
     expect(json.conversationsStore).toEqual(
       expect.objectContaining({
         provider: "postgres",

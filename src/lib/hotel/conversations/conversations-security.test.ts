@@ -19,6 +19,9 @@ import {
 import { verifyPanelAuthorization } from "./auth";
 import { getConversationStore, resetConversationStoreForTests } from "./file-store";
 
+const legacyHotelResponsePattern =
+  /\b(?:hotel|perros|canino|vacunas|comida|visitas|residencia|qu[eé]\s+traer)\b/i;
+
 describe("conversations security", () => {
   let tempDir: string | undefined;
 
@@ -284,6 +287,77 @@ describe("conversations security", () => {
     expect(serialized).not.toContain("expected-token");
     expect(serialized).not.toContain("twilio-secret");
     expect(serialized).not.toContain("AC_safe_diagnostic");
+  });
+
+  it("answers Twilio inbound hola with the Maternaly engine", async () => {
+    tempDir = mkdtempSync(path.join(os.tmpdir(), "maternaly-twilio-hola-"));
+    process.env.HOTEL_CONVERSATIONS_STORE_DIR = tempDir;
+    process.env.TWILIO_WEBHOOK_AUTH_TOKEN = "expected-token";
+    process.env.LLM_PROVIDER = "mock";
+
+    const response = await postTwilioWebhook(
+      new Request("https://example.test/api/twilio/whatsapp?token=expected-token", {
+        method: "POST",
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+        },
+        body: new URLSearchParams({
+          From: "whatsapp:+34600001001",
+          To: "whatsapp:+14155238886",
+          Body: "hola",
+          MessageSid: "SM_MATERNALY_HOLA_001",
+        }),
+      }),
+    );
+    const text = await response.text();
+    const payload = JSON.parse(
+      readFileSync(path.join(tempDir, "hotel-conversations.json"), "utf8"),
+    );
+    const botReply = payload.conversations[0].messages.find(
+      (message: { senderType: string }) => message.senderType === "bot",
+    );
+
+    expect(response.status).toBe(200);
+    expect(text).toContain("<Response><Message>");
+    expect(text).toContain("Maternaly");
+    expect(text).toContain("AIPAP");
+    expect(text).not.toMatch(legacyHotelResponsePattern);
+    expect(botReply.body).toContain("Maternaly");
+    expect(payload.conversations[0].events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          eventType: "maternaly_intent_detected",
+          payload: expect.objectContaining({ botDomain: "maternaly" }),
+        }),
+      ]),
+    );
+  });
+
+  it("keeps Twilio buenos dias free from legacy hotel wording", async () => {
+    tempDir = mkdtempSync(path.join(os.tmpdir(), "maternaly-twilio-buenos-dias-"));
+    process.env.HOTEL_CONVERSATIONS_STORE_DIR = tempDir;
+    process.env.TWILIO_WEBHOOK_AUTH_TOKEN = "expected-token";
+    process.env.LLM_PROVIDER = "mock";
+
+    const response = await postTwilioWebhook(
+      new Request("https://example.test/api/twilio/whatsapp?token=expected-token", {
+        method: "POST",
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+        },
+        body: new URLSearchParams({
+          From: "whatsapp:+34600001002",
+          To: "whatsapp:+14155238886",
+          Body: "buenos días",
+          MessageSid: "SM_MATERNALY_BUENOS_001",
+        }),
+      }),
+    );
+    const text = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(text).toContain("Maternaly");
+    expect(text).not.toMatch(legacyHotelResponsePattern);
   });
 
   it("rejects production Twilio webhook calls when token is not configured", async () => {

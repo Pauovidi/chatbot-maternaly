@@ -1,3 +1,8 @@
+import {
+  ensureMaternalySafeReply,
+  MATERNALY_SAFE_FALLBACK,
+} from "@/lib/maternaly/conversation/response-engine";
+
 export interface MaternalyChatAction {
   label: string;
   url: string;
@@ -27,41 +32,45 @@ export function resolveMaternalyChatReply(
 ): { text: string; actions?: MaternalyChatAction[] } {
   if (includesAny(text, ["aipap agua", "piscina", "hydra", "hidra", "beup", "up&you"])) {
     return {
-      text:
+      text: ensureMaternalySafeReply(
         "AIPAP Agua se gestiona con especial cuidado porque puede requerir justificante de acceso a piscina. Puedo recoger sede, fecha y numero de personas; los horarios reales deben venir de Google Sheets.",
+      ),
     };
   }
 
   if (includesAny(text, ["aipap terra", "terra", "tierra"])) {
     return {
-      text:
+      text: ensureMaternalySafeReply(
         "AIPAP Terra va separado de AIPAP Agua. Para revisar opciones necesito sede o zona, dia preferido y numero de personas. Si falta mapping fiable, lo pasa el equipo.",
+      ),
     };
   }
 
   if (includesAny(text, ["pilates", "yoga"])) {
     return {
-      text:
+      text: ensureMaternalySafeReply(
         "Para Pilates o Yoga recojo servicio, sede y preferencia horaria. No ofrezco plaza hasta contrastar disponibilidad fiable en Sheets.",
+      ),
     };
   }
 
   if (includesAny(text, ["parto", "preparacion"])) {
     return {
-      text:
+      text: ensureMaternalySafeReply(
         "Preparacion al Parto requiere entrevista o revision humana. Hasta validar el documento completo, no invento flujo ni condiciones.",
+      ),
     };
   }
 
   if (includesAny(text, ["factura", "justificante", "pago", "link"])) {
     return {
-      text:
+      text: ensureMaternalySafeReply(
         "Puedo distinguir pago pendiente, pago confirmado, factura pendiente y factura enviada. Solo dire que una plaza o factura esta confirmada cuando exista evento real.",
+      ),
     };
   }
 
   return {
-    text:
-      "Puedo ayudarte con Pilates, AIPAP Terra, AIPAP Agua, Preparacion al Parto, Suelo Pelvico, Lactancia, Diagnostico Prenatal y talleres. Dime servicio, sede o fecha aproximada.",
+    text: MATERNALY_SAFE_FALLBACK,
   };
 }

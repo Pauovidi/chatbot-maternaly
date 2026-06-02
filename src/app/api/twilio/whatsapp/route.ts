@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
 import {
   buildTwilioMessageResponse,
-  handleInboundWhatsApp,
   redactConversationSensitiveText,
 } from "@/lib/hotel/conversations/service";
 import { readTwilioWhatsAppConfig } from "@/lib/hotel/twilio/client";
+import { handleInboundMaternalyWhatsApp } from "@/lib/maternaly/conversation/twilio-inbound";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -194,7 +194,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    const result = await handleInboundWhatsApp({
+    const result = await handleInboundMaternalyWhatsApp({
       from,
       to,
       body,
