@@ -37,6 +37,10 @@ export interface MaternalyRuntimeConfig {
   sheetsAccessMode: GoogleSheetsAccessMode;
   liveSheetsWriteEnabled: boolean;
   sheetIds: string[];
+  copySheetIds: string[];
+  realStructureWriteEnabled: boolean;
+  realStructureWriteMode: string;
+  demoPaymentLinkConfigured: boolean;
   llmProvider: LlmProviderMode;
   llmModel?: string;
   panelAdminUsername?: string;
@@ -73,6 +77,14 @@ export function readMaternalyRuntimeConfig(
     ),
     liveSheetsWriteEnabled: boolFromEnv(env.BOT_SHEETS_LIVE_WRITE_ENABLED, false),
     sheetIds: splitCsv(env.MATERNALY_SHEET_IDS),
+    copySheetIds: [
+      env.MATERNALY_COPY_SHEET_1_ID?.trim(),
+      env.MATERNALY_COPY_SHEET_2_ID?.trim(),
+      ...(env.MATERNALY_COPY_SHEET_IDS?.split(",").map((item) => item.trim()) ?? []),
+    ].filter((item): item is string => Boolean(item)),
+    realStructureWriteEnabled: boolFromEnv(env.MATERNALY_REAL_STRUCTURE_WRITE_ENABLED, false),
+    realStructureWriteMode: env.MATERNALY_REAL_STRUCTURE_WRITE_MODE?.trim() || "disabled",
+    demoPaymentLinkConfigured: Boolean(env.MATERNALY_DEMO_PAYMENT_LINK?.trim()),
     llmProvider,
     llmModel: env.LLM_MODEL?.trim() || undefined,
     panelAdminUsername:

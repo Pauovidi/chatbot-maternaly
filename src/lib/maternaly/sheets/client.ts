@@ -77,6 +77,56 @@ export class GoogleSheetsClient {
 
     return response.data.values ?? [];
   }
+
+  async duplicateTab(
+    spreadsheetId: string,
+    sourceSheetId: number,
+    newTitle: string,
+  ): Promise<{ backupSheetId?: number; title: string }> {
+    const client = await this.getClient();
+    const response = await client.spreadsheets.batchUpdate({
+      spreadsheetId,
+      requestBody: {
+        requests: [
+          {
+            duplicateSheet: {
+              sourceSheetId,
+              newSheetName: newTitle,
+            },
+          },
+        ],
+      },
+    });
+    const properties = response.data.replies?.[0]?.duplicateSheet?.properties;
+
+    return {
+      backupSheetId: properties?.sheetId ?? undefined,
+      title: properties?.title ?? newTitle,
+    };
+  }
+
+  async appendRow(
+    spreadsheetId: string,
+    tabTitle: string,
+    values: Array<string | number | undefined>,
+  ): Promise<{ updatedRange?: string; updatedRows?: number }> {
+    const client = await this.getClient();
+    const escaped = tabTitle.replace(/'/g, "''");
+    const response = await client.spreadsheets.values.append({
+      spreadsheetId,
+      range: `'${escaped}'!A:AZ`,
+      valueInputOption: "USER_ENTERED",
+      insertDataOption: "INSERT_ROWS",
+      requestBody: {
+        values: [values.map((value) => value ?? "")],
+      },
+    });
+
+    return {
+      updatedRange: response.data.updates?.updatedRange ?? undefined,
+      updatedRows: response.data.updates?.updatedRows ?? undefined,
+    };
+  }
 }
 
 export async function readPublicCsvSample(

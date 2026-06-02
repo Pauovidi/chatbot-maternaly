@@ -5,6 +5,7 @@ import {
 } from "@/lib/hotel/persistence/runtime";
 import { readTwilioWhatsAppConfig } from "@/lib/hotel/twilio/client";
 import { readMaternalyRuntimeConfig } from "@/lib/maternaly/config/env";
+import { MATERNALY_ORIGINAL_SHEET_IDS, redactSheetId } from "@/lib/maternaly/sheets/copy-real-write";
 
 const REQUIRED_MIGRATION_IDS = [1, 2, 3, 4, 5] as const;
 
@@ -224,6 +225,17 @@ export async function getMaternalyHealth(env: NodeJS.ProcessEnv = process.env) {
       writeEnabled: config.liveSheetsWriteEnabled,
       liveWriteEnabled: config.liveSheetsWriteEnabled,
       sheetIdsConfigured: config.sheetIds.length,
+      copyWriteMode: config.realStructureWriteMode,
+      copyWriteEnabled: config.realStructureWriteEnabled,
+      copySheetsConfigured: config.copySheetIds.length,
+      copySheetIdsRedacted: config.copySheetIds.map(redactSheetId),
+      originalSheetsProtected: true,
+      protectedOriginalSheetIdsRedacted: MATERNALY_ORIGINAL_SHEET_IDS.map(redactSheetId),
+      realStructureWriteMode: config.realStructureWriteMode,
+      demoPaymentLinkConfigured: config.demoPaymentLinkConfigured,
+    },
+    demoFlow: {
+      testAdnEnabled: true,
     },
     llm: {
       provider: config.llmProvider,

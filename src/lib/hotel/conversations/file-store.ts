@@ -132,6 +132,34 @@ function normalizeRecord(value: unknown): ConversationRecord | undefined {
           : undefined,
     reservationId:
       typeof record.reservationId === "string" ? record.reservationId : undefined,
+    serviceDetected:
+      typeof record.serviceDetected === "string" ? record.serviceDetected : undefined,
+    sheetSource: typeof record.sheetSource === "string" ? record.sheetSource : undefined,
+    sheetRange: typeof record.sheetRange === "string" ? record.sheetRange : undefined,
+    maternalyReservationStatus:
+      record.maternalyReservationStatus === "none" ||
+      record.maternalyReservationStatus === "pending" ||
+      record.maternalyReservationStatus === "confirmed"
+        ? record.maternalyReservationStatus
+        : undefined,
+    maternalyPaymentStatus:
+      record.maternalyPaymentStatus === "none" ||
+      record.maternalyPaymentStatus === "pending" ||
+      record.maternalyPaymentStatus === "confirmed"
+        ? record.maternalyPaymentStatus
+        : undefined,
+    maternalyInvoiceStatus:
+      record.maternalyInvoiceStatus === "none" ||
+      record.maternalyInvoiceStatus === "pending" ||
+      record.maternalyInvoiceStatus === "sent" ||
+      record.maternalyInvoiceStatus === "failed"
+        ? record.maternalyInvoiceStatus
+        : undefined,
+    maternalyReviewStatus:
+      record.maternalyReviewStatus === "ok" ||
+      record.maternalyReviewStatus === "manual_review_required"
+        ? record.maternalyReviewStatus
+        : undefined,
     clientStatus:
       record.clientStatus === "known" ||
       record.clientStatus === "unknown" ||

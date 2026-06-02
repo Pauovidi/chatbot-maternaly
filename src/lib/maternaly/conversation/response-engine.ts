@@ -55,9 +55,9 @@ function buildServiceReply(intent: StructuredIntent): string {
 export function buildMaternalyReplyFromIntent(intent: StructuredIntent): string {
   switch (intent.intent) {
     case "payment_question":
-      return "Puedo ayudarte a distinguir pago pendiente y pago confirmado. No confirmaré una plaza ni un pago si no existe un estado real validado.";
+      return "Puedo ayudarte a revisar si el pago está pendiente o necesita validación del equipo. No doy por cerrada una plaza ni un pago sin un estado real validado.";
     case "invoice_question":
-      return "Puedo ayudarte con factura o justificante. Solo indicaré que está enviado o confirmado cuando exista un evento real; si falta, lo dejo pendiente para revisión del equipo.";
+      return "Puedo ayudarte con factura o justificante. Lo dejo anotado para que el equipo pueda revisarlo y emitir la factura cuando el pago esté validado.";
     case "handoff_request":
       return "Perfecto, derivo la conversación al equipo de Maternaly para que pueda revisarlo una persona.";
     case "reservation_interest":

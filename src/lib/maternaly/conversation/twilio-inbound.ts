@@ -4,6 +4,13 @@ import type { InboundResult, InboundWhatsAppPayload } from "@/lib/hotel/conversa
 import { buildTwilioMessageResponse, redactConversationSensitiveText } from "@/lib/hotel/conversations/service";
 import type { Conversation, ConversationEvent, ConversationRecord, Message } from "@/lib/hotel/conversations/types";
 import type { ConversationStore } from "@/lib/hotel/conversations/store";
+import {
+  TEST_ADN_DEMO_EVENT,
+  advanceTestAdnDemoFlow,
+  getLatestTestAdnState,
+  summarizeWritePlanForEvent,
+} from "@/lib/maternaly/demo/test-adn-flow";
+import { writeCopyWriteResultReports } from "@/lib/maternaly/sheets/copy-real-write";
 import { buildMaternalyWhatsAppReply } from "./response-engine";
 
 function nowIso() {
@@ -171,6 +178,68 @@ export async function handleInboundMaternalyWhatsApp(
     return {
       conversation: (await store.getById(latest.id)) ?? latest,
       inbound,
+    };
+  }
+
+  const demoFlow = await advanceTestAdnDemoFlow({
+    message: safeBody,
+    previousState: getLatestTestAdnState(latest.events),
+    fallbackPhone: latest.phoneE164,
+  });
+  if (demoFlow.handled && demoFlow.reply && demoFlow.state) {
+    const needsHuman = demoFlow.state.phase === "manual_review";
+    const updated = await store.replaceConversation({
+      ...latest,
+      serviceDetected: "TEST ADN / DETESEX",
+      maternalyReservationStatus: "pending",
+      maternalyPaymentStatus: "pending",
+      maternalyReviewStatus: needsHuman ? "manual_review_required" : latest.maternalyReviewStatus ?? "ok",
+      mode: needsHuman ? "human" : latest.mode,
+      humanRequested: needsHuman ? true : latest.humanRequested,
+      requiresManualReview: latest.requiresManualReview || needsHuman,
+      tags: Array.from(new Set([...(latest.tags ?? []), "maternaly", "test-adn-demo"])),
+      updatedAt: nowIso(),
+    });
+    await store.addEvent(createEvent(latest.id, TEST_ADN_DEMO_EVENT, demoFlow.state));
+    await store.addEvent(
+      createEvent(latest.id, "maternaly_test_adn_write_plan", {
+        applied: demoFlow.writeReport?.applied ?? false,
+        error: demoFlow.writeReport?.error,
+        plan: summarizeWritePlanForEvent(demoFlow.writeReport?.plan),
+      }),
+    );
+    if (demoFlow.writeReport) {
+      await writeCopyWriteResultReports(demoFlow.writeReport).catch(() => undefined);
+    }
+    if (needsHuman) {
+      await store.addEvent(
+        createEvent(latest.id, "human_requested", {
+          matchedFrom: "maternaly_test_adn_demo_flow",
+          reason: demoFlow.state.writeError,
+        }),
+      );
+    }
+    const botReply = await store.addMessage(
+      createMessage({
+        conversationId: latest.id,
+        direction: "outbound",
+        senderType: "bot",
+        body: demoFlow.reply,
+      }),
+    );
+    await store.addEvent(
+      createEvent(latest.id, "bot_reply_sent", {
+        botDomain: "maternaly",
+        source: "maternaly_test_adn_demo_flow",
+        phase: demoFlow.state.phase,
+      }),
+    );
+
+    return {
+      conversation: (await store.getById(latest.id)) ?? updated,
+      inbound,
+      botReply,
+      twiml: buildTwilioMessageResponse(demoFlow.reply),
     };
   }
 
