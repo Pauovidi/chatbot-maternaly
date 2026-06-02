@@ -120,6 +120,29 @@ describe("Maternaly copy-only real structure write policy", () => {
     expect(report.plan.sourceLastRowReference.rowNumber).toBe(3);
   });
 
+  it("accepts gid 0 as a valid target tab id", async () => {
+    configureCopyWrite();
+    const client = fakeClient({
+      profileSpreadsheet: vi.fn(async () => ({
+        spreadsheetId: COPY_ID,
+        title: "Maternaly copia demo",
+        readMethod: "service_account",
+        tabs: [{ title: "Reservas", gid: 0 }],
+      })),
+    });
+    const service = new CopySheetsRealWriteService(client as never);
+    const report = await service.writeTestAdnReservation({
+      fullName: "Erika Ramirez",
+      email: "erika@test.com",
+      phone: "+34600000123",
+      selectedLocation: "BILBAO",
+    });
+
+    expect(report.applied).toBe(true);
+    expect(client.duplicateTab).toHaveBeenCalledWith(COPY_ID, 0, expect.stringContaining("BACKUP_BOT_"));
+    expect(client.appendRow).toHaveBeenCalledTimes(1);
+  });
+
   it("writes Bilbao and Erandio according to the user choice", async () => {
     configureCopyWrite();
     const service = new CopySheetsRealWriteService(fakeClient() as never);

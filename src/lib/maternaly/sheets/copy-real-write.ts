@@ -589,7 +589,7 @@ export class CopySheetsRealWriteService {
 
     const plan = this.buildPlanFromAudit(targetAudit, input, config);
     const targetTab = targetAudit.tabs.find((tab) => tab.title === plan.targetTab);
-    if (!plan.allowedByPolicy || !targetTab?.gid) {
+    if (!plan.allowedByPolicy || targetTab?.gid === undefined) {
       return { generatedAt: new Date().toISOString(), plan, applied: false, error: plan.blockedReason ?? "Write blocked." };
     }
 
