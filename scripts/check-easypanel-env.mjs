@@ -8,6 +8,9 @@ const requiredNonSecret = {
   GOOGLE_SHEETS_ACCESS_MODE: "read_only|dry_run",
   BOT_SHEETS_LIVE_WRITE_ENABLED: "false",
   MATERNALY_SHEET_IDS: "comma-separated sheet ids",
+  MATERNALY_NORMALIZED_SHEETS_ENABLED: "true|false",
+  MATERNALY_NORMALIZED_SHEETS_WRITE_MODE: "dry_run",
+  MATERNALY_NORMALIZED_SERVICE_IDS: "charla_embarazo_1_20,taller_blw",
   LLM_PROVIDER: "mock|openai",
   PANEL_ADMIN_USERNAME: "configured",
   APP_BASE_URL: "https://...",
@@ -57,6 +60,26 @@ if (process.env.GOOGLE_SHEETS_ACCESS_MODE === "live") {
 
 if (process.env.BOT_SHEETS_LIVE_WRITE_ENABLED !== "false") {
   warnings.push("BOT_SHEETS_LIVE_WRITE_ENABLED should remain false until explicit go-live.");
+}
+
+if (process.env.MATERNALY_NORMALIZED_SHEETS_WRITE_MODE === "live") {
+  warnings.push("MATERNALY_NORMALIZED_SHEETS_WRITE_MODE=live requires explicit go-live approval.");
+}
+
+if (process.env.MATERNALY_NORMALIZED_SHEETS_ENABLED === "true") {
+  const services = (process.env.MATERNALY_NORMALIZED_SERVICE_IDS || "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+  if (!services.includes("charla_embarazo_1_20") || !services.includes("taller_blw")) {
+    warnings.push("MATERNALY_NORMALIZED_SERVICE_IDS should include charla_embarazo_1_20 and taller_blw.");
+  }
+  if (!process.env.MATERNALY_CHARLA_EMBARAZO_SHEET_ID?.trim()) {
+    warnings.push("MATERNALY_CHARLA_EMBARAZO_SHEET_ID is missing; charla flow will report missing_sheet_ids.");
+  }
+  if (!process.env.MATERNALY_BLW_SHEET_ID?.trim()) {
+    warnings.push("MATERNALY_BLW_SHEET_ID is missing; BLW flow will report missing_sheet_ids.");
+  }
 }
 
 if (process.env.WHATSAPP_PROVIDER === "ycloud" && !process.env.YCLOUD_API_KEY?.trim()) {

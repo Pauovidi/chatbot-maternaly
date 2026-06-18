@@ -78,6 +78,10 @@ function formatEventType(value: string) {
     nlu_classified: "Intent detectado",
     reservation_context_detected: "Reserva detectada",
     maternaly_intent_detected: "Servicio Maternaly detectado",
+    maternaly_normalized_sheet_availability_checked: "Disponibilidad Sheets revisada",
+    maternaly_normalized_registration_write_plan: "Plan Sheets normalizado",
+    maternaly_normalized_registration_written: "Solicitud escrita en Sheets",
+    maternaly_normalized_registration_blocked: "Solicitud Sheets bloqueada",
   };
 
   return labels[value] ?? value.replaceAll("_", " ");
@@ -114,6 +118,12 @@ function conversationSubtitle(conversation: ConversationRecord) {
   ].filter(Boolean);
 
   return parts.join(" · ");
+}
+
+function getLastNormalizedSheetsEvent(conversation: ConversationRecord) {
+  return conversation.events.findLast((event) =>
+    event.eventType.startsWith("maternaly_normalized_"),
+  );
 }
 
 export function ConversationsPanel({
@@ -157,6 +167,7 @@ export function ConversationsPanel({
       dashboard.conversations[0],
     [dashboard.conversations, selectedId],
   );
+  const lastNormalizedSheetsEvent = selected ? getLastNormalizedSheetsEvent(selected) : undefined;
 
   function isTimelineNearBottom() {
     const timeline = timelineRef.current;
@@ -607,6 +618,18 @@ export function ConversationsPanel({
                   {selected.assignedAgent ? <span>{selected.assignedAgent}</span> : null}
                   <span>{selected.sheetSource ? `Sheet conectado: ${selected.sheetSource}` : "Sheet pendiente"}</span>
                   {selected.sheetRange ? <span>Rango: {selected.sheetRange}</span> : null}
+                  {selected.maternalyNormalizedFlow?.serviceKey ? (
+                    <span>Servicio normalizado: {selected.maternalyNormalizedFlow.serviceKey}</span>
+                  ) : null}
+                  {selected.maternalyNormalizedFlow?.stage ? (
+                    <span>Solicitud: {selected.maternalyNormalizedFlow.stage}</span>
+                  ) : null}
+                  {selected.maternalyNormalizedFlow?.selectedSessionId ? (
+                    <span>Sesión: {selected.maternalyNormalizedFlow.selectedSessionId}</span>
+                  ) : null}
+                  {lastNormalizedSheetsEvent ? (
+                    <span>Último Sheets: {formatEventType(lastNormalizedSheetsEvent.eventType)}</span>
+                  ) : null}
                   <span>Reserva: {selected.maternalyReservationStatus ?? "none"}</span>
                   <span>Pago: {selected.maternalyPaymentStatus ?? "none"}</span>
                   <span>Factura: {selected.maternalyInvoiceStatus ?? "none"}</span>

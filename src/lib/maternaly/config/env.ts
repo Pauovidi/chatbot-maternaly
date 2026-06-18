@@ -1,4 +1,5 @@
 export type GoogleSheetsAccessMode = "read_only" | "dry_run" | "live";
+export type NormalizedSheetsWriteMode = "dry_run" | "live";
 export type WhatsAppProviderMode = "ycloud" | "mock" | "twilio";
 export type LlmProviderMode = "openai" | "mock";
 
@@ -29,6 +30,10 @@ function splitCsv(value: string | undefined): string[] {
     : [...DEFAULT_SHEET_IDS];
 }
 
+function splitOptionalCsv(value: string | undefined): string[] {
+  return value ? value.split(",").map((item) => item.trim()).filter(Boolean) : [];
+}
+
 export interface MaternalyRuntimeConfig {
   appName: string;
   appEnv: string;
@@ -40,6 +45,15 @@ export interface MaternalyRuntimeConfig {
   copySheetIds: string[];
   realStructureWriteEnabled: boolean;
   realStructureWriteMode: string;
+  normalizedSheets: {
+    enabled: boolean;
+    writeMode: NormalizedSheetsWriteMode;
+    serviceIds: string[];
+    sheetIds: string[];
+    serviceSheetIds: Record<string, string | undefined>;
+    missingSheetIds: string[];
+    liveReady: boolean;
+  };
   demoPaymentLinkConfigured: boolean;
   llmProvider: LlmProviderMode;
   llmModel?: string;
@@ -60,6 +74,35 @@ export function readMaternalyRuntimeConfig(
   env: NodeJS.ProcessEnv = process.env,
 ): MaternalyRuntimeConfig {
   const llmProvider = oneOf(env.LLM_PROVIDER, ["openai", "mock"] as const, "mock");
+  const normalizedServiceIds = splitOptionalCsv(env.MATERNALY_NORMALIZED_SERVICE_IDS);
+  const normalizedServiceSheetIds: Record<string, string | undefined> = {
+    charla_embarazo_1_20: env.MATERNALY_CHARLA_EMBARAZO_SHEET_ID?.trim() || undefined,
+    taller_blw: env.MATERNALY_BLW_SHEET_ID?.trim() || undefined,
+  };
+  const normalizedSheetIds = Array.from(
+    new Set([
+      ...splitOptionalCsv(env.MATERNALY_NORMALIZED_SHEET_IDS),
+      ...Object.values(normalizedServiceSheetIds).filter((item): item is string => Boolean(item)),
+    ]),
+  );
+  const configuredNormalizedServiceIds = normalizedServiceIds.length
+    ? normalizedServiceIds
+    : ["charla_embarazo_1_20", "taller_blw"];
+  const missingNormalizedSheetIds = configuredNormalizedServiceIds.filter(
+    (serviceId) => !normalizedServiceSheetIds[serviceId],
+  );
+  const normalizedWriteMode = oneOf(
+    env.MATERNALY_NORMALIZED_SHEETS_WRITE_MODE,
+    ["dry_run", "live"] as const,
+    "dry_run",
+  );
+  const normalizedEnabled = boolFromEnv(env.MATERNALY_NORMALIZED_SHEETS_ENABLED, false);
+  const liveSheetsWriteEnabled = boolFromEnv(env.BOT_SHEETS_LIVE_WRITE_ENABLED, false);
+  const sheetsAccessMode = oneOf(
+    env.GOOGLE_SHEETS_ACCESS_MODE,
+    ["read_only", "dry_run", "live"] as const,
+    "dry_run",
+  );
 
   return {
     appName: env.APP_NAME?.trim() || "Maternaly",
@@ -70,12 +113,8 @@ export function readMaternalyRuntimeConfig(
       ["ycloud", "mock", "twilio"] as const,
       "mock",
     ),
-    sheetsAccessMode: oneOf(
-      env.GOOGLE_SHEETS_ACCESS_MODE,
-      ["read_only", "dry_run", "live"] as const,
-      "dry_run",
-    ),
-    liveSheetsWriteEnabled: boolFromEnv(env.BOT_SHEETS_LIVE_WRITE_ENABLED, false),
+    sheetsAccessMode,
+    liveSheetsWriteEnabled,
     sheetIds: splitCsv(env.MATERNALY_SHEET_IDS),
     copySheetIds: [
       env.MATERNALY_COPY_SHEET_1_ID?.trim(),
@@ -84,6 +123,21 @@ export function readMaternalyRuntimeConfig(
     ].filter((item): item is string => Boolean(item)),
     realStructureWriteEnabled: boolFromEnv(env.MATERNALY_REAL_STRUCTURE_WRITE_ENABLED, false),
     realStructureWriteMode: env.MATERNALY_REAL_STRUCTURE_WRITE_MODE?.trim() || "disabled",
+    normalizedSheets: {
+      enabled: normalizedEnabled,
+      writeMode: normalizedWriteMode,
+      serviceIds: configuredNormalizedServiceIds,
+      sheetIds: normalizedSheetIds,
+      serviceSheetIds: normalizedServiceSheetIds,
+      missingSheetIds: missingNormalizedSheetIds,
+      liveReady:
+        normalizedEnabled &&
+        sheetsAccessMode === "live" &&
+        liveSheetsWriteEnabled &&
+        normalizedWriteMode === "live" &&
+        normalizedSheetIds.length > 0 &&
+        missingNormalizedSheetIds.length === 0,
+    },
     demoPaymentLinkConfigured: Boolean(env.MATERNALY_DEMO_PAYMENT_LINK?.trim()),
     llmProvider,
     llmModel: env.LLM_MODEL?.trim() || undefined,

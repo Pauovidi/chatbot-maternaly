@@ -234,6 +234,17 @@ export async function getMaternalyHealth(env: NodeJS.ProcessEnv = process.env) {
       realStructureWriteMode: config.realStructureWriteMode,
       demoPaymentLinkConfigured: config.demoPaymentLinkConfigured,
     },
+    normalizedSheets: {
+      enabled: config.normalizedSheets.enabled,
+      configuredServices: config.normalizedSheets.serviceIds,
+      missingSheetIds: config.normalizedSheets.missingSheetIds,
+      accessMode: config.sheetsAccessMode,
+      writeEnabled: config.liveSheetsWriteEnabled,
+      mode: config.normalizedSheets.writeMode,
+      liveReady: config.normalizedSheets.liveReady,
+      sheetIdsRedacted: config.normalizedSheets.sheetIds.map(redactSheetId),
+      lastAuditStatus: null,
+    },
     demoFlow: {
       testAdnEnabled: true,
     },

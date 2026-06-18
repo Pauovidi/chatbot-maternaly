@@ -99,6 +99,11 @@ function normalizeRecord(value: unknown): ConversationRecord | undefined {
     typeof record.pendingReservationContext === "object"
       ? (record.pendingReservationContext as ConversationRecord["pendingReservationContext"])
       : undefined;
+  const maternalyNormalizedFlow =
+    record.maternalyNormalizedFlow &&
+    typeof record.maternalyNormalizedFlow === "object"
+      ? (record.maternalyNormalizedFlow as ConversationRecord["maternalyNormalizedFlow"])
+      : undefined;
 
   return {
     id: conversationId,
@@ -189,6 +194,7 @@ function normalizeRecord(value: unknown): ConversationRecord | undefined {
       typeof record.clientSheetRow === "number" && Number.isFinite(record.clientSheetRow)
         ? record.clientSheetRow
         : undefined,
+    maternalyNormalizedFlow,
     pendingReservationProposal,
     pendingReservationContext,
     archivedAt: typeof record.archivedAt === "string" ? record.archivedAt : undefined,

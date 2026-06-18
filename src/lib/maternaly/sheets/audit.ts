@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { readMaternalyRuntimeConfig } from "@/lib/maternaly/config/env";
 import { GoogleSheetsClient, readPublicCsvSample } from "@/lib/maternaly/sheets/client";
+import { redactSheetId } from "@/lib/maternaly/sheets/normalized-template";
 import { redactRows } from "@/lib/maternaly/sheets/redaction";
 
 type ColumnHint =
@@ -165,8 +166,8 @@ export function renderAuditMarkdown(audits: SpreadsheetAudit[], generatedAt: str
   ];
 
   for (const audit of audits) {
-    lines.push(`## ${audit.title ?? audit.spreadsheetId}`);
-    lines.push(`- Spreadsheet ID: ${audit.spreadsheetId}`);
+    lines.push(`## ${audit.title ?? redactSheetId(audit.spreadsheetId)}`);
+    lines.push(`- Spreadsheet ID: ${redactSheetId(audit.spreadsheetId)}`);
     lines.push(`- Access: ${audit.access}`);
     lines.push(`- Read method: ${audit.readMethod}`);
     if (audit.error) {
@@ -204,8 +205,13 @@ export async function writeAuditReports(
   const markdownPath = path.join(reportsDir, `maternaly_sheets_audit_${timestamp}.md`);
   const jsonPath = path.join(reportsDir, `maternaly_sheets_audit_${timestamp}.json`);
 
+  const redactedAudits = audits.map((audit) => ({
+    ...audit,
+    spreadsheetId: redactSheetId(audit.spreadsheetId),
+  }));
+
   await fs.writeFile(markdownPath, renderAuditMarkdown(audits, now.toISOString()), "utf8");
-  await fs.writeFile(jsonPath, `${JSON.stringify({ generatedAt: now.toISOString(), audits }, null, 2)}\n`, "utf8");
+  await fs.writeFile(jsonPath, `${JSON.stringify({ generatedAt: now.toISOString(), audits: redactedAudits }, null, 2)}\n`, "utf8");
 
   return { markdownPath, jsonPath };
 }

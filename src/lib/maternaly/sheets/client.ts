@@ -78,6 +78,14 @@ export class GoogleSheetsClient {
     return response.data.values ?? [];
   }
 
+  async readTabRows(
+    spreadsheetId: string,
+    tabTitle: string,
+    range = "A1:AZ1000",
+  ): Promise<unknown[][]> {
+    return this.readTabSample(spreadsheetId, tabTitle, range);
+  }
+
   async duplicateTab(
     spreadsheetId: string,
     sourceSheetId: number,

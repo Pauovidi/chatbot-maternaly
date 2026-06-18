@@ -185,4 +185,35 @@ describe("conversation panel operational UI", () => {
     expect(source).toContain("timeline.scrollHeight <= timeline.clientHeight");
     expect(source).toContain("left.createdAt.localeCompare(right.createdAt)");
   });
+
+  it("shows normalized Sheets service, request status, session and last event", () => {
+    const conversation = {
+      ...buildConversationSeed("2026-05-06T08:00:00.000Z").conversations[0],
+      serviceDetected: "Taller BLW",
+      sheetSource: "normalized_google_sheets",
+      maternalyNormalizedFlow: {
+        serviceKey: "taller_blw",
+        stage: "write_planned",
+        selectedSessionId: "sesion_blw_martes",
+        updatedAt: "2026-06-18T10:00:00.000Z",
+      },
+      events: [
+        {
+          id: "evt_normalized_1",
+          conversationId: "conv_1",
+          eventType: "maternaly_normalized_registration_write_plan",
+          createdAt: "2026-06-18T10:00:00.000Z",
+        },
+      ],
+    } satisfies ConversationRecord;
+
+    const html = renderToStaticMarkup(
+      <ConversationsPanel initialDashboard={dashboardWith(conversation)} whatsAppProviderMode="ycloud" />,
+    );
+
+    expect(html).toContain("Servicio normalizado: taller_blw");
+    expect(html).toContain("Solicitud: write_planned");
+    expect(html).toContain("Sesión: sesion_blw_martes");
+    expect(html).toContain("Último Sheets: Plan Sheets normalizado");
+  });
 });

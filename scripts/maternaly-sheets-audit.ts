@@ -1,5 +1,6 @@
 import { readMaternalyRuntimeConfig } from "../src/lib/maternaly/config/env";
 import { SheetAuditService, writeAuditReports } from "../src/lib/maternaly/sheets/audit";
+import { redactSheetId } from "../src/lib/maternaly/sheets/normalized-template";
 
 async function main() {
   const config = readMaternalyRuntimeConfig();
@@ -12,7 +13,7 @@ async function main() {
     reports,
     sheetCount: audits.length,
     access: audits.map((audit) => ({
-      spreadsheetId: audit.spreadsheetId,
+      spreadsheetId: redactSheetId(audit.spreadsheetId),
       access: audit.access,
       readMethod: audit.readMethod,
       tabs: audit.tabs.map((tab) => tab.title),

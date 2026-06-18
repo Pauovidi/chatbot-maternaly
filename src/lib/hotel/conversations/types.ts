@@ -48,6 +48,20 @@ export interface PendingReservationContext {
   createdFromMessageId: string;
 }
 
+export interface MaternalyNormalizedFlowState {
+  serviceKey?: "charla_embarazo_1_20" | "taller_blw";
+  stage?: "choosing_session" | "collecting_contact" | "write_planned" | "blocked";
+  selectedSessionId?: string;
+  selectedGroupId?: string;
+  fullName?: string;
+  phone?: string;
+  email?: string;
+  peopleCount?: number;
+  pregnancyWeek?: number;
+  idempotencyKey?: string;
+  updatedAt: string;
+}
+
 export interface Conversation {
   id: string;
   phoneE164: string;
@@ -77,6 +91,7 @@ export interface Conversation {
   clientSource?: "google_sheets_client_directory";
   clientSheetName?: string;
   clientSheetRow?: number;
+  maternalyNormalizedFlow?: MaternalyNormalizedFlowState;
   pendingReservationProposal?: PendingReservationProposal;
   pendingReservationContext?: PendingReservationContext;
   archivedAt?: string;

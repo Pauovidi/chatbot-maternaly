@@ -167,6 +167,39 @@ describe("health route", () => {
     expect(serialized).not.toContain("webhook-secret");
   });
 
+  it("reports normalized Sheets status without full sheet IDs or secrets", async () => {
+    vi.stubEnv("NODE_ENV", "development");
+    process.env.APP_ENV = "development";
+    process.env.MATERNALY_NORMALIZED_SHEETS_ENABLED = "true";
+    process.env.MATERNALY_NORMALIZED_SERVICE_IDS = "charla_embarazo_1_20,taller_blw";
+    process.env.MATERNALY_CHARLA_EMBARAZO_SHEET_ID = "1CharlaSheetSecretFullId";
+    delete process.env.MATERNALY_BLW_SHEET_ID;
+    process.env.MATERNALY_NORMALIZED_SHEET_IDS = "1CharlaSheetSecretFullId";
+    process.env.MATERNALY_NORMALIZED_SHEETS_WRITE_MODE = "dry_run";
+    process.env.GOOGLE_SHEETS_ACCESS_MODE = "dry_run";
+    process.env.BOT_SHEETS_LIVE_WRITE_ENABLED = "false";
+    process.env.GOOGLE_SERVICE_ACCOUNT_JSON_BASE64 = "secret-service-account";
+
+    const response = await GET();
+    const json = await response.json();
+    const serialized = JSON.stringify(json);
+
+    expect(response.status).toBe(200);
+    expect(json.normalizedSheets).toEqual(
+      expect.objectContaining({
+        enabled: true,
+        configuredServices: ["charla_embarazo_1_20", "taller_blw"],
+        missingSheetIds: ["taller_blw"],
+        accessMode: "dry_run",
+        writeEnabled: false,
+        mode: "dry_run",
+        liveReady: false,
+      }),
+    );
+    expect(serialized).not.toContain("1CharlaSheetSecretFullId");
+    expect(serialized).not.toContain("secret-service-account");
+  });
+
   it("reports Vercel demo with Google Sheets conversations and no Postgres as ready", async () => {
     vi.stubEnv("NODE_ENV", "production");
     process.env.APP_ENV = "production";

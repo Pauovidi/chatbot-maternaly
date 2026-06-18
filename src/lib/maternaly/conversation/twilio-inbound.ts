@@ -11,7 +11,9 @@ import {
   summarizeWritePlanForEvent,
 } from "@/lib/maternaly/demo/test-adn-flow";
 import { writeCopyWriteResultReports } from "@/lib/maternaly/sheets/copy-real-write";
+import type { NormalizedSheetsClient } from "@/lib/maternaly/sheets/normalized-client";
 import { MATERNALY_SAFE_FALLBACK, buildMaternalyWhatsAppReply, ensureMaternalySafeReply } from "./response-engine";
+import { advanceNormalizedServiceFlow } from "./normalized-service-flow";
 
 function nowIso() {
   return new Date().toISOString();
@@ -192,6 +194,10 @@ function applyMaternalyIntent(record: ConversationRecord, intent: Awaited<Return
 export async function handleInboundMaternalyWhatsApp(
   payload: InboundWhatsAppPayload,
   store: ConversationStore = getConversationStore(),
+  options: {
+    normalizedSheetsClient?: NormalizedSheetsClient;
+    normalizedEnv?: NodeJS.ProcessEnv;
+  } = {},
 ): Promise<InboundResult> {
   const conversation = await getOrCreateMaternalyConversation(store, payload);
   const safeBody = redactConversationSensitiveText(payload.body);
@@ -222,6 +228,48 @@ export async function handleInboundMaternalyWhatsApp(
   );
 
   const latest = (await store.getById(conversation.id)) ?? conversation;
+
+  const normalizedFlow = await advanceNormalizedServiceFlow({
+    conversation: latest,
+    message: safeBody,
+    client: options.normalizedSheetsClient,
+    env: options.normalizedEnv,
+  });
+  if (normalizedFlow.handled && normalizedFlow.reply) {
+    const patched = await store.replaceConversation({
+      ...latest,
+      ...normalizedFlow.conversationPatch,
+      maternalyNormalizedFlow: normalizedFlow.nextState ?? latest.maternalyNormalizedFlow,
+      mode: normalizedFlow.needsHuman ? "human" : latest.mode,
+      tags: Array.from(new Set([...(latest.tags ?? []), "maternaly", "normalized-sheets"])),
+      updatedAt: nowIso(),
+    });
+    for (const event of normalizedFlow.events) {
+      await store.addEvent(createEvent(latest.id, event.eventType, event.payload));
+    }
+    const reply = ensureMaternalySafeReply(normalizedFlow.reply);
+    const botReply = await store.addMessage(
+      createMessage({
+        conversationId: latest.id,
+        direction: "outbound",
+        senderType: "bot",
+        body: reply,
+      }),
+    );
+    await store.addEvent(
+      createEvent(latest.id, "bot_reply_sent", {
+        botDomain: "maternaly",
+        source: "maternaly_normalized_service_flow",
+      }),
+    );
+
+    return {
+      conversation: (await store.getById(latest.id)) ?? patched,
+      inbound,
+      botReply,
+      twiml: buildTwilioMessageResponse(reply),
+    };
+  }
 
   const demoFlow = await advanceTestAdnDemoFlow({
     message: safeBody,

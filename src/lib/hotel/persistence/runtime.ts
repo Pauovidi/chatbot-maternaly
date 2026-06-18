@@ -174,7 +174,7 @@ export function readConversationStoreRuntimeConfig(
         : provider === "file-tmp"
           ? "/tmp is a non-durable fallback and must not be the main panel store."
           : provider === "file-local"
-            ? "Local JSON file store is not durable on Vercel."
+            ? "Local JSON file store is not durable for production containers."
             : undefined;
   const productionReady =
     !productionLike ||
