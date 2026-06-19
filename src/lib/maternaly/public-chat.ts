@@ -1,7 +1,8 @@
-import {
-  ensureMaternalySafeReply,
-  MATERNALY_SAFE_FALLBACK,
-} from "@/lib/maternaly/conversation/response-engine";
+import { MaternalyCopyRenderer } from "@/lib/maternaly/conversation/copy-renderer";
+import { ensureMaternalySafeReply } from "@/lib/maternaly/conversation/safety";
+import { getKnowledgeService } from "@/lib/maternaly/knowledge/catalog";
+import { LlmIntentClassifier } from "@/lib/maternaly/llm/interpreter";
+import type { StructuredIntent } from "@/lib/maternaly/llm/interpreter";
 
 export interface MaternalyChatAction {
   label: string;
@@ -9,68 +10,47 @@ export interface MaternalyChatAction {
 }
 
 export const MATERNALY_CHAT_QUICK_ACTIONS = [
+  "Quiero apuntarme al taller BLW",
+  "Me interesa la charla de embarazo",
   "Quiero ver horarios de AIPAP Agua",
   "Me interesa Pilates",
-  "Preparacion al Parto",
-  "Necesito factura o justificante",
 ] as const;
 
 export function getMaternalyChatWelcomeMessage(): string {
-  return [
-    "Hola, soy el asistente de Maternaly.",
-    "Puedo orientarte sobre servicios y ayudar a recoger datos para revisar disponibilidad. Solo confirmo plazas, pagos o facturas cuando exista un estado real validado.",
-  ].join("\n\n");
+  return "Hola, soy el asistente de Maternaly. Puedo ayudarte con información o preparar una solicitud para talleres y charlas.";
 }
 
-function includesAny(text: string, words: string[]): boolean {
-  const normalized = text.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
-  return words.some((word) => normalized.includes(word));
+function buildPublicReplyFromIntent(intent: StructuredIntent): string {
+  const renderer = new MaternalyCopyRenderer();
+  if (intent.intent === "greeting") {
+    return renderer.render({ decision: { action: "greeting" } }) ?? renderer.renderTechnicalFallback();
+  }
+
+  if (intent.intent === "privacy_question") {
+    return renderer.render({ decision: { action: "privacy" } }) ?? renderer.renderTechnicalFallback();
+  }
+
+  if (intent.intent === "payment_question") {
+    return renderer.render({ decision: { action: "payment" } }) ?? renderer.renderTechnicalFallback();
+  }
+
+  if (intent.intent === "invoice_question") {
+    return renderer.render({ decision: { action: "invoice" } }) ?? renderer.renderTechnicalFallback();
+  }
+
+  const service = getKnowledgeService(intent.service_candidate);
+  if (service) {
+    return renderer.render({ decision: { action: "service_info", service } }) ?? renderer.renderTechnicalFallback();
+  }
+
+  return renderer.render({ decision: { action: "general" } }) ?? renderer.renderTechnicalFallback();
 }
 
 export function resolveMaternalyChatReply(
   text: string,
 ): { text: string; actions?: MaternalyChatAction[] } {
-  if (includesAny(text, ["aipap agua", "piscina", "hydra", "hidra", "beup", "up&you"])) {
-    return {
-      text: ensureMaternalySafeReply(
-        "AIPAP Agua se gestiona con especial cuidado porque puede requerir justificante de acceso a piscina. Puedo recoger sede, fecha y numero de personas; los horarios reales deben venir de Google Sheets.",
-      ),
-    };
-  }
-
-  if (includesAny(text, ["aipap terra", "terra", "tierra"])) {
-    return {
-      text: ensureMaternalySafeReply(
-        "AIPAP Terra va separado de AIPAP Agua. Para revisar opciones necesito sede o zona, dia preferido y numero de personas. Si falta mapping fiable, lo pasa el equipo.",
-      ),
-    };
-  }
-
-  if (includesAny(text, ["pilates", "yoga"])) {
-    return {
-      text: ensureMaternalySafeReply(
-        "Para Pilates o Yoga recojo servicio, sede y preferencia horaria. No ofrezco plaza hasta contrastar disponibilidad fiable en Sheets.",
-      ),
-    };
-  }
-
-  if (includesAny(text, ["parto", "preparacion"])) {
-    return {
-      text: ensureMaternalySafeReply(
-        "Preparacion al Parto requiere entrevista o revision humana. Hasta validar el documento completo, no invento flujo ni condiciones.",
-      ),
-    };
-  }
-
-  if (includesAny(text, ["factura", "justificante", "pago", "link"])) {
-    return {
-      text: ensureMaternalySafeReply(
-        "Puedo distinguir pago pendiente, pago confirmado, factura pendiente y factura enviada. Solo dire que una plaza o factura esta confirmada cuando exista evento real.",
-      ),
-    };
-  }
-
+  const intent = new LlmIntentClassifier().classifyWithMock(text);
   return {
-    text: MATERNALY_SAFE_FALLBACK,
+    text: ensureMaternalySafeReply(buildPublicReplyFromIntent(intent)),
   };
 }

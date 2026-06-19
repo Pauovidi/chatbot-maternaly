@@ -3,7 +3,6 @@ import {
   redactConversationSensitiveText,
 } from "@/lib/hotel/conversations/service";
 import { handleInboundMaternalyWhatsApp } from "@/lib/maternaly/conversation/twilio-inbound";
-import { MaternalyConversationInterpreter } from "@/lib/maternaly/llm/interpreter";
 import { YCloudProvider } from "@/lib/maternaly/whatsapp/provider";
 
 export const runtime = "nodejs";
@@ -41,8 +40,6 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: true, ignored: true, idempotencyKey: inbound.id });
   }
 
-  const interpreter = new MaternalyConversationInterpreter();
-  const intent = await interpreter.interpret(inbound.text);
   const result = await handleInboundMaternalyWhatsApp({
     from: inbound.from,
     to: inbound.to,
@@ -52,7 +49,6 @@ export async function POST(request: Request) {
     channel: "ycloud",
     rawPayload: sanitizePayload({
       ...(inbound.raw ?? {}),
-      maternalyIntent: intent,
       provider: inbound.provider,
     }),
   });
@@ -61,7 +57,6 @@ export async function POST(request: Request) {
     ok: true,
     idempotencyKey: inbound.id,
     provider: inbound.provider,
-    intent,
     conversationId: result.conversation.id,
   });
 }

@@ -20,7 +20,7 @@ describe("normalized Maternaly availability", () => {
     expect(sessions).toHaveLength(1);
     expect(sessions[0]).toMatchObject({
       serviceKey: "taller_blw",
-      sessionId: "sesion_blw_martes",
+      sessionId: "sesion_blw_bilbao_20260925",
       availableSeats: 3,
       availabilityStatus: "available",
     });
@@ -30,8 +30,8 @@ describe("normalized Maternaly availability", () => {
     const client = new InMemoryNormalizedSheetsClient(
       createNormalizedWorkbook({
         registrations: [
-          ["taller_blw", "sesion_blw_martes", "grupo_blw_1", "Activa"],
-          ["taller_blw", "sesion_blw_martes", "grupo_blw_1", "Pendiente confirmar"],
+          ["taller_blw", "sesion_blw_bilbao_20260925", "grupo_blw_bilbao", "Activa"],
+          ["taller_blw", "sesion_blw_bilbao_20260925", "grupo_blw_bilbao", "Pendiente confirmar"],
         ],
       }),
     );
@@ -50,8 +50,8 @@ describe("normalized Maternaly availability", () => {
     const client = new InMemoryNormalizedSheetsClient(
       createNormalizedWorkbook({
         registrations: [
-          ["taller_blw", "sesion_blw_martes", "grupo_blw_1", "Cancelada"],
-          ["taller_blw", "sesion_blw_martes", "grupo_blw_1", "Confirmada"],
+          ["taller_blw", "sesion_blw_bilbao_20260925", "grupo_blw_bilbao", "Cancelada"],
+          ["taller_blw", "sesion_blw_bilbao_20260925", "grupo_blw_bilbao", "Confirmada"],
         ],
       }),
     );
@@ -60,8 +60,8 @@ describe("normalized Maternaly availability", () => {
     expect(
       calculateSessionOccupancy({
         registrations: snapshot.tabs.Inscripciones.rows,
-        sessionId: "sesion_blw_martes",
-        groupId: "grupo_blw_1",
+        sessionId: "sesion_blw_bilbao_20260925",
+        groupId: "grupo_blw_bilbao",
       }),
     ).toBe(1);
   });

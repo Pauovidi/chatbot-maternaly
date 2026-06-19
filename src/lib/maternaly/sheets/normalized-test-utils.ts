@@ -10,22 +10,33 @@ export const NORMALIZED_TEST_HEADERS = {
 } satisfies Record<string, string[][]>;
 
 export function createNormalizedWorkbook(options: {
+  serviceKey?: "taller_blw" | "charla_embarazo_1_20";
   registrations?: string[][];
   sessionCapacity?: string;
 } = {}): Record<string, unknown[][]> {
+  const serviceKey = options.serviceKey ?? "taller_blw";
+  const isCharla = serviceKey === "charla_embarazo_1_20";
+  const serviceName = isCharla ? "Charla informativa embarazo semana 1-20" : "Taller BLW";
+  const groupId = isCharla ? "grupo_charla_bilbao" : "grupo_blw_bilbao";
+  const groupName = isCharla ? "Charla Bilbao presencial" : "Taller BLW Bilbao";
+  const sessionId = isCharla ? "sesion_charla_bilbao_20261006" : "sesion_blw_bilbao_20260925";
+  const sessionName = isCharla ? "Charla Bilbao 6 octubre" : "BLW Bilbao 25 septiembre";
+  const date = isCharla ? "2026-10-06" : "2026-09-25";
+  const time = isCharla ? "17:00" : "17:00";
+
   return {
     Servicio_Config: [
       ...NORMALIZED_TEST_HEADERS.Servicio_Config,
-      ["taller_blw", "Taller BLW"],
+      [serviceKey, serviceName],
     ],
     Clientes_Local: [...NORMALIZED_TEST_HEADERS.Clientes_Local],
     Grupos_Ediciones: [
       ...NORMALIZED_TEST_HEADERS.Grupos_Ediciones,
-      ["grupo_blw_1", "Grupo BLW martes", options.sessionCapacity ?? "3", "Activa"],
+      [groupId, groupName, options.sessionCapacity ?? "3", "Activa"],
     ],
     Sesiones: [
       ...NORMALIZED_TEST_HEADERS.Sesiones,
-      ["sesion_blw_martes", "grupo_blw_1", "Martes BLW", "martes 20/06", "17:00", "", "Activa"],
+      [sessionId, groupId, sessionName, date, time, "", "Activa"],
     ],
     Inscripciones: [
       ...NORMALIZED_TEST_HEADERS.Inscripciones,

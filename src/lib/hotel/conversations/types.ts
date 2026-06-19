@@ -50,14 +50,27 @@ export interface PendingReservationContext {
 
 export interface MaternalyNormalizedFlowState {
   serviceKey?: "charla_embarazo_1_20" | "taller_blw";
-  stage?: "choosing_session" | "collecting_contact" | "write_planned" | "blocked";
+  stage?:
+    | "greeting"
+    | "collecting_service"
+    | "choosing_session"
+    | "collecting_contact"
+    | "write_planned"
+    | "blocked"
+    | "handoff";
   selectedSessionId?: string;
   selectedGroupId?: string;
   fullName?: string;
   phone?: string;
   email?: string;
   peopleCount?: number;
+  partnerName?: string;
   pregnancyWeek?: number;
+  fppOrDueDate?: string;
+  babyBirthDate?: string;
+  location?: string;
+  modality?: "presencial" | "online";
+  observations?: string;
   idempotencyKey?: string;
   updatedAt: string;
 }

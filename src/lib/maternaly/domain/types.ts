@@ -13,12 +13,18 @@ export type MaternalyServiceStatus =
   | "cancelled";
 
 export type MaternalyServiceId =
+  | "charla_embarazo_1_20"
+  | "taller_blw"
   | "pilates"
   | "yoga_prenatal"
   | "aipap_terra"
   | "aipap_agua"
   | "preparacion_parto"
   | "suelo_pelvico"
+  | "fisioterapia_embarazo"
+  | "drenaje_linfatico"
+  | "masaje_perineal"
+  | "indiba_postparto"
   | "primeros_auxilios"
   | "diagnostico_prenatal"
   | "lactancia"

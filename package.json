@@ -21,6 +21,7 @@
     "maternaly:health": "tsx scripts/maternaly-health.ts",
     "maternaly:sheets:audit": "tsx scripts/maternaly-sheets-audit.ts",
     "maternaly:sheets:dry-run-write": "tsx scripts/maternaly-sheets-dry-run-write.ts",
+    "maternaly:sheets:live-write-test": "tsx scripts/maternaly-sheets-live-write-test.ts",
     "maternaly:sheets:copy-audit": "tsx scripts/maternaly-copy-sheets-audit.ts",
     "maternaly:sheets:copy-write": "tsx scripts/maternaly-copy-sheets-write.ts",
     "maternaly:demo-flow:test-adn": "tsx scripts/maternaly-demo-flow-test-adn.ts",

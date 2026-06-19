@@ -26,7 +26,7 @@ describe("normalized Maternaly write plan", () => {
   it("blocks registration when the session is full", async () => {
     const { snapshot, session } = await buildFixture({
       sessionCapacity: "1",
-      registrations: [["taller_blw", "sesion_blw_martes", "grupo_blw_1", "Activa"]],
+      registrations: [["taller_blw", "sesion_blw_bilbao_20260925", "grupo_blw_bilbao", "Activa"]],
     });
     const plan = buildRegistrationWritePlan({
       snapshot,
@@ -151,8 +151,8 @@ describe("normalized Maternaly write plan", () => {
       registrations: [
         [
           "taller_blw",
-          "sesion_blw_martes",
-          "grupo_blw_1",
+          "sesion_blw_bilbao_20260925",
+          "grupo_blw_bilbao",
           "Preinscrita",
           "Marta Lopez",
           "+34600111222",

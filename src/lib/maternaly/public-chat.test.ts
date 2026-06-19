@@ -9,8 +9,7 @@ describe("Maternaly public chat", () => {
     const reply = resolveMaternalyChatReply("hola").text;
 
     expect(reply).toContain("Maternaly");
-    expect(reply).toContain("Pilates");
-    expect(reply).toContain("AIPAP");
+    expect(reply).toMatch(/información|talleres|charlas/i);
     expect(reply).not.toMatch(forbiddenResponsePattern);
   });
 });

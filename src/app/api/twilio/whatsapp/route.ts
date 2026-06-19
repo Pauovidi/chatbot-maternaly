@@ -16,6 +16,10 @@ export const dynamic = "force-dynamic";
 const TWILIO_XML_HEADERS = { "Content-Type": "text/xml; charset=utf-8" };
 
 function buildSafeMaternalyTwilioResponse(twiml?: string): string {
+  if (twiml && !twiml.includes("<Message>") && !containsLegacyHotelKnowledge(twiml)) {
+    return twiml;
+  }
+
   const message = twiml?.match(/<Message>([\s\S]*?)<\/Message>/)?.[1]?.trim();
   if (!message || containsLegacyHotelKnowledge(twiml ?? "")) {
     return buildTwilioMessageResponse(MATERNALY_SAFE_FALLBACK);

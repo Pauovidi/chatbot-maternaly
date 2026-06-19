@@ -40,12 +40,10 @@ describe("normalized Maternaly WhatsApp flow", () => {
       { normalizedSheetsClient: client, normalizedEnv: normalizedTestEnv() },
     );
 
-    expect(result.botReply?.body).toMatch(/horarios disponibles/i);
+    expect(result.botReply?.body).toMatch(/BLW|Opciones/i);
     expect(result.botReply?.body).not.toMatch(forbiddenHotelCopy);
     expect(result.conversation.serviceDetected).toBe("Taller BLW");
-    expect(result.conversation.events.map((event) => event.eventType)).toContain(
-      "maternaly_normalized_sheet_availability_checked",
-    );
+    expect(result.conversation.events.map((event) => event.eventType)).toContain("maternaly_tool_executed");
   });
 
   it("handles YCloud inbound through the shared normalized flow", async () => {
@@ -62,7 +60,7 @@ describe("normalized Maternaly WhatsApp flow", () => {
     );
 
     expect(result.conversation.channel).toBe("ycloud");
-    expect(result.botReply?.body).toMatch(/BLW|horarios/i);
+    expect(result.botReply?.body).toMatch(/BLW|Opciones/i);
     expect(result.botReply?.body).not.toMatch(forbiddenHotelCopy);
   });
 
@@ -83,7 +81,7 @@ describe("normalized Maternaly WhatsApp flow", () => {
     await handleInboundMaternalyWhatsApp(
       {
         from: "+34600111222",
-        body: "Me apunto a la del martes",
+        body: "Opción 1",
         messageSid: "SM_MULTI_2",
       },
       store,
@@ -92,7 +90,7 @@ describe("normalized Maternaly WhatsApp flow", () => {
     const result = await handleInboundMaternalyWhatsApp(
       {
         from: "+34600111222",
-        body: "Soy Marta Lopez, telefono +34 600 111 222, email marta@example.test",
+        body: "Soy Marta Lopez, telefono +34 600 111 222, email marta@example.test, 1 persona, fecha nacimiento bebé 2025-01-15",
         messageSid: "SM_MULTI_3",
       },
       store,
@@ -103,12 +101,10 @@ describe("normalized Maternaly WhatsApp flow", () => {
     expect(result.botReply?.body).not.toMatch(/plaza confirmada/i);
     expect(client.appended).toHaveLength(0);
     expect(result.conversation.maternalyNormalizedFlow?.stage).toBe("write_planned");
-    expect(result.conversation.events.map((event) => event.eventType)).toContain(
-      "maternaly_normalized_registration_write_plan",
-    );
+    expect(result.conversation.events.map((event) => event.eventType)).toContain("maternaly_tool_executed");
   });
 
-  it("blocks auto-write in human mode and derives", async () => {
+  it("blocks auto-write in human mode without autoresponse", async () => {
     const store = makeStore();
     const client = new InMemoryNormalizedSheetsClient(createNormalizedWorkbook());
     const first = await handleInboundMaternalyWhatsApp(
@@ -137,8 +133,48 @@ describe("normalized Maternaly WhatsApp flow", () => {
 
     expect(client.appended).toHaveLength(0);
     expect(second.conversation.mode).toBe("human");
-    expect(second.conversation.events.map((event) => event.eventType)).toContain(
-      "maternaly_normalized_registration_blocked",
+    expect(second.botReply).toBeUndefined();
+    expect(second.twiml).toBe('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
+  });
+
+  it("handles Charla with two attendees, partner and FPP", async () => {
+    const store = makeStore();
+    const client = new InMemoryNormalizedSheetsClient(
+      createNormalizedWorkbook({ serviceKey: "charla_embarazo_1_20" }),
     );
+    const env = normalizedTestEnv();
+
+    await handleInboundMaternalyWhatsApp(
+      {
+        from: "+34600111223",
+        body: "Quiero apuntarme a la charla de embarazo",
+        messageSid: "SM_CHARLA_1",
+      },
+      store,
+      { normalizedSheetsClient: client, normalizedEnv: env },
+    );
+    await handleInboundMaternalyWhatsApp(
+      {
+        from: "+34600111223",
+        body: "Opción 1",
+        messageSid: "SM_CHARLA_2",
+      },
+      store,
+      { normalizedSheetsClient: client, normalizedEnv: env },
+    );
+    const result = await handleInboundMaternalyWhatsApp(
+      {
+        from: "+34600111223",
+        body: "Soy Laura Ruiz, telefono +34 600 111 223, somos 2 personas, pareja Acompañante Prueba, FPP 2026-11-30",
+        messageSid: "SM_CHARLA_3",
+      },
+      store,
+      { normalizedSheetsClient: client, normalizedEnv: env },
+    );
+
+    expect(result.botReply?.body).toMatch(/solicitud preparada|pendiente de validación/i);
+    expect(result.botReply?.body).not.toMatch(/plaza confirmada/i);
+    expect(client.appended).toHaveLength(0);
+    expect(result.conversation.maternalyNormalizedFlow?.stage).toBe("write_planned");
   });
 });

@@ -112,7 +112,7 @@ async function checkTwilioWebhookEndpoint() {
   const cases = [
     ["hola", "Maternaly"],
     ["Pilates", "Pilates"],
-    ["Quiero reservar Test ADN", "18:20"],
+    ["Quiero información sobre Detesex", "Detesex"],
   ];
 
   for (const [body, expected] of cases) {

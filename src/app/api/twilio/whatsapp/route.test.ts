@@ -67,11 +67,12 @@ describe("Maternaly Twilio WhatsApp route", () => {
   it("responds with non-empty safe TwiML for the full multi-turn demo", async () => {
     const inputs = [
       ["hola", "SM_MULTI_1"],
-      ["Pilates", "SM_MULTI_2"],
-      ["Quiero reservar Test ADN", "SM_MULTI_3"],
-      ["Bilbao", "SM_MULTI_4"],
-      ["Erika Ramírez, erika@test.com", "SM_MULTI_5"],
-      ["Sí", "SM_MULTI_6"],
+      ["Quiero apuntarme al taller BLW", "SM_MULTI_2"],
+      ["Bilbao", "SM_MULTI_3"],
+      [
+        "Soy Erika Ramirez, telefono +34 600 000 123, email erika@example.test, 1 persona, fecha nacimiento bebé 2025-01-15",
+        "SM_MULTI_4",
+      ],
     ] as const;
     const results = [];
 
@@ -87,15 +88,12 @@ describe("Maternaly Twilio WhatsApp route", () => {
       expect(result.message).not.toMatch(LEGACY_HOTEL_PATTERN);
     }
 
-    expect(results[0].message).toMatch(/Maternaly|Pilates|AIPAP/i);
-    expect(results[1].message).toMatch(/Pilates|Maternaly/i);
-    expect(results[2].message).toContain("08/06/2026");
-    expect(results[2].message).toContain("18:20");
-    expect(results[3].message).toContain("nombre y apellidos");
-    expect(results[4].message).toContain("¿Quieres que deje la reserva fijada pendiente de pago?");
-    expect(results[5].message).toContain("reserva fijada pendiente de pago");
-    expect(results[5].message).toContain("https://app.uelzpay.com/checkout/cml6qypoi00g0qy01fkfdapmh");
-    expect(results[5].message).not.toMatch(FORBIDDEN_FINAL_PATTERN);
+    expect(results[0].message).toMatch(/Maternaly|servicio/i);
+    expect(results[0].message).not.toContain("Disculpa, estoy revisando");
+    expect(results[1].message).toMatch(/BLW|validar disponibilidad|equipo/i);
+    expect(results[2].message).toMatch(/BLW|validar disponibilidad|equipo|solicitud/i);
+    expect(results[3].message).toMatch(/solicitud|equipo|validación/i);
+    expect(results[3].message).not.toMatch(FORBIDDEN_FINAL_PATTERN);
   });
 
   it("does not dedupe different messages with different MessageSid values", async () => {
@@ -118,5 +116,21 @@ describe("Maternaly Twilio WhatsApp route", () => {
     expect(second.text).toContain("<Message>");
     expect(second.message).toContain("Maternaly");
     expect(second.message).not.toMatch(LEGACY_HOTEL_PATTERN);
+  });
+
+  it("returns empty valid TwiML in human mode", async () => {
+    await postTwilio({ body: "Quiero hablar con una persona", sid: "SM_HUMAN_1" });
+    const second = await postTwilio({ body: "¿Hay alguien?", sid: "SM_HUMAN_2" });
+
+    expect(second.response.status).toBe(200);
+    expect(second.text).toBe('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
+  });
+
+  it("reset leaves human mode and answers naturally", async () => {
+    await postTwilio({ body: "Quiero hablar con una persona", sid: "SM_RESET_1" });
+    const reset = await postTwilio({ body: "reiniciar", sid: "SM_RESET_2" });
+
+    expect(reset.message).toContain("reiniciado");
+    expect(reset.message).not.toContain("Disculpa, estoy revisando");
   });
 });

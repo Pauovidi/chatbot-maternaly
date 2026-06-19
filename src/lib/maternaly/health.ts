@@ -246,7 +246,8 @@ export async function getMaternalyHealth(env: NodeJS.ProcessEnv = process.env) {
       lastAuditStatus: null,
     },
     demoFlow: {
-      testAdnEnabled: true,
+      testAdnInboundEnabled: false,
+      activeConversationAuthority: "maternaly_core_policy_copy",
     },
     llm: {
       provider: config.llmProvider,

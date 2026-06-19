@@ -16,17 +16,21 @@ describe("Maternaly response engine", () => {
 
   it.each([
     ["hola"],
+    ["buenas noches"],
     ["buenos días"],
     ["quiero información"],
     ["quiero AIPAP"],
     ["me interesa pilates"],
+    ["Quiero apuntarme al taller BLW"],
     ["necesito factura"],
+    ["reiniciar"],
   ])("answers Maternaly content in mock mode for %s", async (message) => {
     vi.stubEnv("LLM_PROVIDER", "mock");
 
     const result = await buildMaternalyWhatsAppReply(message);
 
-    expect(result.reply).toMatch(/Maternaly|Pilates|AIPAP|factura|justificante/i);
+    expect(result.reply).toMatch(/Maternaly|Pilates|AIPAP|factura|justificante|BLW|reiniciado/i);
+    expect(result.reply).not.toContain("Disculpa, estoy revisando");
     expect(result.reply).not.toMatch(forbiddenResponsePattern);
   });
 

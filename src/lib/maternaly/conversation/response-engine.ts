@@ -1,81 +1,89 @@
+import type { ConversationRecord } from "@/lib/hotel/conversations/types";
+import { MaternalyCoreAdapter } from "@/lib/maternaly/conversation/core";
+import { MaternalyCopyRenderer } from "@/lib/maternaly/conversation/copy-renderer";
+import {
+  MATERNALY_SAFE_FALLBACK,
+  containsLegacyHotelKnowledge,
+  ensureMaternalySafeReply,
+} from "@/lib/maternaly/conversation/safety";
 import { getKnowledgeService } from "@/lib/maternaly/knowledge/catalog";
 import { MaternalyConversationInterpreter } from "@/lib/maternaly/llm/interpreter";
 import type { StructuredIntent } from "@/lib/maternaly/llm/interpreter";
 
-export const MATERNALY_SAFE_FALLBACK =
-  "Disculpa, estoy revisando tu solicitud con el equipo de Maternaly. Puedo ayudarte con Pilates, AIPAP Agua, AIPAP Terra, Preparación al Parto, Suelo Pélvico, Lactancia, Diagnóstico Prenatal y Test ADN. ¿Sobre qué servicio necesitas información?";
+const renderer = new MaternalyCopyRenderer();
 
-const LEGACY_HOTEL_PATTERNS = [
-  /\bhotel(?:es)?\b/i,
-  /\bperr[oa]s?\b/i,
-  /\bcanin[oa]s?\b/i,
-  /\bvacunas?\b/i,
-  /\bcomida\b/i,
-  /\bvisitas?\b/i,
-  /\bresidencia\b/i,
-  /\bqu[eé]\s+traer\b/i,
-  /\bsomos\s+perros\b/i,
-];
-
-export function containsLegacyHotelKnowledge(text: string): boolean {
-  return LEGACY_HOTEL_PATTERNS.some((pattern) => pattern.test(text));
-}
-
-export function ensureMaternalySafeReply(candidate: string): string {
-  const reply = candidate.trim();
-  if (!reply || containsLegacyHotelKnowledge(reply)) {
-    return MATERNALY_SAFE_FALLBACK;
-  }
-
-  return reply;
-}
-
-function buildServiceReply(intent: StructuredIntent): string {
-  const service = getKnowledgeService(intent.service_candidate);
-  if (!service) {
-    return MATERNALY_SAFE_FALLBACK;
-  }
-
-  if (service.category === "reservable") {
-    return [
-      `Puedo orientarte sobre ${service.name}.`,
-      "Para revisar disponibilidad necesito servicio, sede o zona, fecha aproximada y número de personas.",
-      "No confirmo plaza hasta validarlo con una fuente real.",
-    ].join(" ");
-  }
-
-  return [
-    `Puedo orientarte sobre ${service.name}.`,
-    service.requiresInterview
-      ? "Este servicio requiere revisión del equipo antes de avanzar."
-      : "Si necesitas disponibilidad o cita, recojo los datos y lo derivamos a revisión humana si falta una fuente validada.",
-  ].join(" ");
-}
+export { MATERNALY_SAFE_FALLBACK, containsLegacyHotelKnowledge, ensureMaternalySafeReply };
 
 export function buildMaternalyReplyFromIntent(intent: StructuredIntent): string {
-  switch (intent.intent) {
-    case "payment_question":
-      return "Puedo ayudarte a revisar si el pago está pendiente o necesita validación del equipo. No doy por cerrada una plaza ni un pago sin un estado real validado.";
-    case "invoice_question":
-      return "Puedo ayudarte con factura o justificante. Lo dejo anotado para que el equipo pueda revisarlo y emitir la factura cuando el pago esté validado.";
-    case "handoff_request":
-      return "Perfecto, derivo la conversación al equipo de Maternaly para que pueda revisarlo una persona.";
-    case "reservation_interest":
-    case "service_question":
-      return buildServiceReply(intent);
-    case "greeting":
-    case "unknown":
-      return MATERNALY_SAFE_FALLBACK;
+  if (intent.intent === "greeting") {
+    return ensureMaternalySafeReply(renderer.render({ decision: { action: "greeting" } }));
   }
+
+  if (intent.intent === "handoff_request" || intent.should_handoff) {
+    return ensureMaternalySafeReply(renderer.render({ decision: { action: "handoff" } }));
+  }
+
+  if (intent.intent === "privacy_question") {
+    return ensureMaternalySafeReply(renderer.render({ decision: { action: "privacy" } }));
+  }
+
+  if (intent.intent === "payment_question") {
+    return ensureMaternalySafeReply(renderer.render({ decision: { action: "payment" } }));
+  }
+
+  if (intent.intent === "invoice_question") {
+    return ensureMaternalySafeReply(renderer.render({ decision: { action: "invoice" } }));
+  }
+
+  if (intent.intent === "reset") {
+    return ensureMaternalySafeReply(renderer.render({ decision: { action: "reset" } }));
+  }
+
+  const service = getKnowledgeService(intent.service_candidate);
+  if (service) {
+    return ensureMaternalySafeReply(
+      renderer.render({ decision: { action: "service_info", service } }),
+    );
+  }
+
+  return ensureMaternalySafeReply(renderer.render({ decision: { action: "general" } }));
+}
+
+function fakeConversation(): ConversationRecord {
+  const now = new Date().toISOString();
+  return {
+    id: "maternaly_reply_only",
+    phoneE164: "+000000000",
+    phoneNormalized: "000000000",
+    sourceType: "whatsapp",
+    status: "open",
+    tags: ["maternaly"],
+    mode: "bot",
+    humanRequested: false,
+    unreadCount: 0,
+    createdAt: now,
+    updatedAt: now,
+    messages: [],
+    events: [],
+  };
 }
 
 export async function buildMaternalyWhatsAppReply(
   message: string,
   interpreter = new MaternalyConversationInterpreter(),
 ): Promise<{ reply: string; intent: StructuredIntent }> {
-  const intent = await interpreter.interpret(message);
+  const adapter = new MaternalyCoreAdapter(interpreter);
+  const result = await adapter.handle({
+    conversation: fakeConversation(),
+    inbound: {
+      provider: "api",
+      from: "+000000000",
+      text: message,
+    },
+  });
+
   return {
-    intent,
-    reply: ensureMaternalySafeReply(buildMaternalyReplyFromIntent(intent)),
+    intent: result.intent,
+    reply: ensureMaternalySafeReply(result.reply),
   };
 }

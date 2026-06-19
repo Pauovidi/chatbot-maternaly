@@ -318,7 +318,7 @@ describe("conversations security", () => {
     expect(response.status).toBe(200);
     expect(text).toContain("<Response><Message>");
     expect(text).toContain("Maternaly");
-    expect(text).toContain("AIPAP");
+    expect(text).not.toContain("Disculpa, estoy revisando");
     expect(text).not.toMatch(legacyHotelResponsePattern);
     expect(botReply.body).toContain("Maternaly");
     expect(payload.conversations[0].events).toEqual(
@@ -358,57 +358,41 @@ describe("conversations security", () => {
     expect(text).not.toMatch(legacyHotelResponsePattern);
   });
 
-  it("runs the Test ADN demo flow through Twilio conversation state", async () => {
+  it("answers prenatal diagnosis questions through the Maternaly core state", async () => {
     tempDir = mkdtempSync(path.join(os.tmpdir(), "maternaly-twilio-test-adn-"));
     process.env.HOTEL_CONVERSATIONS_STORE_DIR = tempDir;
     process.env.TWILIO_WEBHOOK_AUTH_TOKEN = "expected-token";
     process.env.LLM_PROVIDER = "mock";
-    const messages = [
-      ["Quiero reservar Test ADN", "SM_TEST_ADN_001"],
-      ["Bilbao", "SM_TEST_ADN_002"],
-      ["Erika Ramírez, erika@test.com", "SM_TEST_ADN_003"],
-      ["Sí", "SM_TEST_ADN_004"],
-    ];
-    const responses: string[] = [];
-
-    for (const [body, sid] of messages) {
-      const response = await postTwilioWebhook(
-        new Request("https://example.test/api/twilio/whatsapp?token=expected-token", {
-          method: "POST",
-          headers: {
-            "content-type": "application/x-www-form-urlencoded",
-          },
-          body: new URLSearchParams({
-            From: "whatsapp:+34600001003",
-            To: "whatsapp:+14155238886",
-            Body: body,
-            MessageSid: sid,
-          }),
+    const response = await postTwilioWebhook(
+      new Request("https://example.test/api/twilio/whatsapp?token=expected-token", {
+        method: "POST",
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+        },
+        body: new URLSearchParams({
+          From: "whatsapp:+34600001003",
+          To: "whatsapp:+14155238886",
+          Body: "Quiero información sobre Detesex",
+          MessageSid: "SM_TEST_ADN_001",
         }),
-      );
-      responses.push(await response.text());
-      expect(response.status).toBe(200);
-    }
+      }),
+    );
+    const text = await response.text();
 
     const payload = JSON.parse(
       readFileSync(path.join(tempDir, "hotel-conversations.json"), "utf8"),
     );
     const conversation = payload.conversations[0];
-    const lastReply = responses.at(-1) ?? "";
 
-    expect(responses[0]).toContain("08/06/2026");
-    expect(responses[0]).toContain("18:20");
-    expect(responses[1]).toContain("nombre y apellidos");
-    expect(responses[2]).toContain("reserva fijada pendiente de pago");
-    expect(lastReply).toContain("https://app.uelzpay.com/checkout/cml6qypoi00g0qy01fkfdapmh");
-    expect(lastReply).toContain("reserva fijada pendiente de pago");
-    expect(lastReply).not.toMatch(/reserva confirmada|pago confirmado|factura enviada|plaza confirmada/i);
-    expect(conversation.serviceDetected).toBe("TEST ADN / DETESEX");
-    expect(conversation.maternalyReservationStatus).toBe("pending");
+    expect(response.status).toBe(200);
+    expect(text).toContain("Detesex");
+    expect(text).toContain("Diagnóstico Prenatal");
+    expect(text).not.toMatch(/reserva confirmada|pago confirmado|factura enviada|plaza confirmada/i);
+    expect(conversation.serviceDetected).toBe("Diagnóstico Prenatal");
     expect(conversation.events).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ eventType: "maternaly_test_adn_demo_state" }),
-        expect.objectContaining({ eventType: "maternaly_test_adn_write_plan" }),
+        expect.objectContaining({ eventType: "maternaly_nlu_interpreted" }),
+        expect.objectContaining({ eventType: "maternaly_policy_decision" }),
       ]),
     );
   });
@@ -540,7 +524,7 @@ describe("conversations security", () => {
     expect(first.headers.get("Content-Type")).toContain("text/xml");
     expect(firstText).toContain("<?xml version=\"1.0\" encoding=\"UTF-8\"?>");
     expect(firstText).toContain("<Response><Message>");
-    expect(secondText).toContain("<Response><Message>");
+    expect(secondText).toBe('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
     expect(conversation).toEqual(
       expect.objectContaining({
         phoneE164: "+34600000004",
