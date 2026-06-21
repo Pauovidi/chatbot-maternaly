@@ -91,6 +91,16 @@ export const TAB_REQUIRED_COLUMNS = Object.freeze({
   Interacciones_Chatbot: ["idempotencyKey", "createdAt", "event"],
 });
 
+const TAB_HEADER_EXPECTATIONS = Object.freeze({
+  Clientes_Local: ["fullName", "phone", "email", "idempotencyKey"],
+  Grupos_Ediciones: ["groupId", "groupName", "capacityTotal", "status"],
+  Sesiones: ["sessionId", "groupId", "serviceId", "date", "startTime", "endTime", "capacityTotal", "status"],
+  Inscripciones: ["serviceId", "groupId", "sessionId", "fullName", "phone", "email", "status", "idempotencyKey"],
+  Interacciones_Chatbot: ["idempotencyKey", "createdAt", "source", "event", "notes"],
+});
+
+const HEADER_SCAN_LIMIT = 20;
+
 const NON_OCCUPYING_STATUSES = Object.freeze([
   "cancelada",
   "anulada",
@@ -164,16 +174,75 @@ function coerceRows(values) {
   return (values ?? []).map((row) => row.map((cell) => String(cell ?? "").trim()));
 }
 
-export function rowsToObjects(values) {
+function minimumExpectedMatches(tabTitle) {
+  switch (tabTitle) {
+    case "Sesiones":
+      return 3;
+    case "Clientes_Local":
+    case "Inscripciones":
+    case "Grupos_Ediciones":
+      return 2;
+    case "Interacciones_Chatbot":
+      return 1;
+    default:
+      return 2;
+  }
+}
+
+function columnKeyForHeader(value) {
+  const normalized = normalizeSheetText(value);
+  for (const [key, aliases] of Object.entries(COLUMN_ALIASES)) {
+    if (aliases.map(normalizeSheetText).includes(normalized)) {
+      return key;
+    }
+  }
+  return undefined;
+}
+
+export function detectHeaderRow(rows, tabTitle) {
+  const expected = new Set(TAB_HEADER_EXPECTATIONS[tabTitle] ?? Object.keys(COLUMN_ALIASES));
+  let best = null;
+
+  for (const [index, row] of rows.slice(0, HEADER_SCAN_LIMIT).entries()) {
+    if (!row.some(Boolean)) {
+      continue;
+    }
+
+    const matchedKeys = new Set(row.map(columnKeyForHeader).filter(Boolean));
+    const expectedMatches = Array.from(matchedKeys).filter((key) => expected.has(key)).length;
+    const score = matchedKeys.size * 10 + expectedMatches * 20 + row.filter(Boolean).length;
+    if (!best || score > best.score) {
+      best = { index, score, matchedKeys, expectedMatches };
+    }
+  }
+
+  if (!best) {
+    return { headerRowIndex: -1, parseError: "header_not_found:no_non_empty_rows" };
+  }
+
+  if (best.matchedKeys.size < 2 || best.expectedMatches < minimumExpectedMatches(tabTitle)) {
+    return {
+      headerRowIndex: -1,
+      parseError: `header_not_found:${tabTitle ?? "unknown"}:matched_${best.matchedKeys.size}:expected_${best.expectedMatches}`,
+    };
+  }
+
+  return { headerRowIndex: best.index };
+}
+
+export function rowsToObjects(values, tabTitle) {
   const rows = coerceRows(values);
-  const headerIndex = rows.findIndex((row) => row.some(Boolean));
-  const headers = headerIndex >= 0 ? rows[headerIndex] : [];
+  const { headerRowIndex, parseError } = detectHeaderRow(rows, tabTitle);
+  const headers = headerRowIndex >= 0 ? rows[headerRowIndex] : [];
   const normalizedHeaders = headers.map(normalizeSheetText);
-  const body = headerIndex >= 0 ? rows.slice(headerIndex + 1) : [];
+  const body = headerRowIndex >= 0 ? rows.slice(headerRowIndex + 1) : [];
 
   return {
     headers,
     normalizedHeaders,
+    headerRowIndex,
+    headerRowNumber: headerRowIndex >= 0 ? headerRowIndex + 1 : undefined,
+    parseError,
     rows: body
       .filter((row) => row.some(Boolean))
       .map((row) =>
@@ -494,7 +563,7 @@ async function readTab(sheets, sheetId, tabTitle) {
     valueRenderOption: "FORMATTED_VALUE",
     majorDimension: "ROWS",
   });
-  return rowsToObjects(response.data.values ?? []);
+  return rowsToObjects(response.data.values ?? [], tabTitle);
 }
 
 async function appendTabRow(sheets, sheetId, tabTitle, headers, values) {
@@ -577,6 +646,15 @@ async function processService({ sheets, service, idempotencyKey, createdAt, env 
     const tabs = {};
     for (const tab of [...SESSION_CONTEXT_TABS, ...WRITE_TABS]) {
       tabs[tab] = await readTab(sheets, service.sheetId, tab);
+    }
+
+    const parseErrors = Object.entries(tabs)
+      .filter(([, snapshot]) => snapshot.parseError)
+      .map(([tab, snapshot]) => ({ tab, error: snapshot.parseError }));
+    if (parseErrors.length) {
+      result.status = "skipped_header_not_found";
+      result.parseErrors = parseErrors;
+      return result;
     }
 
     const missingColumns = [];

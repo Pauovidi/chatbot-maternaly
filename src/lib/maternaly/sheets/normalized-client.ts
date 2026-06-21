@@ -12,7 +12,10 @@ export interface NormalizedTabSnapshot {
   tab: NormalizedRequiredTab;
   headers: string[];
   normalizedHeaders: string[];
+  headerRowIndex: number;
+  headerRowNumber?: number;
   rows: NormalizedRow[];
+  parseError?: string;
 }
 
 export interface NormalizedServiceSheetSnapshot {
@@ -65,7 +68,7 @@ export async function readNormalizedServiceSheet(
 
   const tabEntries = await Promise.all(
     NORMALIZED_REQUIRED_TABS.map(async (tab) => {
-      const parsed = rowsToObjects(await client.readTabRows(sheetId, tab));
+      const parsed = rowsToObjects(await client.readTabRows(sheetId, tab), { tab });
       return [
         tab,
         {

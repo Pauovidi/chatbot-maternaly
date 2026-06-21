@@ -4,7 +4,7 @@ export const NORMALIZED_TEST_HEADERS = {
   Servicio_Config: [["service_id", "servicio"]],
   Clientes_Local: [["nombre_completo", "telefono", "email", "idempotency_key", "created_at"]],
   Grupos_Ediciones: [["group_id", "grupo", "capacidad_total", "estado"]],
-  Sesiones: [["session_id", "group_id", "sesion", "fecha", "hora_inicio", "capacidad_total", "estado"]],
+  Sesiones: [["session_id", "group_id", "sesion", "fecha", "hora_inicio", "hora_fin", "capacidad_total", "estado"]],
   Inscripciones: [["service_id", "session_id", "group_id", "estado", "nombre_completo", "telefono", "email", "people_count", "semana_embarazo", "observaciones", "source", "idempotency_key", "created_at"]],
   Interacciones_Chatbot: [["idempotency_key", "evento", "mode", "blocked_reasons", "created_at"]],
 } satisfies Record<string, string[][]>;
@@ -14,6 +14,7 @@ export function createNormalizedWorkbook(options: {
   registrations?: string[][];
   sessionCapacity?: string;
   multiSession?: boolean;
+  visualHeaderRows?: boolean;
 } = {}): Record<string, unknown[][]> {
   const serviceKey = options.serviceKey ?? "taller_blw";
   const isCharla = serviceKey === "charla_embarazo_1_20";
@@ -24,35 +25,40 @@ export function createNormalizedWorkbook(options: {
   const sessionName = isCharla ? "Charla Bilbao 6 octubre" : "BLW Bilbao 25 septiembre";
   const date = isCharla ? "2026-10-06" : "2026-09-25";
   const time = isCharla ? "17:00" : "17:00";
+  const endTime = isCharla ? "18:30" : "20:00";
   const extraGroupId = isCharla ? "grupo_charla_erandio" : "grupo_blw_erandio";
   const extraGroupName = isCharla ? "Charla Erandio presencial" : "Taller BLW Erandio";
   const extraSessionId = isCharla ? "sesion_charla_erandio_20260924" : "sesion_blw_erandio_20260902";
   const extraSessionName = isCharla ? "Charla Erandio 24 septiembre" : "BLW Erandio 2 septiembre";
   const extraDate = isCharla ? "2026-09-24" : "2026-09-02";
+  const capacity = options.sessionCapacity ?? "3";
+  const extraCapacity = options.sessionCapacity ?? "4";
+  const withVisualRows = (tab: string, rows: unknown[][]) =>
+    options.visualHeaderRows ? [[tab], [`Ayuda visual para ${tab}`], ...rows] : rows;
 
   return {
-    Servicio_Config: [
+    Servicio_Config: withVisualRows("Servicio_Config", [
       ...NORMALIZED_TEST_HEADERS.Servicio_Config,
       [serviceKey, serviceName],
-    ],
-    Clientes_Local: [...NORMALIZED_TEST_HEADERS.Clientes_Local],
-    Grupos_Ediciones: [
+    ]),
+    Clientes_Local: withVisualRows("Clientes_Local", [...NORMALIZED_TEST_HEADERS.Clientes_Local]),
+    Grupos_Ediciones: withVisualRows("Grupos_Ediciones", [
       ...NORMALIZED_TEST_HEADERS.Grupos_Ediciones,
-      [groupId, groupName, options.sessionCapacity ?? "3", "Activa"],
-      ...(options.multiSession ? [[extraGroupId, extraGroupName, "4", "Activa"]] : []),
-    ],
-    Sesiones: [
+      [groupId, groupName, capacity, "Activa"],
+      ...(options.multiSession ? [[extraGroupId, extraGroupName, extraCapacity, "Activa"]] : []),
+    ]),
+    Sesiones: withVisualRows("Sesiones", [
       ...NORMALIZED_TEST_HEADERS.Sesiones,
-      [sessionId, groupId, sessionName, date, time, "", "Activa"],
+      [sessionId, groupId, sessionName, date, time, endTime, "", "Activa"],
       ...(options.multiSession
-        ? [[extraSessionId, extraGroupId, extraSessionName, extraDate, time, "", "Activa"]]
+        ? [[extraSessionId, extraGroupId, extraSessionName, extraDate, time, endTime, "", "Activa"]]
         : []),
-    ],
-    Inscripciones: [
+    ]),
+    Inscripciones: withVisualRows("Inscripciones", [
       ...NORMALIZED_TEST_HEADERS.Inscripciones,
       ...(options.registrations ?? []),
-    ],
-    Interacciones_Chatbot: [...NORMALIZED_TEST_HEADERS.Interacciones_Chatbot],
+    ]),
+    Interacciones_Chatbot: withVisualRows("Interacciones_Chatbot", [...NORMALIZED_TEST_HEADERS.Interacciones_Chatbot]),
   };
 }
 

@@ -7,7 +7,9 @@ import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
 import {
   buildMarkdownReport,
+  detectHeaderRow,
   redactSheetId,
+  rowsToObjects,
   sanitizeErrorMessage,
   validateLiveWriteEnvironment,
   validateRequiredColumns,
@@ -120,6 +122,42 @@ describe("maternaly live write Node script", () => {
     );
 
     expect(missing).toEqual(["phone"]);
+  });
+
+  it("detects shifted headers in the production Node parser", () => {
+    const parsed = rowsToObjects(
+      [
+        ["Sesiones"],
+        ["Ayuda visual para la plantilla"],
+        ["sesion_id", "grupo_id", "fecha", "hora_inicio", "hora_fin", "capacidad_total", "estado"],
+        ["sesion_blw_erandio_20260902", "grupo_blw_erandio", "2026-09-02", "17:00", "20:00", "14", "Activa"],
+      ],
+      "Sesiones",
+    );
+
+    expect(parsed.headerRowNumber).toBe(3);
+    expect(parsed.parseError).toBeUndefined();
+    expect(parsed.rows[0]).toMatchObject({
+      sesion_id: "sesion_blw_erandio_20260902",
+      fecha: "2026-09-02",
+      hora_inicio: "17:00",
+      hora_fin: "20:00",
+      capacidad_total: "14",
+    });
+  });
+
+  it("does not treat visual title rows as headers in the Node parser", () => {
+    const detection = detectHeaderRow(
+      [
+        ["Sesiones"],
+        ["Ayuda visual para la plantilla"],
+        ["fila sin columnas normalizadas"],
+      ],
+      "Sesiones",
+    );
+
+    expect(detection.headerRowIndex).toBe(-1);
+    expect(detection.parseError).toMatch(/header_not_found/);
   });
 
   it("redacts complete Sheet IDs from markdown reports", () => {

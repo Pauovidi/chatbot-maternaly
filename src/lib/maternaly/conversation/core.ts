@@ -115,6 +115,52 @@ function safeInternalError(value: string | undefined): string | undefined {
     .slice(0, 240);
 }
 
+function classifySheetDiagnostics(toolResult: NormalizedToolResult | undefined): string[] | undefined {
+  if (!toolResult) {
+    return undefined;
+  }
+
+  const diagnostics = new Set<string>();
+  const safeError = safeInternalError(toolResult.error) ?? "";
+  const parseErrors = toolResult.snapshot
+    ? Object.values(toolResult.snapshot.tabs)
+        .map((tab) => tab.parseError ?? "")
+        .filter(Boolean)
+    : [];
+
+  if (toolResult.status === "read_error") {
+    diagnostics.add("read_error");
+  }
+
+  if (parseErrors.some((error) => error.includes("header_not_found"))) {
+    diagnostics.add("header_not_found");
+  }
+
+  if (/missing_tab|unable to parse range|tab_not_found|sheet_not_found/i.test(safeError)) {
+    diagnostics.add("missing_tab");
+  }
+
+  if (
+    toolResult.status === "sessions_available" &&
+    toolResult.sessions.length === 0
+  ) {
+    diagnostics.add("no_sessions_available");
+  }
+
+  if (
+    toolResult.sessions.some((session) => session.availabilityStatus === "unknown_capacity") ||
+    toolResult.plan?.blockedReasons.includes("unknown_capacity_requires_manual_review")
+  ) {
+    diagnostics.add("unknown_capacity");
+  }
+
+  if (toolResult.plan?.blockedReasons.some((reason) => /^missing_.+_column:/.test(reason))) {
+    diagnostics.add("missing_required_columns");
+  }
+
+  return diagnostics.size > 0 ? Array.from(diagnostics) : undefined;
+}
+
 function serviceKeyFromSlots(
   slots: MaternalyNluSlots,
   previous?: MaternalyNormalizedFlowState,
@@ -364,6 +410,19 @@ export class MaternalyToolExecutor {
         error: error instanceof Error ? error.message : "sheet_read_failed",
       };
     }
+    const parseErrors = Object.values(snapshot.tabs)
+      .filter((tab) => tab.parseError)
+      .map((tab) => `${tab.tab}:${tab.parseError}`);
+    if (parseErrors.length > 0) {
+      return {
+        status: "read_error",
+        serviceKey: input.serviceKey,
+        snapshot,
+        sessions: [],
+        missingFields: [],
+        error: parseErrors.join("|"),
+      };
+    }
 
     const sessions = listAvailableSessionsFromSnapshot(snapshot);
     const selectedSession = chooseSession(input.message, input.state, sessions);
@@ -540,7 +599,13 @@ export class MaternalyCoreAdapter {
           mode: toolResult.writeResult?.mode,
           applied: toolResult.writeResult?.applied,
           blockedReasons: toolResult.plan?.blockedReasons,
+          diagnostics: classifySheetDiagnostics(toolResult),
           error: safeInternalError(toolResult.error),
+          parseErrors: toolResult.snapshot
+            ? Object.values(toolResult.snapshot.tabs)
+                .filter((tab) => tab.parseError)
+                .map((tab) => ({ tab: tab.tab, error: tab.parseError }))
+            : undefined,
           updatedRanges: toolResult.writeResult?.updatedRanges,
         },
       });

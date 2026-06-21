@@ -66,7 +66,9 @@ describe("normalized Maternaly WhatsApp flow", () => {
 
   it("supports service to options to choice to contact data and creates a dry-run write plan", async () => {
     const store = makeStore();
-    const client = new InMemoryNormalizedSheetsClient(createNormalizedWorkbook({ multiSession: true }));
+    const client = new InMemoryNormalizedSheetsClient(
+      createNormalizedWorkbook({ visualHeaderRows: true, multiSession: true, sessionCapacity: "14" }),
+    );
     const env = normalizedTestEnv();
 
     const first = await handleInboundMaternalyWhatsApp(
@@ -79,10 +81,12 @@ describe("normalized Maternaly WhatsApp flow", () => {
       { normalizedSheetsClient: client, normalizedEnv: env },
     );
 
+    const firstBody = first.botReply?.body ?? "";
     expect(first.botReply?.body).toMatch(/Opciones para Taller BLW/i);
-    expect(first.botReply?.body).toMatch(/1\./);
-    expect(first.botReply?.body).toMatch(/2\./);
-    expect(first.botReply?.body).not.toMatch(/nombre y apellidos|fecha de nacimiento/i);
+    expect(firstBody).toContain("2026-09-25 17:00 Taller BLW Bilbao (14 plazas disponibles)");
+    expect(firstBody).toContain("2026-09-02 17:00 Taller BLW Erandio (14 plazas disponibles)");
+    expect(firstBody).not.toMatch(/disponibilidad a validar/i);
+    expect(firstBody).not.toMatch(/nombre y apellidos|fecha de nacimiento/i);
     expect(first.conversation.maternalyNormalizedFlow?.stage).toBe("choosing_session");
     expect(first.conversation.maternalyNormalizedFlow?.selectedSessionId).toBeUndefined();
 

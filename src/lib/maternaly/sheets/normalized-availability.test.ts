@@ -10,8 +10,62 @@ import {
   createNormalizedWorkbook,
   normalizedTestEnv,
 } from "@/lib/maternaly/sheets/normalized-test-utils";
+import { rowsToObjects } from "@/lib/maternaly/sheets/normalized-template";
 
 describe("normalized Maternaly availability", () => {
+  it("detects normalized headers below visual title and help rows", () => {
+    const parsed = rowsToObjects(
+      [
+        ["Sesiones"],
+        ["Ayuda visual para la plantilla"],
+        ["sesion_id", "grupo_id", "fecha", "hora_inicio", "hora_fin", "capacidad_total", "estado"],
+        ["sesion_blw_erandio_20260902", "grupo_blw_erandio", "2026-09-02", "17:00", "20:00", "14", "Activa"],
+      ],
+      { tab: "Sesiones" },
+    );
+
+    expect(parsed.headerRowNumber).toBe(3);
+    expect(parsed.parseError).toBeUndefined();
+    expect(parsed.headers).toContain("fecha");
+    expect(parsed.rows[0]).toMatchObject({
+      sesion_id: "sesion_blw_erandio_20260902",
+      fecha: "2026-09-02",
+      hora_inicio: "17:00",
+      hora_fin: "20:00",
+      capacidad_total: "14",
+    });
+  });
+
+  it("keeps row-1 normalized headers working", () => {
+    const parsed = rowsToObjects(
+      [
+        ["session_id", "group_id", "fecha", "hora_inicio"],
+        ["sesion_1", "grupo_1", "2026-09-02", "17:00"],
+      ],
+      { tab: "Sesiones" },
+    );
+
+    expect(parsed.headerRowNumber).toBe(1);
+    expect(parsed.rows[0]?.session_id).toBe("sesion_1");
+  });
+
+  it("does not use a visual title as headers when real headers are missing", () => {
+    const parsed = rowsToObjects(
+      [
+        ["Sesiones"],
+        ["Ayuda visual para la plantilla"],
+        ["sin columnas reconocibles"],
+        ["dato sin sentido"],
+      ],
+      { tab: "Sesiones" },
+    );
+
+    expect(parsed.headerRowIndex).toBe(-1);
+    expect(parsed.parseError).toMatch(/header_not_found/);
+    expect(parsed.headers).toEqual([]);
+    expect(parsed.rows).toEqual([]);
+  });
+
   it("reads a normalized BLW sheet and lists sessions", async () => {
     const client = new InMemoryNormalizedSheetsClient(createNormalizedWorkbook());
     const snapshot = await readNormalizedServiceSheet("taller_blw", client, normalizedTestEnv());
@@ -21,8 +75,37 @@ describe("normalized Maternaly availability", () => {
     expect(sessions[0]).toMatchObject({
       serviceKey: "taller_blw",
       sessionId: "sesion_blw_bilbao_20260925",
+      date: "2026-09-25",
+      startTime: "17:00",
+      endTime: "20:00",
+      groupName: "Taller BLW Bilbao",
+      capacityTotal: 3,
       availableSeats: 3,
       availabilityStatus: "available",
+    });
+  });
+
+  it("reads shifted BLW template rows and returns real date, time, center and 14 seats", async () => {
+    const client = new InMemoryNormalizedSheetsClient(
+      createNormalizedWorkbook({ visualHeaderRows: true, multiSession: true, sessionCapacity: "14" }),
+    );
+    const snapshot = await readNormalizedServiceSheet("taller_blw", client, normalizedTestEnv());
+    const sessions = listAvailableSessionsFromSnapshot(snapshot);
+
+    expect(snapshot.tabs.Sesiones.headerRowNumber).toBe(3);
+    expect(sessions).toHaveLength(2);
+    expect(sessions[0]).toMatchObject({
+      date: "2026-09-25",
+      startTime: "17:00",
+      endTime: "20:00",
+      groupName: "Taller BLW Bilbao",
+      capacityTotal: 14,
+      availableSeats: 14,
+    });
+    expect(sessions[1]).toMatchObject({
+      date: "2026-09-02",
+      groupName: "Taller BLW Erandio",
+      availableSeats: 14,
     });
   });
 
@@ -40,6 +123,22 @@ describe("normalized Maternaly availability", () => {
 
     expect(sessions[0]?.occupied).toBe(2);
     expect(sessions[0]?.availableSeats).toBe(1);
+  });
+
+  it("subtracts occupied registrations from shifted 14-seat BLW templates", async () => {
+    const client = new InMemoryNormalizedSheetsClient(
+      createNormalizedWorkbook({
+        visualHeaderRows: true,
+        sessionCapacity: "14",
+        registrations: [["taller_blw", "sesion_blw_bilbao_20260925", "grupo_blw_bilbao", "Confirmada"]],
+      }),
+    );
+    const snapshot = await readNormalizedServiceSheet("taller_blw", client, normalizedTestEnv());
+    const sessions = listAvailableSessionsFromSnapshot(snapshot);
+
+    expect(sessions[0]?.capacityTotal).toBe(14);
+    expect(sessions[0]?.occupied).toBe(1);
+    expect(sessions[0]?.availableSeats).toBe(13);
   });
 
   it("does not count cancelled or rejected registrations as occupied", async () => {
