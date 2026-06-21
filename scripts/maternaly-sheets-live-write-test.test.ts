@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
 import {
+  TAB_REQUIRED_COLUMNS,
   buildMarkdownReport,
   detectHeaderRow,
   redactSheetId,
@@ -21,6 +22,59 @@ const repoRoot = path.resolve(scriptsDir, "..");
 const scriptPath = path.join(scriptsDir, "maternaly-sheets-live-write-test.mjs");
 
 const LEGACY_SHEET_ID = "163BD-mjKeYGx7bjjUzW_FUYhwMUniLfHlhPnByZWOfI";
+const REAL_CLIENT_HEADERS = [
+  "cliente_id",
+  "nombre",
+  "apellidos",
+  "telefono_normalizado",
+  "email",
+  "dni_nif",
+  "fpp",
+  "fecha_nacimiento_bebe",
+  "centro_preferente",
+  "canal_origen",
+  "consentimiento_comunicaciones",
+  "estado_cliente",
+  "cliente_global_id",
+  "notas_privadas",
+  "fecha_alta",
+  "ultima_actualizacion",
+];
+const REAL_REGISTRATION_HEADERS = [
+  "inscripcion_id",
+  "cliente_id",
+  "nombre",
+  "apellidos",
+  "telefono",
+  "grupo_id",
+  "servicio_id",
+  "fecha_inscripcion",
+  "canal_origen",
+  "precio_acordado",
+  "estado_pago",
+  "estado_inscripcion",
+  "fpp",
+  "pareja_nombre",
+  "consentimiento_comunicaciones",
+  "observaciones",
+];
+const REAL_INTERACTION_HEADERS = [
+  "interaccion_id",
+  "fecha_hora",
+  "canal",
+  "telefono",
+  "cliente_id",
+  "lead_id",
+  "servicio_id",
+  "intent",
+  "mensaje_usuario_resumen",
+  "respuesta_bot_resumen",
+  "accion_realizada",
+  "resultado",
+  "requiere_humano",
+  "conversation_id",
+  "observaciones",
+];
 
 function liveEnv(overrides: Record<string, string> = {}) {
   return {
@@ -124,6 +178,12 @@ describe("maternaly live write Node script", () => {
     expect(missing).toEqual(["phone"]);
   });
 
+  it("accepts real template write headers without idempotency_key", () => {
+    expect(validateRequiredColumns(REAL_CLIENT_HEADERS, TAB_REQUIRED_COLUMNS.Clientes_Local)).toEqual([]);
+    expect(validateRequiredColumns(REAL_REGISTRATION_HEADERS, TAB_REQUIRED_COLUMNS.Inscripciones)).toEqual([]);
+    expect(validateRequiredColumns(REAL_INTERACTION_HEADERS, TAB_REQUIRED_COLUMNS.Interacciones_Chatbot)).toEqual([]);
+  });
+
   it("detects shifted headers in the production Node parser", () => {
     const parsed = rowsToObjects(
       [
@@ -143,6 +203,55 @@ describe("maternaly live write Node script", () => {
       hora_inicio: "17:00",
       hora_fin: "20:00",
       capacidad_total: "14",
+    });
+  });
+
+  it("detects shifted real-template write headers in the production Node parser", () => {
+    const clients = rowsToObjects(
+      [
+        ["Clientes_Local"],
+        ["Ayuda visual para la plantilla"],
+        REAL_CLIENT_HEADERS,
+        ["CLI_BOT_TEST", "PRUEBA", "BOT", "+34999000111", "prueba.bot@example.test"],
+      ],
+      "Clientes_Local",
+    );
+    const registrations = rowsToObjects(
+      [
+        ["Inscripciones"],
+        ["Ayuda visual para la plantilla"],
+        REAL_REGISTRATION_HEADERS,
+        ["INS_BOT_TEST", "CLI_BOT_TEST", "PRUEBA", "BOT", "+34999000111", "grupo_blw_bilbao", "taller_blw"],
+      ],
+      "Inscripciones",
+    );
+    const interactions = rowsToObjects(
+      [
+        ["Interacciones_Chatbot"],
+        ["Ayuda visual para la plantilla"],
+        REAL_INTERACTION_HEADERS,
+        ["INT_BOT_TEST", "2026-06-21T00:00:00.000Z", "whatsapp", "+34999000111", "CLI_BOT_TEST"],
+      ],
+      "Interacciones_Chatbot",
+    );
+
+    expect(clients.headerRowNumber).toBe(3);
+    expect(clients.rows[0]).toMatchObject({
+      cliente_id: "CLI_BOT_TEST",
+      nombre: "PRUEBA",
+      telefono_normalizado: "+34999000111",
+    });
+    expect(registrations.headerRowNumber).toBe(3);
+    expect(registrations.rows[0]).toMatchObject({
+      inscripcion_id: "INS_BOT_TEST",
+      cliente_id: "CLI_BOT_TEST",
+      grupo_id: "grupo_blw_bilbao",
+    });
+    expect(interactions.headerRowNumber).toBe(3);
+    expect(interactions.rows[0]).toMatchObject({
+      interaccion_id: "INT_BOT_TEST",
+      fecha_hora: "2026-06-21T00:00:00.000Z",
+      canal: "whatsapp",
     });
   });
 

@@ -7,11 +7,13 @@ import type {
 import type { NormalizedAvailableSession } from "@/lib/maternaly/sheets/normalized-availability";
 import {
   MATERNALY_NORMALIZED_SERVICES,
+  NORMALIZED_COLUMN_ALIASES,
   getCell,
   hasColumn,
   normalizeSheetText,
   normalizePhoneForMatch,
   type MaternalyNormalizedServiceKey,
+  type NormalizedColumnKey,
 } from "@/lib/maternaly/sheets/normalized-template";
 
 export interface NormalizedRegistrationDraft {
@@ -21,6 +23,9 @@ export interface NormalizedRegistrationDraft {
   email?: string;
   peopleCount: number;
   pregnancyWeek?: number;
+  babyBirthDate?: string;
+  fppOrDueDate?: string;
+  partnerName?: string;
   notes?: string;
 }
 
@@ -72,6 +77,35 @@ function buildIdempotencyKey(input: {
     .slice(0, 32);
 }
 
+function buildSyntheticIds(idempotencyKey: string) {
+  const suffix = idempotencyKey.slice(0, 16).toUpperCase();
+  return {
+    clientId: `CLI_BOT_${suffix}`,
+    registrationId: `INS_BOT_${suffix}`,
+    interactionId: `INT_BOT_${suffix}`,
+  };
+}
+
+function splitFullName(fullName: string | undefined) {
+  const parts = (fullName ?? "").trim().split(/\s+/).filter(Boolean);
+  if (parts.length <= 1) {
+    return { firstName: fullName?.trim() ?? "", lastName: "" };
+  }
+
+  return {
+    firstName: parts[0],
+    lastName: parts.slice(1).join(" "),
+  };
+}
+
+function priceForService(serviceKey: MaternalyNormalizedServiceKey, peopleCount: number): string {
+  if (serviceKey === "charla_embarazo_1_20") {
+    return "0 €";
+  }
+
+  return peopleCount > 1 ? "75 €/pareja" : "45 €/persona";
+}
+
 function findClient(snapshot: NormalizedServiceSheetSnapshot, phone?: string) {
   const normalized = normalizePhoneForMatch(phone ?? "");
   if (!normalized) {
@@ -85,68 +119,206 @@ function findClient(snapshot: NormalizedServiceSheetSnapshot, phone?: string) {
 
 function hasExistingRegistration(
   snapshot: NormalizedServiceSheetSnapshot,
-  idempotencyKey: string,
+  input: { idempotencyKey: string; registrationId: string },
 ): boolean {
-  return snapshot.tabs.Inscripciones.rows.some(
-    (row) => getCell(row, "idempotencyKey") === idempotencyKey,
-  );
+  return snapshot.tabs.Inscripciones.rows.some((row) => {
+    const notes = getCell(row, "notes");
+    return (
+      getCell(row, "idempotencyKey") === input.idempotencyKey ||
+      getCell(row, "registrationId") === input.registrationId ||
+      notes.includes(input.idempotencyKey) ||
+      notes.includes(input.registrationId)
+    );
+  });
+}
+
+interface ColumnRequirement {
+  label: string;
+  alternatives: NormalizedColumnKey[];
+}
+
+const WRITE_COLUMN_REQUIREMENTS: Record<
+  NormalizedRegistrationWriteOperation["tab"],
+  ColumnRequirement[]
+> = {
+  Clientes_Local: [
+    { label: "clientId", alternatives: ["clientId", "idempotencyKey"] },
+    { label: "fullName", alternatives: ["fullName", "firstName"] },
+    { label: "phone", alternatives: ["phone"] },
+    { label: "email", alternatives: ["email"] },
+  ],
+  Inscripciones: [
+    { label: "registrationId", alternatives: ["registrationId", "idempotencyKey"] },
+    { label: "clientId", alternatives: ["clientId", "idempotencyKey"] },
+    { label: "groupId", alternatives: ["groupId"] },
+    { label: "serviceId", alternatives: ["serviceId"] },
+    { label: "phone", alternatives: ["phone"] },
+    { label: "status", alternatives: ["status"] },
+    { label: "source", alternatives: ["source"] },
+    { label: "notes", alternatives: ["notes"] },
+  ],
+  Interacciones_Chatbot: [
+    { label: "interactionId", alternatives: ["interactionId", "idempotencyKey"] },
+    { label: "createdAt", alternatives: ["createdAt"] },
+    { label: "source", alternatives: ["source", "mode"] },
+    { label: "event", alternatives: ["event"] },
+    { label: "resultOrNotes", alternatives: ["result", "notes", "blockedReasons"] },
+  ],
+};
+
+function hasAnyColumn(headers: string[], alternatives: NormalizedColumnKey[]): boolean {
+  return alternatives.some((key) => hasColumn(headers, key));
+}
+
+function acceptedAliases(alternatives: NormalizedColumnKey[]): string {
+  return alternatives
+    .map((key) => `${key}(${NORMALIZED_COLUMN_ALIASES[key].join(",")})`)
+    .join(";");
+}
+
+function formatMissingColumns(
+  tab: NormalizedRegistrationWriteOperation["tab"],
+  missing: ColumnRequirement[],
+  headers: string[],
+): string {
+  const headerList = headers.map(normalizeSheetText).filter(Boolean).join(",");
+  return [
+    `missing_required_columns:${tab}:${missing.map((requirement) => requirement.label).join("|")}`,
+    `accepted=${missing.map((requirement) => acceptedAliases(requirement.alternatives)).join("+")}`,
+    `headers=${headerList}`,
+  ].join(":");
 }
 
 function requiredColumnsPresent(snapshot: NormalizedServiceSheetSnapshot): string[] {
   const errors: string[] = [];
-  const inscriptionsHeaders = snapshot.tabs.Inscripciones.headers;
-  const clientsHeaders = snapshot.tabs.Clientes_Local.headers;
-  const interactionHeaders = snapshot.tabs.Interacciones_Chatbot.headers;
 
-  for (const key of ["fullName", "phone", "serviceId", "sessionId", "status", "idempotencyKey"] as const) {
-    if (!hasColumn(inscriptionsHeaders, key)) {
-      errors.push(`missing_inscripciones_column:${key}`);
+  for (const [tab, requirements] of Object.entries(WRITE_COLUMN_REQUIREMENTS) as Array<
+    [NormalizedRegistrationWriteOperation["tab"], ColumnRequirement[]]
+  >) {
+    const headers = snapshot.tabs[tab].headers;
+    const missing = requirements.filter((requirement) => !hasAnyColumn(headers, requirement.alternatives));
+    if (missing.length > 0) {
+      errors.push(formatMissingColumns(tab, missing, headers));
     }
-  }
-
-  for (const key of ["fullName", "phone"] as const) {
-    if (!hasColumn(clientsHeaders, key)) {
-      errors.push(`missing_clientes_local_column:${key}`);
-    }
-  }
-
-  if (!hasColumn(interactionHeaders, "idempotencyKey")) {
-    errors.push("missing_interacciones_chatbot_column:idempotencyKey");
   }
 
   return errors;
+}
+
+function isNormalizedColumnKey(key: string): key is NormalizedColumnKey {
+  return key in NORMALIZED_COLUMN_ALIASES;
 }
 
 function valuesForHeaders(
   headers: string[],
   values: Record<string, string | number | undefined>,
 ): Array<string | number | undefined> {
-  return headers.map((header) => values[header] ?? values[normalizeSheetText(header)] ?? "");
+  const exactValues = new Map<string, string | number | undefined>();
+  const aliasedValues = new Map<string, string | number | undefined>();
+
+  for (const [key, value] of Object.entries(values)) {
+    exactValues.set(normalizeSheetText(key), value);
+    if (isNormalizedColumnKey(key)) {
+      for (const alias of NORMALIZED_COLUMN_ALIASES[key]) {
+        aliasedValues.set(normalizeSheetText(alias), value);
+      }
+    }
+  }
+
+  return headers.map((header) => {
+    const normalizedHeader = normalizeSheetText(header);
+    return exactValues.get(normalizedHeader) ?? aliasedValues.get(normalizedHeader) ?? "";
+  });
 }
 
 function baseValues(input: {
   draft: NormalizedRegistrationDraft;
   session: NormalizedAvailableSession;
   idempotencyKey: string;
+  clientId: string;
+  registrationId: string;
+  interactionId: string;
+  createdAt: string;
 }) {
   const service = MATERNALY_NORMALIZED_SERVICES[input.draft.serviceKey];
+  const { firstName, lastName } = splitFullName(input.draft.fullName);
+  const notes = [
+    input.draft.notes,
+    `trace:${input.idempotencyKey}`,
+    `session:${input.session.sessionId}`,
+    `personas:${input.draft.peopleCount}`,
+  ].filter(Boolean).join(" | ");
+  const source = "whatsapp";
+  const price = priceForService(input.draft.serviceKey, input.draft.peopleCount);
+
   return {
+    serviceId: input.draft.serviceKey,
+    serviceName: service.label,
+    groupId: input.session.groupId,
+    sessionId: input.session.sessionId,
+    date: input.session.date,
+    startTime: input.session.startTime,
+    clientId: input.clientId,
+    registrationId: input.registrationId,
+    interactionId: input.interactionId,
+    idempotencyKey: input.idempotencyKey,
+    fullName: input.draft.fullName,
+    firstName,
+    lastName,
+    phone: input.draft.phone,
+    email: input.draft.email,
+    peopleCount: input.draft.peopleCount,
+    pregnancyWeek: input.draft.pregnancyWeek,
+    babyBirthDate: input.draft.babyBirthDate,
+    fppOrDueDate: input.draft.fppOrDueDate,
+    partnerName: input.draft.partnerName,
+    source,
+    status: "preinscrita",
+    paymentStatus: "pendiente",
+    price,
+    notes,
+    createdAt: input.createdAt,
+    updatedAt: input.createdAt,
+    event: "maternaly_normalized_registration_write_plan",
+    result: "prepared",
+    requiresHuman: "no",
+    conversationId: input.idempotencyKey,
+
     service_id: input.draft.serviceKey,
+    servicio_id: input.draft.serviceKey,
     servicio: service.label,
     group_id: input.session.groupId,
     session_id: input.session.sessionId,
     fecha: input.session.date,
     hora_inicio: input.session.startTime,
-    estado: "Preinscrita",
+    cliente_id: input.clientId,
+    inscripcion_id: input.registrationId,
+    interaccion_id: input.interactionId,
+    nombre: firstName,
+    apellidos: lastName,
     nombre_completo: input.draft.fullName,
     telefono: input.draft.phone,
-    email: input.draft.email,
+    telefono_normalizado: input.draft.phone,
     people_count: input.draft.peopleCount,
     semana_embarazo: input.draft.pregnancyWeek,
-    observaciones: input.draft.notes,
-    source: "maternaly_chatbot",
+    fecha_nacimiento_bebe: input.draft.babyBirthDate,
+    fpp: input.draft.fppOrDueDate,
+    pareja_nombre: input.draft.partnerName,
+    canal_origen: source,
+    canal: source,
+    estado: "Preinscrita",
+    estado_cliente: "lead",
+    estado_inscripcion: "preinscrita",
+    estado_pago: "pendiente",
+    precio_acordado: price,
+    observaciones: notes,
+    notas_privadas: notes,
     idempotency_key: input.idempotencyKey,
-    created_at: new Date().toISOString(),
+    created_at: input.createdAt,
+    fecha_alta: input.createdAt,
+    fecha_inscripcion: input.createdAt,
+    fecha_hora: input.createdAt,
+    ultima_actualizacion: input.createdAt,
   };
 }
 
@@ -164,6 +336,9 @@ export function buildRegistrationWritePlan(input: {
     phone: input.draft.phone,
     sessionId: input.session.sessionId,
   });
+  const generatedIds = buildSyntheticIds(idempotencyKey);
+  const existingClient = findClient(input.snapshot, input.draft.phone);
+  const clientId = existingClient ? getCell(existingClient, "clientId") || generatedIds.clientId : generatedIds.clientId;
   const liveFlagsReady =
     normalizedConfig.enabled &&
     config.sheetsAccessMode === "live" &&
@@ -179,18 +354,29 @@ export function buildRegistrationWritePlan(input: {
       ? "not_enough_available_seats"
       : "",
     input.session.availabilityStatus === "unknown_capacity" ? "unknown_capacity_requires_manual_review" : "",
-    hasExistingRegistration(input.snapshot, idempotencyKey) ? "duplicate_idempotency_key" : "",
+    hasExistingRegistration(input.snapshot, {
+      idempotencyKey,
+      registrationId: generatedIds.registrationId,
+    })
+      ? "duplicate_idempotency_key"
+      : "",
     !allowlisted ? "sheet_not_allowlisted" : "",
     ...requiredColumnsPresent(input.snapshot),
   ].filter(Boolean);
 
-  const values = baseValues({
+  const base = baseValues({
     draft: input.draft,
     session: input.session,
     idempotencyKey,
+    clientId,
+    registrationId: generatedIds.registrationId,
+    interactionId: generatedIds.interactionId,
+    createdAt: new Date().toISOString(),
   });
-  const clientExists = Boolean(findClient(input.snapshot, input.draft.phone));
+  const clientExists = Boolean(existingClient);
   const blocked = blockedReasons.length > 0;
+  const result = blocked ? "blocked" : "prepared";
+  const blockedReasonText = blockedReasons.join("|");
 
   return {
     serviceKey: input.draft.serviceKey,
@@ -204,19 +390,48 @@ export function buildRegistrationWritePlan(input: {
       {
         tab: "Clientes_Local",
         operation: clientExists || blocked ? "noop" : "append",
-        values,
+        values: {
+          ...base,
+          status: "lead",
+          estado: "lead",
+          estado_cliente: "lead",
+          event: "maternaly_client_upsert",
+          accion_realizada: "maternaly_client_upsert",
+          result,
+          resultado: result,
+        },
       },
       {
         tab: "Inscripciones",
         operation: blocked ? "noop" : "append",
-        values,
+        values: {
+          ...base,
+          status: "preinscrita",
+          estado: "Preinscrita",
+          estado_inscripcion: "preinscrita",
+          event: "maternaly_registration_write_plan",
+          accion_realizada: "maternaly_registration_write_plan",
+          result,
+          resultado: result,
+        },
       },
       {
         tab: "Interacciones_Chatbot",
         operation: "append",
         values: {
-          ...values,
+          ...base,
+          status: result,
+          estado: result,
+          event: blocked ? "maternaly_normalized_registration_blocked" : "maternaly_normalized_registration_write_plan",
           evento: blocked ? "maternaly_normalized_registration_blocked" : "maternaly_normalized_registration_write_plan",
+          accion_realizada: blocked ? "maternaly_normalized_registration_blocked" : "maternaly_normalized_registration_write_plan",
+          result,
+          resultado: result,
+          requiresHuman: blocked ? "si" : "no",
+          requiere_humano: blocked ? "si" : "no",
+          observaciones: [base.observaciones, blockedReasonText ? `blocked:${blockedReasonText}` : ""]
+            .filter(Boolean)
+            .join(" | "),
           blocked_reasons: blockedReasons.join("|"),
           mode: normalizedConfig.writeMode,
         },

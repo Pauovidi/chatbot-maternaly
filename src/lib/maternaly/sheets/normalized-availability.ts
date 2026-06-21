@@ -69,7 +69,16 @@ function indexGroups(rows: NormalizedRow[]) {
 
 function isActiveRow(row: NormalizedRow): boolean {
   const status = humanNormalize(getCell(row, "status"));
-  return !status || !NON_OCCUPYING_STATUSES.some((item) => status.includes(item));
+  const visible = humanNormalize(getCell(row, "visibleChatbot"));
+  const reservable = humanNormalize(getCell(row, "reservableChatbot"));
+  const hidden = ["no", "false", "0", "oculto", "oculta"].includes(visible);
+  const notReservable = ["no", "false", "0"].includes(reservable);
+
+  return (
+    !hidden &&
+    !notReservable &&
+    (!status || !NON_OCCUPYING_STATUSES.some((item) => status.includes(item)))
+  );
 }
 
 export function calculateSessionOccupancy(input: {
@@ -99,20 +108,30 @@ export function listAvailableSessionsFromSnapshot(
       const group = groups.get(groupId);
       const sessionId = getCell(row, "sessionId") || `${groupId}:${getCell(row, "date")}:${getCell(row, "startTime")}`;
       const sessionCapacity = parsePositiveInteger(getCell(row, "capacityTotal"));
+      const directOccupied = parsePositiveInteger(getCell(row, "occupiedSeats"));
+      const directAvailable = parsePositiveInteger(getCell(row, "availableSeats"));
       const capacityTotal = sessionCapacity ?? group?.capacityTotal;
-      const occupied = calculateSessionOccupancy({
+      const calculatedOccupied = calculateSessionOccupancy({
         registrations,
         sessionId,
         groupId,
       });
-      const availableSeats = capacityTotal === undefined ? undefined : Math.max(capacityTotal - occupied, 0);
+      const occupied =
+        directOccupied ??
+        (directAvailable !== undefined && capacityTotal !== undefined
+          ? Math.max(capacityTotal - directAvailable, 0)
+          : calculatedOccupied);
+      const availableSeats =
+        directAvailable ??
+        (capacityTotal === undefined ? undefined : Math.max(capacityTotal - occupied, 0));
       const full = availableSeats !== undefined && availableSeats <= 0;
+      const center = getCell(row, "center");
 
       return {
         serviceKey: snapshot.serviceKey,
         serviceLabel: service.label,
         groupId,
-        groupName: group?.groupName || groupId,
+        groupName: center || group?.groupName || groupId,
         sessionId,
         sessionName: getCell(row, "sessionName") || service.label,
         date: getCell(row, "date") || undefined,

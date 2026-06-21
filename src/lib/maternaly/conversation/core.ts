@@ -154,7 +154,11 @@ function classifySheetDiagnostics(toolResult: NormalizedToolResult | undefined):
     diagnostics.add("unknown_capacity");
   }
 
-  if (toolResult.plan?.blockedReasons.some((reason) => /^missing_.+_column:/.test(reason))) {
+  if (
+    toolResult.plan?.blockedReasons.some((reason) =>
+      reason.startsWith("missing_required_columns:") || /^missing_.+_column:/.test(reason),
+    )
+  ) {
     diagnostics.add("missing_required_columns");
   }
 
@@ -463,6 +467,9 @@ export class MaternalyToolExecutor {
         email: stateWithSelection.email,
         peopleCount: stateWithSelection.peopleCount ?? 1,
         pregnancyWeek: stateWithSelection.pregnancyWeek,
+        babyBirthDate: stateWithSelection.babyBirthDate,
+        fppOrDueDate: stateWithSelection.fppOrDueDate,
+        partnerName: stateWithSelection.partnerName,
         notes: notesFromState(stateWithSelection),
       },
       env,

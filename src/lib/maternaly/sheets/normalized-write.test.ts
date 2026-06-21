@@ -7,6 +7,7 @@ import {
 } from "@/lib/maternaly/sheets/normalized-write";
 import {
   InMemoryNormalizedSheetsClient,
+  createRealTemplateWorkbook,
   createNormalizedWorkbook,
   normalizedTestEnv,
 } from "@/lib/maternaly/sheets/normalized-test-utils";
@@ -20,6 +21,21 @@ async function buildFixture(options: Parameters<typeof createNormalizedWorkbook>
   }
 
   return { client, snapshot, session };
+}
+
+async function buildRealFixture(options: Parameters<typeof createNormalizedWorkbook>[0] = {}) {
+  const client = new InMemoryNormalizedSheetsClient(createRealTemplateWorkbook(options));
+  const snapshot = await readNormalizedServiceSheet(options.serviceKey ?? "taller_blw", client, normalizedTestEnv());
+  const session = listAvailableSessionsFromSnapshot(snapshot)[0];
+  if (!session) {
+    throw new Error("missing real template test session");
+  }
+
+  return { client, snapshot, session };
+}
+
+function appendedRowByHeader(headers: string[], values: Array<string | number | undefined>) {
+  return Object.fromEntries(headers.map((header, index) => [header, values[index] ?? ""]));
 }
 
 describe("normalized Maternaly write plan", () => {
@@ -130,6 +146,76 @@ describe("normalized Maternaly write plan", () => {
       "Inscripciones",
       "Interacciones_Chatbot",
     ]);
+  });
+
+  it("writes real-template columns without requiring technical idempotency columns", async () => {
+    const { client, snapshot, session } = await buildRealFixture({
+      visualHeaderRows: true,
+      sessionCapacity: "14",
+    });
+    const plan = buildRegistrationWritePlan({
+      snapshot,
+      session,
+      draft: {
+        serviceKey: "taller_blw",
+        fullName: "PRUEBA BOT BLW",
+        phone: "+34999000111",
+        email: "prueba.bot.blw@example.test",
+        peopleCount: 2,
+        babyBirthDate: "2025-01-15",
+        notes: "PRUEBA_BOT_CODEX_NO_CLIENTE_REAL",
+      },
+      env: normalizedTestEnv({
+        MATERNALY_NORMALIZED_SHEETS_WRITE_MODE: "live",
+        GOOGLE_SHEETS_ACCESS_MODE: "live",
+        BOT_SHEETS_LIVE_WRITE_ENABLED: "true",
+      }),
+    });
+
+    expect(plan.blocked).toBe(false);
+    expect(plan.blockedReasons).toEqual([]);
+
+    const result = await applyRegistrationWritePlan({ snapshot, client, plan });
+    expect(result.ok).toBe(true);
+    expect(result.applied).toBe(true);
+
+    const clientsRow = appendedRowByHeader(
+      snapshot.tabs.Clientes_Local.headers,
+      client.appended.find((item) => item.tabTitle === "Clientes_Local")?.values ?? [],
+    );
+    expect(clientsRow.cliente_id).toMatch(/^CLI_BOT_/);
+    expect(clientsRow.nombre).toBe("PRUEBA");
+    expect(clientsRow.apellidos).toBe("BOT BLW");
+    expect(clientsRow.telefono_normalizado).toBe("+34999000111");
+    expect(clientsRow.email).toBe("prueba.bot.blw@example.test");
+    expect(clientsRow.fecha_nacimiento_bebe).toBe("2025-01-15");
+    expect(clientsRow.estado_cliente).toBe("lead");
+
+    const registrationsRow = appendedRowByHeader(
+      snapshot.tabs.Inscripciones.headers,
+      client.appended.find((item) => item.tabTitle === "Inscripciones")?.values ?? [],
+    );
+    expect(registrationsRow.inscripcion_id).toMatch(/^INS_BOT_/);
+    expect(registrationsRow.cliente_id).toBe(clientsRow.cliente_id);
+    expect(registrationsRow.grupo_id).toBe(session.groupId);
+    expect(registrationsRow.servicio_id).toBe("taller_blw");
+    expect(registrationsRow.precio_acordado).toBe("75 €/pareja");
+    expect(registrationsRow.estado_pago).toBe("pendiente");
+    expect(registrationsRow.estado_inscripcion).toBe("preinscrita");
+    expect(String(registrationsRow.observaciones)).toContain("PRUEBA_BOT_CODEX_NO_CLIENTE_REAL");
+    expect(String(registrationsRow.observaciones)).toContain(`session:${session.sessionId}`);
+
+    const interactionsRow = appendedRowByHeader(
+      snapshot.tabs.Interacciones_Chatbot.headers,
+      client.appended.find((item) => item.tabTitle === "Interacciones_Chatbot")?.values ?? [],
+    );
+    expect(interactionsRow.interaccion_id).toMatch(/^INT_BOT_/);
+    expect(interactionsRow.fecha_hora).toBeTruthy();
+    expect(interactionsRow.canal).toBe("whatsapp");
+    expect(interactionsRow.telefono).toBe("+34999000111");
+    expect(interactionsRow.accion_realizada).toBe("maternaly_normalized_registration_write_plan");
+    expect(interactionsRow.resultado).toBe("prepared");
+    expect(interactionsRow.requiere_humano).toBe("no");
   });
 
   it("idempotency blocks duplicate person and session", async () => {

@@ -9,13 +9,101 @@ export const NORMALIZED_TEST_HEADERS = {
   Interacciones_Chatbot: [["idempotency_key", "evento", "mode", "blocked_reasons", "created_at"]],
 } satisfies Record<string, string[][]>;
 
-export function createNormalizedWorkbook(options: {
+export const REAL_TEMPLATE_TEST_HEADERS = {
+  Servicio_Config: [["service_id", "servicio"]],
+  Clientes_Local: [[
+    "cliente_id",
+    "nombre",
+    "apellidos",
+    "telefono_normalizado",
+    "email",
+    "dni_nif",
+    "fpp",
+    "fecha_nacimiento_bebe",
+    "centro_preferente",
+    "canal_origen",
+    "consentimiento_comunicaciones",
+    "estado_cliente",
+    "cliente_global_id",
+    "notas_privadas",
+    "fecha_alta",
+    "ultima_actualizacion",
+  ]],
+  Grupos_Ediciones: [[
+    "grupo_id",
+    "servicio_id",
+    "nombre_grupo",
+    "centro",
+    "modalidad",
+    "capacidad_total",
+    "estado",
+    "visible_chatbot",
+    "reservable_chatbot",
+  ]],
+  Sesiones: [[
+    "sesion_id",
+    "grupo_id",
+    "servicio_id",
+    "fecha",
+    "hora_inicio",
+    "hora_fin",
+    "centro",
+    "modalidad",
+    "estado_sesion",
+    "capacidad_total",
+    "plazas_ocupadas",
+    "plazas_disponibles",
+    "visible_chatbot",
+    "reservable_chatbot",
+    "observaciones",
+  ]],
+  Inscripciones: [[
+    "inscripcion_id",
+    "cliente_id",
+    "nombre",
+    "apellidos",
+    "telefono",
+    "grupo_id",
+    "servicio_id",
+    "fecha_inscripcion",
+    "canal_origen",
+    "precio_acordado",
+    "estado_pago",
+    "estado_inscripcion",
+    "fpp",
+    "pareja_nombre",
+    "consentimiento_comunicaciones",
+    "observaciones",
+  ]],
+  Interacciones_Chatbot: [[
+    "interaccion_id",
+    "fecha_hora",
+    "canal",
+    "telefono",
+    "cliente_id",
+    "lead_id",
+    "servicio_id",
+    "intent",
+    "mensaje_usuario_resumen",
+    "respuesta_bot_resumen",
+    "accion_realizada",
+    "resultado",
+    "requiere_humano",
+    "conversation_id",
+    "observaciones",
+  ]],
+} satisfies Record<string, string[][]>;
+
+export interface NormalizedWorkbookOptions {
   serviceKey?: "taller_blw" | "charla_embarazo_1_20";
   registrations?: string[][];
   sessionCapacity?: string;
   multiSession?: boolean;
   visualHeaderRows?: boolean;
-} = {}): Record<string, unknown[][]> {
+  realTemplate?: boolean;
+}
+
+export function createNormalizedWorkbook(options: NormalizedWorkbookOptions = {}): Record<string, unknown[][]> {
   const serviceKey = options.serviceKey ?? "taller_blw";
   const isCharla = serviceKey === "charla_embarazo_1_20";
   const serviceName = isCharla ? "Charla informativa embarazo semana 1-20" : "Taller BLW";
@@ -35,6 +123,39 @@ export function createNormalizedWorkbook(options: {
   const extraCapacity = options.sessionCapacity ?? "4";
   const withVisualRows = (tab: string, rows: unknown[][]) =>
     options.visualHeaderRows ? [[tab], [`Ayuda visual para ${tab}`], ...rows] : rows;
+
+  if (options.realTemplate) {
+    const center = isCharla ? "Bilbao" : "Bilbao";
+    const extraCenter = "Erandio";
+    return {
+      Servicio_Config: withVisualRows("Servicio_Config", [
+        ...REAL_TEMPLATE_TEST_HEADERS.Servicio_Config,
+        [serviceKey, serviceName],
+      ]),
+      Clientes_Local: withVisualRows("Clientes_Local", [...REAL_TEMPLATE_TEST_HEADERS.Clientes_Local]),
+      Grupos_Ediciones: withVisualRows("Grupos_Ediciones", [
+        ...REAL_TEMPLATE_TEST_HEADERS.Grupos_Ediciones,
+        [groupId, serviceKey, groupName, center, "Presencial", capacity, "Activa", "sí", "sí"],
+        ...(options.multiSession
+          ? [[extraGroupId, serviceKey, extraGroupName, extraCenter, "Presencial", extraCapacity, "Activa", "sí", "sí"]]
+          : []),
+      ]),
+      Sesiones: withVisualRows("Sesiones", [
+        ...REAL_TEMPLATE_TEST_HEADERS.Sesiones,
+        [sessionId, groupId, serviceKey, date, time, endTime, center, "Presencial", "Activa", capacity, "0", capacity, "sí", "sí", ""],
+        ...(options.multiSession
+          ? [[extraSessionId, extraGroupId, serviceKey, extraDate, time, endTime, extraCenter, "Presencial", "Activa", extraCapacity, "0", extraCapacity, "sí", "sí", ""]]
+          : []),
+      ]),
+      Inscripciones: withVisualRows("Inscripciones", [
+        ...REAL_TEMPLATE_TEST_HEADERS.Inscripciones,
+        ...(options.registrations ?? []),
+      ]),
+      Interacciones_Chatbot: withVisualRows("Interacciones_Chatbot", [
+        ...REAL_TEMPLATE_TEST_HEADERS.Interacciones_Chatbot,
+      ]),
+    };
+  }
 
   return {
     Servicio_Config: withVisualRows("Servicio_Config", [
@@ -60,6 +181,12 @@ export function createNormalizedWorkbook(options: {
     ]),
     Interacciones_Chatbot: withVisualRows("Interacciones_Chatbot", [...NORMALIZED_TEST_HEADERS.Interacciones_Chatbot]),
   };
+}
+
+export function createRealTemplateWorkbook(
+  options: Omit<NormalizedWorkbookOptions, "realTemplate"> = {},
+): Record<string, unknown[][]> {
+  return createNormalizedWorkbook({ ...options, realTemplate: true, visualHeaderRows: options.visualHeaderRows ?? true });
 }
 
 export class InMemoryNormalizedSheetsClient implements NormalizedSheetsClient {

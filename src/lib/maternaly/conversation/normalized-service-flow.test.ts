@@ -6,6 +6,7 @@ import { FileConversationStore } from "@/lib/hotel/conversations/file-store";
 import { handleInboundMaternalyWhatsApp } from "@/lib/maternaly/conversation/twilio-inbound";
 import {
   InMemoryNormalizedSheetsClient,
+  createRealTemplateWorkbook,
   createNormalizedWorkbook,
   normalizedTestEnv,
 } from "@/lib/maternaly/sheets/normalized-test-utils";
@@ -67,7 +68,7 @@ describe("normalized Maternaly WhatsApp flow", () => {
   it("supports service to options to choice to contact data and creates a dry-run write plan", async () => {
     const store = makeStore();
     const client = new InMemoryNormalizedSheetsClient(
-      createNormalizedWorkbook({ visualHeaderRows: true, multiSession: true, sessionCapacity: "14" }),
+      createRealTemplateWorkbook({ multiSession: true, sessionCapacity: "14" }),
     );
     const env = normalizedTestEnv();
 
@@ -83,8 +84,8 @@ describe("normalized Maternaly WhatsApp flow", () => {
 
     const firstBody = first.botReply?.body ?? "";
     expect(first.botReply?.body).toMatch(/Opciones para Taller BLW/i);
-    expect(firstBody).toContain("2026-09-25 17:00 Taller BLW Bilbao (14 plazas disponibles)");
-    expect(firstBody).toContain("2026-09-02 17:00 Taller BLW Erandio (14 plazas disponibles)");
+    expect(firstBody).toContain("2026-09-25 17:00 Bilbao (14 plazas disponibles)");
+    expect(firstBody).toContain("2026-09-02 17:00 Erandio (14 plazas disponibles)");
     expect(firstBody).not.toMatch(/disponibilidad a validar/i);
     expect(firstBody).not.toMatch(/nombre y apellidos|fecha de nacimiento/i);
     expect(first.conversation.maternalyNormalizedFlow?.stage).toBe("choosing_session");
@@ -226,7 +227,7 @@ describe("normalized Maternaly WhatsApp flow", () => {
   it("handles Charla with two attendees, partner and FPP", async () => {
     const store = makeStore();
     const client = new InMemoryNormalizedSheetsClient(
-      createNormalizedWorkbook({ serviceKey: "charla_embarazo_1_20" }),
+      createRealTemplateWorkbook({ serviceKey: "charla_embarazo_1_20" }),
     );
     const env = normalizedTestEnv();
 
@@ -267,7 +268,7 @@ describe("normalized Maternaly WhatsApp flow", () => {
   it("lists Charla options, then asks for FPP and partner data when needed", async () => {
     const store = makeStore();
     const client = new InMemoryNormalizedSheetsClient(
-      createNormalizedWorkbook({ serviceKey: "charla_embarazo_1_20", multiSession: true }),
+      createRealTemplateWorkbook({ serviceKey: "charla_embarazo_1_20", multiSession: true }),
     );
     const env = normalizedTestEnv();
 

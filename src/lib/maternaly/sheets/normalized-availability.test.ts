@@ -7,6 +7,7 @@ import {
 } from "@/lib/maternaly/sheets/normalized-availability";
 import {
   InMemoryNormalizedSheetsClient,
+  createRealTemplateWorkbook,
   createNormalizedWorkbook,
   normalizedTestEnv,
 } from "@/lib/maternaly/sheets/normalized-test-utils";
@@ -105,6 +106,32 @@ describe("normalized Maternaly availability", () => {
     expect(sessions[1]).toMatchObject({
       date: "2026-09-02",
       groupName: "Taller BLW Erandio",
+      availableSeats: 14,
+    });
+  });
+
+  it("reads real shifted template headers and uses center and direct available seats", async () => {
+    const client = new InMemoryNormalizedSheetsClient(
+      createRealTemplateWorkbook({ multiSession: true, sessionCapacity: "14" }),
+    );
+    const snapshot = await readNormalizedServiceSheet("taller_blw", client, normalizedTestEnv());
+    const sessions = listAvailableSessionsFromSnapshot(snapshot);
+
+    expect(snapshot.tabs.Clientes_Local.headerRowNumber).toBe(3);
+    expect(snapshot.tabs.Inscripciones.headerRowNumber).toBe(3);
+    expect(snapshot.tabs.Interacciones_Chatbot.headerRowNumber).toBe(3);
+    expect(snapshot.tabs.Sesiones.headerRowNumber).toBe(3);
+    expect(sessions[0]).toMatchObject({
+      date: "2026-09-25",
+      startTime: "17:00",
+      endTime: "20:00",
+      groupName: "Bilbao",
+      capacityTotal: 14,
+      availableSeats: 14,
+    });
+    expect(sessions[1]).toMatchObject({
+      date: "2026-09-02",
+      groupName: "Erandio",
       availableSeats: 14,
     });
   });
