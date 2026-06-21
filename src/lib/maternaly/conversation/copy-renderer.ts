@@ -66,6 +66,7 @@ function fieldLabel(field: string): string {
   const labels: Record<string, string> = {
     fullName: "nombre y apellidos",
     phone: "teléfono",
+    email: "email",
     peopleCount: "si vienes tú sola o en pareja",
     partnerName: "nombre de la pareja o acompañante",
     fppOrDueDate: "fecha probable de parto",
@@ -88,6 +89,12 @@ export class MaternalyCopyRenderer {
       case "reset":
         return "Listo, he reiniciado la conversación. ¿Quieres información sobre algún servicio de Maternaly o prefieres que te ayude con una inscripción?";
       case "handoff":
+        if (input.decision.reason === "cancel_or_reschedule_requires_human") {
+          return "Para cambios de fecha o cancelaciones lo revisa directamente el equipo de Maternaly. Te paso con una persona para hacerlo con seguridad.";
+        }
+        if (input.decision.reason === "payment_or_invoice_requires_human") {
+          return "Para pagos, facturas o justificantes lo revisa directamente el equipo de Maternaly. Te paso con una persona para hacerlo con seguridad.";
+        }
         return "Perfecto, dejo la conversación para que la revise el equipo de Maternaly. Cuéntame en una frase qué necesitas y lo verán con contexto.";
       case "privacy":
         return "Usamos los datos que nos das solo para gestionar tu consulta o solicitud de plaza con el equipo de Maternaly. Si quieres ejercer derechos de privacidad o borrar datos, lo derivo al equipo. ¿Quieres que lo deje anotado?";
@@ -165,6 +172,10 @@ export class MaternalyCopyRenderer {
   private renderSessions(result: MaternalyCopyToolResult, service: KnowledgeService | null): string {
     if (result.sessions.length === 0) {
       return "Ahora mismo no veo sesiones disponibles para ese servicio. Puedo recoger tus datos y dejarlo para que lo revise el equipo.";
+    }
+
+    if (result.sessions.every((session) => session.full)) {
+      return "Ahora mismo las sesiones de ese servicio aparecen sin plazas libres. Puedo dejarte en lista de espera o pasar la solicitud al equipo para revisar otra opción.";
     }
 
     const serviceName = service?.name ?? MATERNALY_NORMALIZED_SERVICES[result.serviceKey].label;

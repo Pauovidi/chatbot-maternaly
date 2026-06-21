@@ -47,4 +47,21 @@ describe("Maternaly LLM interpreter", () => {
     expect(system).toContain("AIPAP");
     expect(system).not.toMatch(forbiddenPromptPattern);
   });
+
+  it("marks cancellations, rescheduling and invoice/payment requests for human handoff", async () => {
+    const classifier = new LlmIntentClassifier();
+
+    await expect(classifier.classify("quiero cancelar mi inscripción")).resolves.toMatchObject({
+      should_handoff: true,
+      safety_flags: expect.arrayContaining(["handoff_cancel_or_reschedule"]),
+    });
+    await expect(classifier.classify("quiero cambiar la fecha")).resolves.toMatchObject({
+      should_handoff: true,
+      safety_flags: expect.arrayContaining(["handoff_cancel_or_reschedule"]),
+    });
+    await expect(classifier.classify("necesito factura")).resolves.toMatchObject({
+      should_handoff: true,
+      safety_flags: expect.arrayContaining(["handoff_payment_or_invoice"]),
+    });
+  });
 });

@@ -159,6 +159,8 @@ describe("normalized Maternaly write plan", () => {
           "marta@example.test",
           "1",
           "",
+          "",
+          "",
           firstPlan.idempotencyKey,
         ],
       ],

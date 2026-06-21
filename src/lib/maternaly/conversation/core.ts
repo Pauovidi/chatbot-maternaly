@@ -104,6 +104,17 @@ function normalize(text: string): string {
   return humanNormalize(text);
 }
 
+function safeInternalError(value: string | undefined): string | undefined {
+  if (!value) {
+    return undefined;
+  }
+
+  return value
+    .replace(/-----BEGIN[\s\S]*?-----END [^-]+-----/g, "[redacted-private-key]")
+    .replace(/[A-Za-z0-9_=-]{64,}/g, "[redacted-token]")
+    .slice(0, 240);
+}
+
 function serviceKeyFromSlots(
   slots: MaternalyNluSlots,
   previous?: MaternalyNormalizedFlowState,
@@ -137,32 +148,56 @@ function chooseSession(
     }
   }
 
+  const availableSessions = sessions.filter((session) => !session.full);
+  if (availableSessions.length === 1) {
+    return availableSessions[0];
+  }
+
   const normalized = normalize(message);
-  const ordinal = normalized.match(/\b(?:opcion\s*)?([1-9])\b/)?.[1];
+  const trimmed = normalized.trim();
+  const ordinal =
+    trimmed.match(/^(?:opcion\s*)?([1-9])$/)?.[1] ??
+    normalized.match(/\bopcion\s*([1-9])\b/)?.[1] ??
+    (
+      /\b(?:la\s+)?primera\b|\bopcion\s+uno\b/.test(normalized)
+        ? "1"
+        : /\b(?:la\s+)?segunda\b|\bopcion\s+dos\b/.test(normalized)
+          ? "2"
+          : /\b(?:la\s+)?tercera\b|\bopcion\s+tres\b/.test(normalized)
+            ? "3"
+            : /\b(?:la\s+)?cuarta\b|\bopcion\s+cuatro\b/.test(normalized)
+              ? "4"
+              : undefined
+    );
   if (ordinal) {
-    return sessions[Number.parseInt(ordinal, 10) - 1];
+    return availableSessions[Number.parseInt(ordinal, 10) - 1];
   }
 
   const dateLike = message.match(/\b\d{4}-\d{2}-\d{2}\b/)?.[0] ?? message.match(/\b\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?\b/)?.[0];
   if (dateLike) {
-    const dateMatch = sessions.find((session) => normalize(session.date ?? "").includes(normalize(dateLike)));
-    if (dateMatch) {
-      return dateMatch;
+    const dateMatches = availableSessions.filter((session) => normalize(session.date ?? "").includes(normalize(dateLike)));
+    if (dateMatches.length === 1) {
+      return dateMatches[0];
     }
   }
 
-  const locationMatch = sessions.find((session) => {
+  const locationMatches = availableSessions.filter((session) => {
     const haystack = normalize([session.groupName, session.sessionName, session.date, session.startTime].filter(Boolean).join(" "));
     return state.location && haystack.includes(normalize(state.location));
   });
-  if (locationMatch) {
-    return locationMatch;
+  if (locationMatches.length === 1) {
+    return locationMatches[0];
   }
 
-  return sessions.find((session) => {
+  const modalityMatches = availableSessions.filter((session) => {
     const haystack = normalize([session.groupName, session.sessionName, session.date, session.startTime].filter(Boolean).join(" "));
-    return haystack.split(/\s+/).some((token) => token.length > 3 && normalized.includes(token));
+    return state.modality && haystack.includes(normalize(state.modality));
   });
+  if (modalityMatches.length === 1) {
+    return modalityMatches[0];
+  }
+
+  return undefined;
 }
 
 function requiredFieldsForService(
@@ -172,6 +207,7 @@ function requiredFieldsForService(
   const common = [
     !state.fullName ? "fullName" : "",
     !state.phone ? "phone" : "",
+    !state.email ? "email" : "",
     !state.peopleCount ? "peopleCount" : "",
   ];
   const serviceSpecific =
@@ -217,6 +253,8 @@ export class MaternalyStateReducer {
         pregnancyWeek: slots.pregnancy_week ?? previous?.pregnancyWeek,
         fppOrDueDate: slots.fpp_or_due_date ?? previous?.fppOrDueDate,
         babyBirthDate: slots.baby_birth_date ?? previous?.babyBirthDate,
+        selectedSessionId: slots.selected_session_id ?? previous?.selectedSessionId,
+        selectedGroupId: slots.selected_group_id ?? previous?.selectedGroupId,
         location: slots.location ?? previous?.location,
         modality: slots.modality ?? previous?.modality,
         observations: slots.observations ?? previous?.observations,
@@ -244,7 +282,12 @@ export class MaternalyConversationPolicy {
     }
 
     if (intent.should_handoff || intent.intent === "handoff_request") {
-      return { action: "handoff", reason: "user_or_safety_handoff" };
+      const reason = intent.safety_flags.includes("handoff_cancel_or_reschedule")
+        ? "cancel_or_reschedule_requires_human"
+        : intent.safety_flags.includes("handoff_payment_or_invoice")
+          ? "payment_or_invoice_requires_human"
+          : "user_or_safety_handoff";
+      return { action: "handoff", reason };
     }
 
     if (intent.intent === "privacy_question") {
@@ -252,11 +295,11 @@ export class MaternalyConversationPolicy {
     }
 
     if (intent.intent === "payment_question") {
-      return { action: "payment" };
+      return { action: "handoff", reason: "payment_or_invoice_requires_human" };
     }
 
     if (intent.intent === "invoice_question") {
-      return { action: "invoice" };
+      return { action: "handoff", reason: "payment_or_invoice_requires_human" };
     }
 
     if (state.serviceKey) {
@@ -451,7 +494,12 @@ export class MaternalyCoreAdapter {
         ? undefined
         : {
             ...toPersistedState(state),
-            stage: state.serviceKey ? "choosing_session" : state.stage,
+            stage:
+              decision.action === "handoff"
+                ? "handoff"
+                : state.serviceKey
+                  ? "choosing_session"
+                  : state.stage,
             updatedAt: nowIso(),
           };
 
@@ -492,6 +540,7 @@ export class MaternalyCoreAdapter {
           mode: toolResult.writeResult?.mode,
           applied: toolResult.writeResult?.applied,
           blockedReasons: toolResult.plan?.blockedReasons,
+          error: safeInternalError(toolResult.error),
           updatedRanges: toolResult.writeResult?.updatedRanges,
         },
       });
@@ -503,6 +552,15 @@ export class MaternalyCoreAdapter {
       decision.action === "handoff" ||
       (toolResult?.status === "write_result" && Boolean(toolResult.plan?.blocked || !toolResult.writeResult?.ok));
     if (needsHuman) {
+      events.push({
+        eventType: "maternaly_handoff_required",
+        payload: {
+          reason: decision.reason ?? toolResult?.writeResult?.blockedReason ?? "manual_review_required",
+          serviceKey: decision.serviceKey ?? state.serviceKey,
+          blockedReasons: toolResult?.plan?.blockedReasons,
+          readError: safeInternalError(toolResult?.error),
+        },
+      });
       events.push({
         eventType: "human_requested",
         payload: {

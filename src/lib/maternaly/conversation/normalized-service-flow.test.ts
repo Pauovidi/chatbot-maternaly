@@ -66,10 +66,10 @@ describe("normalized Maternaly WhatsApp flow", () => {
 
   it("supports service to options to choice to contact data and creates a dry-run write plan", async () => {
     const store = makeStore();
-    const client = new InMemoryNormalizedSheetsClient(createNormalizedWorkbook());
+    const client = new InMemoryNormalizedSheetsClient(createNormalizedWorkbook({ multiSession: true }));
     const env = normalizedTestEnv();
 
-    await handleInboundMaternalyWhatsApp(
+    const first = await handleInboundMaternalyWhatsApp(
       {
         from: "+34600111222",
         body: "Quiero apuntarme a BLW",
@@ -78,7 +78,15 @@ describe("normalized Maternaly WhatsApp flow", () => {
       store,
       { normalizedSheetsClient: client, normalizedEnv: env },
     );
-    await handleInboundMaternalyWhatsApp(
+
+    expect(first.botReply?.body).toMatch(/Opciones para Taller BLW/i);
+    expect(first.botReply?.body).toMatch(/1\./);
+    expect(first.botReply?.body).toMatch(/2\./);
+    expect(first.botReply?.body).not.toMatch(/nombre y apellidos|fecha de nacimiento/i);
+    expect(first.conversation.maternalyNormalizedFlow?.stage).toBe("choosing_session");
+    expect(first.conversation.maternalyNormalizedFlow?.selectedSessionId).toBeUndefined();
+
+    const second = await handleInboundMaternalyWhatsApp(
       {
         from: "+34600111222",
         body: "Opción 1",
@@ -87,6 +95,10 @@ describe("normalized Maternaly WhatsApp flow", () => {
       store,
       { normalizedSheetsClient: client, normalizedEnv: env },
     );
+    expect(second.botReply?.body).toMatch(/nombre y apellidos/i);
+    expect(second.botReply?.body).toMatch(/email/i);
+    expect(second.conversation.maternalyNormalizedFlow?.selectedSessionId).toBe("sesion_blw_bilbao_20260925");
+
     const result = await handleInboundMaternalyWhatsApp(
       {
         from: "+34600111222",
@@ -102,6 +114,76 @@ describe("normalized Maternaly WhatsApp flow", () => {
     expect(client.appended).toHaveLength(0);
     expect(result.conversation.maternalyNormalizedFlow?.stage).toBe("write_planned");
     expect(result.conversation.events.map((event) => event.eventType)).toContain("maternaly_tool_executed");
+  });
+
+  it("does not close a BLW request when contact data arrives before a session choice", async () => {
+    const store = makeStore();
+    const client = new InMemoryNormalizedSheetsClient(createNormalizedWorkbook({ multiSession: true }));
+    const env = normalizedTestEnv();
+
+    await handleInboundMaternalyWhatsApp(
+      {
+        from: "+34600111224",
+        body: "Quiero reservar taller blw",
+        messageSid: "SM_NO_SESSION_1",
+      },
+      store,
+      { normalizedSheetsClient: client, normalizedEnv: env },
+    );
+    const result = await handleInboundMaternalyWhatsApp(
+      {
+        from: "+34600111224",
+        body: "Soy PRUEBA BOT BLW, teléfono +34999000111, email prueba.bot.blw@example.test. Vamos 2 personas. La fecha de nacimiento del bebé es 2025-01-15.",
+        messageSid: "SM_NO_SESSION_2",
+      },
+      store,
+      { normalizedSheetsClient: client, normalizedEnv: env },
+    );
+
+    expect(result.botReply?.body).toMatch(/Opciones para Taller BLW/i);
+    expect(result.botReply?.body).toMatch(/Dime cuál prefieres/i);
+    expect(result.botReply?.body).not.toMatch(/solicitud preparada|No puedo cerrar/i);
+    expect(client.appended).toHaveLength(0);
+    expect(result.conversation.maternalyNormalizedFlow?.stage).toBe("choosing_session");
+  });
+
+  it("auto-selects the only available BLW session and asks for contact fields", async () => {
+    const client = new InMemoryNormalizedSheetsClient(createNormalizedWorkbook());
+    const result = await handleInboundMaternalyWhatsApp(
+      {
+        from: "+34600111225",
+        body: "Quiero reservar taller blw",
+        messageSid: "SM_SINGLE_SESSION_1",
+      },
+      makeStore(),
+      { normalizedSheetsClient: client, normalizedEnv: normalizedTestEnv() },
+    );
+
+    expect(result.botReply?.body).toMatch(/preparo la solicitud/i);
+    expect(result.botReply?.body).toMatch(/nombre y apellidos/i);
+    expect(result.conversation.maternalyNormalizedFlow?.selectedSessionId).toBe("sesion_blw_bilbao_20260925");
+  });
+
+  it("offers waitlist or human review when all BLW sessions are full", async () => {
+    const client = new InMemoryNormalizedSheetsClient(
+      createNormalizedWorkbook({
+        sessionCapacity: "1",
+        registrations: [["taller_blw", "sesion_blw_bilbao_20260925", "grupo_blw_bilbao", "Confirmada"]],
+      }),
+    );
+    const result = await handleInboundMaternalyWhatsApp(
+      {
+        from: "+34600111226",
+        body: "Quiero reservar taller blw",
+        messageSid: "SM_FULL_SESSION_1",
+      },
+      makeStore(),
+      { normalizedSheetsClient: client, normalizedEnv: normalizedTestEnv() },
+    );
+
+    expect(result.botReply?.body).toMatch(/sin plazas libres/i);
+    expect(result.botReply?.body).toMatch(/lista de espera|equipo/i);
+    expect(client.appended).toHaveLength(0);
   });
 
   it("blocks auto-write in human mode without autoresponse", async () => {
@@ -165,7 +247,7 @@ describe("normalized Maternaly WhatsApp flow", () => {
     const result = await handleInboundMaternalyWhatsApp(
       {
         from: "+34600111223",
-        body: "Soy Laura Ruiz, telefono +34 600 111 223, somos 2 personas, pareja Acompañante Prueba, FPP 2026-11-30",
+        body: "Soy Laura Ruiz, telefono +34 600 111 223, email laura@example.test, somos 2 personas, pareja Acompañante Prueba, FPP 2026-11-30",
         messageSid: "SM_CHARLA_3",
       },
       store,
@@ -176,5 +258,73 @@ describe("normalized Maternaly WhatsApp flow", () => {
     expect(result.botReply?.body).not.toMatch(/plaza confirmada/i);
     expect(client.appended).toHaveLength(0);
     expect(result.conversation.maternalyNormalizedFlow?.stage).toBe("write_planned");
+  });
+
+  it("lists Charla options, then asks for FPP and partner data when needed", async () => {
+    const store = makeStore();
+    const client = new InMemoryNormalizedSheetsClient(
+      createNormalizedWorkbook({ serviceKey: "charla_embarazo_1_20", multiSession: true }),
+    );
+    const env = normalizedTestEnv();
+
+    const first = await handleInboundMaternalyWhatsApp(
+      {
+        from: "+34600111227",
+        body: "Quiero apuntarme a la charla embarazo",
+        messageSid: "SM_CHARLA_OPTIONS_1",
+      },
+      store,
+      { normalizedSheetsClient: client, normalizedEnv: env },
+    );
+    expect(first.botReply?.body).toMatch(/Opciones para Charla/i);
+    expect(first.conversation.maternalyNormalizedFlow?.selectedSessionId).toBeUndefined();
+
+    const second = await handleInboundMaternalyWhatsApp(
+      {
+        from: "+34600111227",
+        body: "opción 1",
+        messageSid: "SM_CHARLA_OPTIONS_2",
+      },
+      store,
+      { normalizedSheetsClient: client, normalizedEnv: env },
+    );
+    expect(second.botReply?.body).toMatch(/fecha probable de parto/i);
+
+    const third = await handleInboundMaternalyWhatsApp(
+      {
+        from: "+34600111227",
+        body: "Soy Laura Ruiz, telefono +34 600 111 227, email laura@example.test, somos 2 personas, FPP 2026-11-30",
+        messageSid: "SM_CHARLA_OPTIONS_3",
+      },
+      store,
+      { normalizedSheetsClient: client, normalizedEnv: env },
+    );
+    expect(third.botReply?.body).toMatch(/pareja|acompañante/i);
+    expect(third.conversation.maternalyNormalizedFlow?.stage).toBe("collecting_contact");
+  });
+
+  it("derives cancellations, date changes and invoices to human without writing", async () => {
+    for (const [index, body, sid] of [
+      [0, "quiero cancelar mi inscripción", "SM_HANDOFF_CANCEL"],
+      [1, "quiero cambiar la fecha", "SM_HANDOFF_DATE"],
+      [2, "necesito factura", "SM_HANDOFF_INVOICE"],
+    ] as const) {
+      const client = new InMemoryNormalizedSheetsClient(createNormalizedWorkbook({ multiSession: true }));
+      const result = await handleInboundMaternalyWhatsApp(
+        {
+          from: `+3460011128${index}`,
+          body,
+          messageSid: sid,
+        },
+        makeStore(),
+        { normalizedSheetsClient: client, normalizedEnv: normalizedTestEnv() },
+      );
+
+      expect(result.conversation.mode).toBe("human");
+      expect(result.conversation.humanRequested).toBe(true);
+      expect(result.conversation.events.map((event) => event.eventType)).toContain("maternaly_handoff_required");
+      expect(result.botReply?.body).toMatch(/equipo de Maternaly|persona/i);
+      expect(client.appended).toHaveLength(0);
+    }
   });
 });

@@ -11,6 +11,7 @@ export const MATERNALY_OPENAI_SYSTEM_PROMPT = [
   "Diferencia información general, interés, inscripción, selección de sesión, datos de inscripción, confirmación, pago, factura, humano, privacidad y reset.",
   "Si falta un dato, márcalo en missing_fields; no te bloquees ni inventes datos.",
   "Dudas clínicas o diagnósticas deben marcar should_handoff=true.",
+  "Cancelaciones, cambios de fecha o sede, reagendamientos, devoluciones, pagos, facturas y justificantes deben marcar should_handoff=true.",
   "JSON schema: { intent, slots, needs_availability_lookup, confidence, missing_fields, should_handoff, safety_flags }.",
 ].join(" ");
 
@@ -284,9 +285,15 @@ export class LlmIntentClassifier {
     const serviceKey = detectNormalizedServiceKey(service?.id);
     const wantsAvailability = /(horarios?|plazas?|disponibilidad|hay hueco|hueco|fechas?)/.test(text);
     const wantsRegistration = /(reserv|apunt|inscrib|preinscrib|plaza|me interesa|quiero)/.test(text);
-    const wantsPayment = /(pago|pagar|link|enlace|precio|cuesta|importe)/.test(text);
+    const wantsPayment = /\b(pago|pagar|link|enlace)\b/.test(text);
     const wantsInvoice = /(factura|justificante)/.test(text);
-    const handoff = /(hablar con|persona humana|humano|humana|llamad|equipo|matrona|profesional)/.test(text);
+    const cancelOrReschedule =
+      /(cancel|anular|darme de baja|darse de baja|\bbaja\b|cambiar(?:\s+de|\s+la)?\s+fecha|cambio(?:\s+de|\s+la)?\s+fecha|reagend|mover(?:\s+la)?\s+cita|no puedo ir|cambiar(?:\s+de|\s+la)?\s+sede)/.test(text);
+    const paymentOrInvoiceHandoff = /(devolucion|devolución|factura|justificante|\bpago\b|pagar|link de pago|enlace de pago)/.test(text);
+    const handoff =
+      cancelOrReschedule ||
+      paymentOrInvoiceHandoff ||
+      /(hablar con|persona humana|humano|humana|llamad|equipo|matrona|profesional)/.test(text);
     const reset = /(reiniciar|reset|empezar de cero|borrar conversacion|borrar conversación)/.test(text);
     const privacy = /(privacidad|datos|proteccion de datos|protección de datos|rgpd|consentimiento)/.test(text);
     const selectedSession = /\b(?:opci[oó]n\s*)?([1-9])\b/.test(text) || Boolean(extractDateLike(message));
@@ -330,7 +337,11 @@ export class LlmIntentClassifier {
         : privacy
           ? "privacy_question"
           : handoff
-            ? "handoff_request"
+            ? wantsInvoice
+              ? "invoice_question"
+              : wantsPayment
+                ? "payment_question"
+                : "handoff_request"
             : wantsInvoice
               ? "invoice_question"
               : wantsPayment && !wantsRegistration
@@ -363,6 +374,8 @@ export class LlmIntentClassifier {
       missing_fields: [],
       should_handoff: handoff || clinical === true,
       safety_flags: [
+        cancelOrReschedule ? "handoff_cancel_or_reschedule" : "",
+        paymentOrInvoiceHandoff ? "handoff_payment_or_invoice" : "",
         service?.id === "aipap_agua" ? "pool_access_justification_required" : "",
         service?.clinicalEscalation ? "clinical_or_diagnostic_escalation" : "",
       ].filter(Boolean),

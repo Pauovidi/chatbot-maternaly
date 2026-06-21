@@ -44,6 +44,17 @@ describe("maternaly live write Node script", () => {
     );
   });
 
+  it("copies the production Node script and dependencies into the Docker runner", async () => {
+    const dockerfile = await readFile(path.join(repoRoot, "Dockerfile"), "utf8");
+
+    expect(dockerfile).toContain("FROM node:22-bookworm-slim AS prod-deps");
+    expect(dockerfile).toContain("npm ci --omit=dev");
+    expect(dockerfile).toContain("/app/node_modules ./node_modules");
+    expect(dockerfile).toContain(
+      "/app/scripts/maternaly-sheets-live-write-test.mjs ./scripts/maternaly-sheets-live-write-test.mjs",
+    );
+  });
+
   it("skips safely when the synthetic live write flag is missing", () => {
     const validation = validateLiveWriteEnvironment(liveEnv({
       MATERNALY_ALLOW_SYNTHETIC_LIVE_WRITE: "false",
