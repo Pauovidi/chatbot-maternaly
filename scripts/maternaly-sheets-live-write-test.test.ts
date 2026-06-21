@@ -11,6 +11,7 @@ import {
   detectHeaderRow,
   redactSheetId,
   rowsToObjects,
+  runLiveWriteTest,
   sanitizeErrorMessage,
   validateLiveWriteEnvironment,
   validateRequiredColumns,
@@ -75,6 +76,33 @@ const REAL_INTERACTION_HEADERS = [
   "conversation_id",
   "observaciones",
 ];
+const REAL_GROUP_HEADERS = [
+  "grupo_id",
+  "servicio_id",
+  "nombre_grupo",
+  "centro",
+  "modalidad",
+  "capacidad_total",
+  "estado",
+  "visible_chatbot",
+  "reservable_chatbot",
+];
+const REAL_SESSION_HEADERS = [
+  "sesion_id",
+  "grupo_id",
+  "servicio_id",
+  "fecha",
+  "hora_inicio",
+  "hora_fin",
+  "centro",
+  "modalidad",
+  "estado_sesion",
+  "capacidad_total",
+  "plazas_ocupadas",
+  "plazas_disponibles",
+  "visible_chatbot",
+  "reservable_chatbot",
+];
 
 function liveEnv(overrides: Record<string, string> = {}) {
   return {
@@ -88,6 +116,95 @@ function liveEnv(overrides: Record<string, string> = {}) {
     MATERNALY_NORMALIZED_SHEET_IDS: "sheet_charla_synthetic,sheet_blw_synthetic",
     GOOGLE_APPLICATION_CREDENTIALS: "C:\\synthetic\\google-credentials.json",
     ...overrides,
+  };
+}
+
+function fakeServiceWorkbook(serviceKey: "charla_embarazo_1_20" | "taller_blw", withSession: boolean) {
+  const isBlw = serviceKey === "taller_blw";
+  const groupId = isBlw ? "grupo_blw_erandio" : "grupo_charla_erandio";
+  return {
+    Clientes_Local: [REAL_CLIENT_HEADERS],
+    Inscripciones: [REAL_REGISTRATION_HEADERS],
+    Interacciones_Chatbot: [REAL_INTERACTION_HEADERS],
+    Grupos_Ediciones: [
+      REAL_GROUP_HEADERS,
+      [
+        groupId,
+        serviceKey,
+        isBlw ? "Taller BLW Erandio" : "Charla Erandio",
+        "Erandio",
+        "Presencial",
+        "14",
+        "Activa",
+        "sí",
+        "sí",
+      ],
+    ],
+    Sesiones: [
+      REAL_SESSION_HEADERS,
+      ...(withSession
+        ? [[
+            isBlw ? "sesion_blw_erandio_20260902" : "sesion_charla_erandio_20260924",
+            groupId,
+            serviceKey,
+            isBlw ? "2026-09-02" : "2026-09-24",
+            isBlw ? "17:00" : "18:30",
+            isBlw ? "20:00" : "20:00",
+            "Erandio",
+            "Presencial",
+            "Activa",
+            "14",
+            "0",
+            "14",
+            "sí",
+            "sí",
+          ]]
+        : []),
+    ],
+  };
+}
+
+function fakeSheets(workbooks: Record<string, Record<string, unknown[][]>>) {
+  const tabFromRange = (range: string) => range.match(/^'((?:''|[^'])+)'!/)?.[1].replace(/''/g, "'");
+
+  return {
+    spreadsheets: {
+      get: async ({ spreadsheetId }: { spreadsheetId: string }) => ({
+        data: {
+          sheets: Object.keys(workbooks[spreadsheetId] ?? {}).map((title) => ({
+            properties: { title },
+          })),
+        },
+      }),
+      values: {
+        get: async ({ spreadsheetId, range }: { spreadsheetId: string; range: string }) => ({
+          data: {
+            values: workbooks[spreadsheetId]?.[tabFromRange(range) ?? ""] ?? [],
+          },
+        }),
+        append: async ({
+          spreadsheetId,
+          range,
+          requestBody,
+        }: {
+          spreadsheetId: string;
+          range: string;
+          requestBody: { values: unknown[][] };
+        }) => {
+          const tab = tabFromRange(range) ?? "";
+          workbooks[spreadsheetId]?.[tab]?.push(...requestBody.values);
+          const rowNumber = workbooks[spreadsheetId]?.[tab]?.length ?? 1;
+          return {
+            data: {
+              updates: {
+                updatedRange: `${tab}!A${rowNumber}:AZ${rowNumber}`,
+                updatedRows: requestBody.values.length,
+              },
+            },
+          };
+        },
+      },
+    },
   };
 }
 
@@ -167,7 +284,7 @@ describe("maternaly live write Node script", () => {
     } finally {
       await rm(reportDir, { recursive: true, force: true });
     }
-  });
+  }, 15_000);
 
   it("reports missing columns without producing append values", () => {
     const missing = validateRequiredColumns(
@@ -295,6 +412,32 @@ describe("maternaly live write Node script", () => {
 
     expect(markdown).toContain(redactSheetId(LEGACY_SHEET_ID));
     expect(markdown).not.toContain(LEGACY_SHEET_ID);
+  });
+
+  it("reports partial_success when one service writes and another has no available session", async () => {
+    const reportDir = await mkdtemp(path.join(tmpdir(), "maternaly-live-write-partial-"));
+
+    try {
+      const result = await runLiveWriteTest({
+        env: liveEnv({ MATERNALY_LIVE_WRITE_TEST_REPORT_DIR: reportDir }),
+        now: new Date("2026-06-21T00:00:00.000Z"),
+        sheets: fakeSheets({
+          sheet_charla_synthetic: fakeServiceWorkbook("charla_embarazo_1_20", false),
+          sheet_blw_synthetic: fakeServiceWorkbook("taller_blw", true),
+        }),
+      });
+
+      expect(result.ok).toBe(true);
+      expect(result.reason).toBe("partial_success");
+      expect(result.exitCode).toBe(0);
+      expect(result.appendApplied).toBe(3);
+      expect(result.services.map((service) => [service.serviceKey, service.status])).toEqual([
+        ["charla_embarazo_1_20", "skipped_no_available_session"],
+        ["taller_blw", "applied"],
+      ]);
+    } finally {
+      await rm(reportDir, { recursive: true, force: true });
+    }
   });
 
   it("redacts known sensitive values from error messages", () => {

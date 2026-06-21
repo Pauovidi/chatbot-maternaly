@@ -1030,13 +1030,24 @@ export async function runLiveWriteTest(options = {}) {
   }
 
   result.skipped = result.services.every((service) => service.appendApplied === 0);
-  result.ok = result.services.length > 0 && result.services.every((service) =>
-    ["applied", "skipped_duplicate_idempotency_key"].includes(service.status),
-  );
+  const successfulStatuses = ["applied", "skipped_duplicate_idempotency_key"];
+  const nonFatalSkipStatuses = ["skipped_no_available_session"];
+  const allServicesSuccessful =
+    result.services.length > 0 &&
+    result.services.every((service) => successfulStatuses.includes(service.status));
+  const partialSuccess =
+    result.appendApplied > 0 &&
+    result.services.every((service) =>
+      [...successfulStatuses, ...nonFatalSkipStatuses].includes(service.status),
+    );
+
+  result.ok = allServicesSuccessful || partialSuccess;
   result.reason = result.ok
     ? result.skipped
       ? "duplicate_idempotency_key"
-      : "applied"
+      : partialSuccess && !allServicesSuccessful
+        ? "partial_success"
+        : "applied"
     : "service_write_not_applied";
   result.exitCode = result.ok ? 0 : 1;
   result.reportPaths = await writeReport(result, env);

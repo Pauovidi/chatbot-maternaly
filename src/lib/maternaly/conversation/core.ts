@@ -1,6 +1,5 @@
 import type { ConversationRecord, MaternalyNormalizedFlowState } from "@/lib/hotel/conversations/types";
 import { MaternalyCopyRenderer } from "@/lib/maternaly/conversation/copy-renderer";
-import { readMaternalyRuntimeConfig } from "@/lib/maternaly/config/env";
 import {
   getKnowledgeService,
   getKnowledgeServiceByNormalizedKey,
@@ -13,14 +12,14 @@ import {
 } from "@/lib/maternaly/llm/interpreter";
 import {
   GoogleNormalizedSheetsClient,
-  readNormalizedServiceSheet,
   type NormalizedSheetsClient,
   type NormalizedServiceSheetSnapshot,
 } from "@/lib/maternaly/sheets/normalized-client";
+import type { NormalizedAvailableSession } from "@/lib/maternaly/sheets/normalized-availability";
 import {
-  listAvailableSessionsFromSnapshot,
-  type NormalizedAvailableSession,
-} from "@/lib/maternaly/sheets/normalized-availability";
+  getNormalizedServiceAvailability,
+  type NormalizedServiceAvailabilityResult,
+} from "@/lib/maternaly/sheets/normalized-service-availability";
 import {
   applyRegistrationWritePlan,
   buildRegistrationWritePlan,
@@ -87,6 +86,7 @@ interface NormalizedToolResult {
   missingFields: string[];
   plan?: NormalizedRegistrationWritePlan;
   writeResult?: NormalizedRegistrationWriteResult;
+  availability?: NormalizedServiceAvailabilityResult;
   error?: string;
 }
 
@@ -130,6 +130,17 @@ function classifySheetDiagnostics(toolResult: NormalizedToolResult | undefined):
 
   if (toolResult.status === "read_error") {
     diagnostics.add("read_error");
+  }
+
+  if (
+    toolResult.availability?.reason &&
+    !["sessions_available"].includes(toolResult.availability.reason)
+  ) {
+    diagnostics.add(toolResult.availability.reason);
+  }
+
+  if (toolResult.availability?.diagnostics.errorType) {
+    diagnostics.add(toolResult.availability.diagnostics.errorType);
   }
 
   if (parseErrors.some((error) => error.includes("header_not_found"))) {
@@ -391,44 +402,34 @@ export class MaternalyToolExecutor {
     env?: NodeJS.ProcessEnv;
   }): Promise<NormalizedToolResult> {
     const env = input.env ?? process.env;
-    const config = readMaternalyRuntimeConfig(env);
 
-    if (!config.normalizedSheets.enabled || config.normalizedSheets.missingSheetIds.includes(input.serviceKey)) {
+    const availability = await getNormalizedServiceAvailability({
+      serviceKey: input.serviceKey,
+      client: this.client,
+      env,
+    });
+
+    if (!availability.ok) {
+      const status =
+        availability.reason === "missing_sheet_id"
+          ? "not_configured"
+          : availability.reason === "no_sessions_available"
+            ? "sessions_available"
+            : "read_error";
+
       return {
-        status: "not_configured",
+        status,
         serviceKey: input.serviceKey,
-        sessions: [],
+        snapshot: availability.snapshot,
+        sessions: availability.sessions,
         missingFields: [],
+        availability,
+        error: availability.diagnostics.errorType ?? availability.reason,
       };
     }
 
-    let snapshot: NormalizedServiceSheetSnapshot;
-    try {
-      snapshot = await readNormalizedServiceSheet(input.serviceKey, this.client, env);
-    } catch (error) {
-      return {
-        status: "read_error",
-        serviceKey: input.serviceKey,
-        sessions: [],
-        missingFields: [],
-        error: error instanceof Error ? error.message : "sheet_read_failed",
-      };
-    }
-    const parseErrors = Object.values(snapshot.tabs)
-      .filter((tab) => tab.parseError)
-      .map((tab) => `${tab.tab}:${tab.parseError}`);
-    if (parseErrors.length > 0) {
-      return {
-        status: "read_error",
-        serviceKey: input.serviceKey,
-        snapshot,
-        sessions: [],
-        missingFields: [],
-        error: parseErrors.join("|"),
-      };
-    }
-
-    const sessions = listAvailableSessionsFromSnapshot(snapshot);
+    const snapshot = availability.snapshot as NormalizedServiceSheetSnapshot;
+    const sessions = availability.sessions;
     const selectedSession = chooseSession(input.message, input.state, sessions);
     if (!selectedSession) {
       return {
@@ -437,6 +438,7 @@ export class MaternalyToolExecutor {
         snapshot,
         sessions,
         missingFields: [],
+        availability,
       };
     }
 
@@ -454,6 +456,7 @@ export class MaternalyToolExecutor {
         sessions,
         selectedSession,
         missingFields,
+        availability,
       };
     }
 
@@ -485,8 +488,54 @@ export class MaternalyToolExecutor {
       missingFields: [],
       plan,
       writeResult,
+      availability,
     };
   }
+}
+
+function buildAvailabilityCheckedPayload(
+  serviceKey: MaternalyNormalizedServiceKey,
+  toolResult: NormalizedToolResult,
+): Record<string, unknown> {
+  const availability = toolResult.availability;
+  const sessionsCount = availability?.sessions.length ?? toolResult.sessions.length;
+  const reason =
+    availability?.reason ??
+    (toolResult.status === "not_configured"
+      ? "missing_sheet_id"
+      : toolResult.status === "read_error"
+        ? "read_error"
+        : sessionsCount === 0
+          ? "no_sessions_available"
+          : "sessions_available");
+
+  return {
+    route: "whatsapp_core",
+    serviceKey,
+    ok:
+      availability?.ok ??
+      (toolResult.status !== "not_configured" &&
+        toolResult.status !== "read_error" &&
+        sessionsCount > 0),
+    sessionsCount,
+    reason,
+    headersDetected: availability?.diagnostics.headersDetected ?? Boolean(toolResult.snapshot),
+    selectedSource: availability?.diagnostics.selectedSource ?? "normalized_sheets",
+    sheetIdRedacted: availability?.diagnostics.sheetIdRedacted,
+    errorType: availability?.diagnostics.errorType,
+  };
+}
+
+function availabilityFallbackReason(toolResult: NormalizedToolResult): string | undefined {
+  if (toolResult.status === "not_configured" || toolResult.status === "read_error") {
+    return toolResult.availability?.reason ?? toolResult.status;
+  }
+
+  if (toolResult.status === "sessions_available" && toolResult.sessions.length === 0) {
+    return toolResult.availability?.reason ?? "no_sessions_available";
+  }
+
+  return undefined;
 }
 
 export class MaternalyCoreAdapter {
@@ -595,6 +644,26 @@ export class MaternalyCoreAdapter {
         idempotencyKey: toolResult.plan?.idempotencyKey ?? state.idempotencyKey,
         updatedAt: nowIso(),
       };
+      events.push({
+        eventType: "maternaly_availability_checked",
+        payload: buildAvailabilityCheckedPayload(serviceKey, toolResult),
+      });
+      const fallbackReason = availabilityFallbackReason(toolResult);
+      if (fallbackReason) {
+        events.push({
+          eventType: "maternaly_availability_fallback",
+          payload: {
+            route: "whatsapp_core",
+            serviceKey,
+            reason: fallbackReason,
+            sessionsCount: toolResult.sessions.length,
+            headersDetected: toolResult.availability?.diagnostics.headersDetected ?? Boolean(toolResult.snapshot),
+            selectedSource: toolResult.availability?.diagnostics.selectedSource ?? "normalized_sheets",
+            sheetIdRedacted: toolResult.availability?.diagnostics.sheetIdRedacted,
+            errorType: toolResult.availability?.diagnostics.errorType,
+          },
+        });
+      }
       events.push({
         eventType: "maternaly_tool_executed",
         payload: {

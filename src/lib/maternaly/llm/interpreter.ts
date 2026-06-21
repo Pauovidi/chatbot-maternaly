@@ -305,6 +305,13 @@ export class LlmIntentClassifier {
     const email = extractEmail(message);
     const hasContactData = Boolean(fullName || phone || email || peopleCount);
     const clinical = service?.clinicalEscalation && /(dolor|mastitis|urgente|diagn[oó]stico|sangrado|fiebre|malestar)/.test(text);
+    const explicitGeneralInfo = /\b(que es|qué es|info|informaci[oó]n|precio|cu[aá]nto cuesta|cuanto cuesta)\b/.test(text);
+    const serviceOnlyReservationRequest = Boolean(
+      serviceKey &&
+        service?.category === "reservable" &&
+        !explicitGeneralInfo &&
+        text.trim().length <= 80,
+    );
 
     const slots: MaternalyNluSlots = {
       service_id: service?.id,
@@ -350,7 +357,7 @@ export class LlmIntentClassifier {
                   ? "registration_slot_selected"
                   : hasContactData
                     ? "registration_data_provided"
-                    : serviceKey && (wantsAvailability || wantsRegistration)
+                    : serviceKey && (wantsAvailability || wantsRegistration || serviceOnlyReservationRequest)
                       ? "registration_start"
                       : wantsAvailability
                         ? "availability_request"
@@ -369,7 +376,9 @@ export class LlmIntentClassifier {
       time_preference: slots.preferred_time,
       pregnancy_week: pregnancyWeek,
       people_count: peopleCount,
-      needs_availability_lookup: Boolean(serviceKey && (wantsAvailability || wantsRegistration || selectedSession)),
+      needs_availability_lookup: Boolean(
+        serviceKey && (wantsAvailability || wantsRegistration || selectedSession || serviceOnlyReservationRequest),
+      ),
       confidence: service || reset || privacy || handoff ? 0.82 : hasContactData ? 0.65 : 0.45,
       missing_fields: [],
       should_handoff: handoff || clinical === true,

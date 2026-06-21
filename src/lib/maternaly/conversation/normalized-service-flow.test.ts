@@ -28,6 +28,15 @@ describe("normalized Maternaly WhatsApp flow", () => {
     return new FileConversationStore(path.join(tempDir, "conversations.json"));
   }
 
+  function lastPayload(
+    events: Array<{ eventType: string; payload?: unknown }>,
+    eventType: string,
+  ): Record<string, unknown> | undefined {
+    return events
+      .filter((event) => event.eventType === eventType)
+      .at(-1)?.payload as Record<string, unknown> | undefined;
+  }
+
   it("handles Twilio inbound for BLW without hotel copy", async () => {
     const client = new InMemoryNormalizedSheetsClient(createNormalizedWorkbook());
     const result = await handleInboundMaternalyWhatsApp(
@@ -119,6 +128,155 @@ describe("normalized Maternaly WhatsApp flow", () => {
     expect(client.appended).toHaveLength(0);
     expect(result.conversation.maternalyNormalizedFlow?.stage).toBe("write_planned");
     expect(result.conversation.events.map((event) => event.eventType)).toContain("maternaly_tool_executed");
+  });
+
+  it.each([
+    "quiero reservar taller blw",
+    "estoy interesada en reservar en el taller blw",
+    "quiero apuntarme al taller blw",
+    "taller blw",
+  ])("lists real-template BLW availability for '%s'", async (body) => {
+    const client = new InMemoryNormalizedSheetsClient(
+      createRealTemplateWorkbook({ multiSession: true, sessionCapacity: "14" }),
+    );
+
+    const result = await handleInboundMaternalyWhatsApp(
+      {
+        from: `+34600999${body.length}`,
+        body,
+        messageSid: `SM_BLW_PHRASE_${body.length}`,
+      },
+      makeStore(),
+      { normalizedSheetsClient: client, normalizedEnv: normalizedTestEnv() },
+    );
+
+    const reply = result.botReply?.body ?? "";
+    expect(reply).toMatch(/Opciones para Taller BLW/i);
+    expect(reply).toContain("2026-09-25 17:00 Bilbao (14 plazas disponibles)");
+    expect(reply).toContain("2026-09-02 17:00 Erandio (14 plazas disponibles)");
+    expect(reply).not.toMatch(/no puedo validar disponibilidad/i);
+    expect(reply).not.toMatch(/disponibilidad a validar/i);
+
+    const checked = lastPayload(result.conversation.events, "maternaly_availability_checked");
+    expect(checked).toMatchObject({
+      route: "whatsapp_core",
+      serviceKey: "taller_blw",
+      ok: true,
+      reason: "sessions_available",
+      sessionsCount: 2,
+      headersDetected: true,
+      selectedSource: "normalized_sheets",
+      sheetIdRedacted: "[sheet-id]",
+    });
+    expect(result.conversation.events.map((event) => event.eventType)).not.toContain(
+      "maternaly_availability_fallback",
+    );
+  });
+
+  it("keeps BLW availability after reset and then accepts option 1", async () => {
+    const store = makeStore();
+    const client = new InMemoryNormalizedSheetsClient(
+      createRealTemplateWorkbook({ multiSession: true, sessionCapacity: "14" }),
+    );
+    const env = normalizedTestEnv();
+
+    await handleInboundMaternalyWhatsApp(
+      {
+        from: "+34600111901",
+        body: "reiniciar",
+        messageSid: "SM_BLW_RESET_1",
+      },
+      store,
+      { normalizedSheetsClient: client, normalizedEnv: env },
+    );
+
+    const first = await handleInboundMaternalyWhatsApp(
+      {
+        from: "+34600111901",
+        body: "quiero reservar taller blw",
+        messageSid: "SM_BLW_RESET_2",
+      },
+      store,
+      { normalizedSheetsClient: client, normalizedEnv: env },
+    );
+    expect(first.botReply?.body).toMatch(/Opciones para Taller BLW/i);
+    expect(first.botReply?.body).not.toMatch(/no puedo validar disponibilidad/i);
+
+    const second = await handleInboundMaternalyWhatsApp(
+      {
+        from: "+34600111901",
+        body: "1",
+        messageSid: "SM_BLW_RESET_3",
+      },
+      store,
+      { normalizedSheetsClient: client, normalizedEnv: env },
+    );
+    expect(second.botReply?.body).toMatch(/nombre y apellidos/i);
+    expect(second.botReply?.body).toMatch(/email/i);
+    expect(second.conversation.maternalyNormalizedFlow?.selectedSessionId).toBe("sesion_blw_bilbao_20260925");
+  });
+
+  it("reads BLW availability when a Sheet ID is configured even if normalized writes are disabled", async () => {
+    const client = new InMemoryNormalizedSheetsClient(
+      createRealTemplateWorkbook({ multiSession: true, sessionCapacity: "14" }),
+    );
+
+    const result = await handleInboundMaternalyWhatsApp(
+      {
+        from: "+34600111903",
+        body: "quiero reservar taller blw",
+        messageSid: "SM_BLW_READ_ONLY_AVAILABILITY_1",
+      },
+      makeStore(),
+      {
+        normalizedSheetsClient: client,
+        normalizedEnv: normalizedTestEnv({ MATERNALY_NORMALIZED_SHEETS_ENABLED: "false" }),
+      },
+    );
+
+    expect(result.botReply?.body).toMatch(/Opciones para Taller BLW/i);
+    expect(result.botReply?.body).toContain("2026-09-02 17:00 Erandio (14 plazas disponibles)");
+    expect(result.botReply?.body).not.toMatch(/no puedo validar disponibilidad/i);
+    expect(lastPayload(result.conversation.events, "maternaly_availability_checked")).toMatchObject({
+      ok: true,
+      reason: "sessions_available",
+      sessionsCount: 2,
+    });
+  });
+
+  it("emits a fallback event only when BLW has no available sessions", async () => {
+    const workbook = createRealTemplateWorkbook({ multiSession: true, sessionCapacity: "14" });
+    workbook.Sesiones = (workbook.Sesiones as unknown[][]).slice(0, 3);
+    const client = new InMemoryNormalizedSheetsClient(workbook);
+
+    const result = await handleInboundMaternalyWhatsApp(
+      {
+        from: "+34600111902",
+        body: "quiero reservar taller blw",
+        messageSid: "SM_BLW_NO_SESSIONS_1",
+      },
+      makeStore(),
+      { normalizedSheetsClient: client, normalizedEnv: normalizedTestEnv() },
+    );
+
+    expect(result.botReply?.body).toMatch(/no veo sesiones disponibles/i);
+    expect(result.botReply?.body).not.toMatch(/no puedo validar disponibilidad/i);
+    const checked = lastPayload(result.conversation.events, "maternaly_availability_checked");
+    expect(checked).toMatchObject({
+      route: "whatsapp_core",
+      serviceKey: "taller_blw",
+      ok: false,
+      reason: "no_sessions_available",
+      sessionsCount: 0,
+      headersDetected: true,
+    });
+    const fallback = lastPayload(result.conversation.events, "maternaly_availability_fallback");
+    expect(fallback).toMatchObject({
+      route: "whatsapp_core",
+      serviceKey: "taller_blw",
+      reason: "no_sessions_available",
+      sessionsCount: 0,
+    });
   });
 
   it("does not close a BLW request when contact data arrives before a session choice", async () => {
