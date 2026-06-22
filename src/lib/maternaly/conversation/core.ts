@@ -12,6 +12,7 @@ import {
 } from "@/lib/maternaly/llm/interpreter";
 import {
   GoogleNormalizedSheetsClient,
+  readNormalizedServiceSheet,
   type NormalizedSheetsClient,
   type NormalizedServiceSheetSnapshot,
 } from "@/lib/maternaly/sheets/normalized-client";
@@ -460,8 +461,24 @@ export class MaternalyToolExecutor {
       };
     }
 
+    let writeSnapshot: NormalizedServiceSheetSnapshot;
+    try {
+      writeSnapshot = await readNormalizedServiceSheet(input.serviceKey, this.client, env);
+    } catch (error) {
+      return {
+        status: "read_error",
+        serviceKey: input.serviceKey,
+        snapshot,
+        sessions,
+        selectedSession,
+        missingFields: [],
+        availability,
+        error: error instanceof Error ? error.message : "sheet_read_failed",
+      };
+    }
+
     const plan = buildRegistrationWritePlan({
-      snapshot,
+      snapshot: writeSnapshot,
       session: selectedSession,
       draft: {
         serviceKey: input.serviceKey,
@@ -477,12 +494,12 @@ export class MaternalyToolExecutor {
       },
       env,
     });
-    const writeResult = await applyRegistrationWritePlan({ snapshot, client: this.client, plan });
+    const writeResult = await applyRegistrationWritePlan({ snapshot: writeSnapshot, client: this.client, plan });
 
     return {
       status: "write_result",
       serviceKey: input.serviceKey,
-      snapshot,
+      snapshot: writeSnapshot,
       sessions,
       selectedSession,
       missingFields: [],
@@ -523,6 +540,8 @@ function buildAvailabilityCheckedPayload(
     selectedSource: availability?.diagnostics.selectedSource ?? "normalized_sheets",
     sheetIdRedacted: availability?.diagnostics.sheetIdRedacted,
     errorType: availability?.diagnostics.errorType,
+    criticalTabsOk: availability?.diagnostics.criticalTabsOk,
+    nonCriticalParseErrorsCount: availability?.diagnostics.nonCriticalParseErrorsCount,
   };
 }
 
@@ -661,6 +680,8 @@ export class MaternalyCoreAdapter {
             selectedSource: toolResult.availability?.diagnostics.selectedSource ?? "normalized_sheets",
             sheetIdRedacted: toolResult.availability?.diagnostics.sheetIdRedacted,
             errorType: toolResult.availability?.diagnostics.errorType,
+            criticalTabsOk: toolResult.availability?.diagnostics.criticalTabsOk,
+            nonCriticalParseErrorsCount: toolResult.availability?.diagnostics.nonCriticalParseErrorsCount,
           },
         });
       }

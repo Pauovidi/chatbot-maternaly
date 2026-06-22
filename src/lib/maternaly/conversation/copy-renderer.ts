@@ -137,6 +137,13 @@ export class MaternalyCopyRenderer {
       return service ? this.renderServiceInfo(service) : this.renderGeneral();
     }
 
+    if (
+      result.sessions.length > 0 &&
+      ["not_configured", "read_error", "sessions_available"].includes(result.status)
+    ) {
+      return this.renderSessions(result, service);
+    }
+
     if (result.status === "not_configured" || result.status === "read_error") {
       const serviceName = service?.name ?? MATERNALY_NORMALIZED_SERVICES[result.serviceKey].label;
       return `Puedo ayudarte con ${serviceName}, pero ahora no puedo validar disponibilidad automáticamente. Si me dejas nombre, teléfono y preferencia de fecha o sede, lo paso al equipo para revisión.`;

@@ -1,15 +1,23 @@
 import { readMaternalyRuntimeConfig } from "../config/env";
 import {
   GoogleNormalizedSheetsClient,
-  readNormalizedServiceSheet,
   type NormalizedSheetsClient,
   type NormalizedServiceSheetSnapshot,
+  type NormalizedTabSnapshot,
 } from "./normalized-client";
 import {
   listAvailableSessionsFromSnapshot,
   type NormalizedAvailableSession,
 } from "./normalized-availability";
-import { redactSheetId, type MaternalyNormalizedServiceKey } from "./normalized-template";
+import {
+  NORMALIZED_REQUIRED_TABS,
+  getCell,
+  hasColumn,
+  redactSheetId,
+  rowsToObjects,
+  type MaternalyNormalizedServiceKey,
+  type NormalizedRequiredTab,
+} from "./normalized-template";
 
 export type NormalizedServiceAvailabilityReason =
   | "sessions_available"
@@ -21,12 +29,22 @@ export type NormalizedServiceAvailabilityReason =
 export interface NormalizedServiceAvailabilityDiagnostics {
   selectedSource: "normalized_sheets";
   headersDetected: boolean;
+  criticalTabsOk: boolean;
   sheetIdRedacted?: string;
-  errorType?: string;
+  errorType?: string | null;
   parseErrors?: Array<{
     tab: string;
     error: string;
   }>;
+  criticalParseErrors?: Array<{
+    tab: string;
+    error: string;
+  }>;
+  nonCriticalParseErrors?: Array<{
+    tab: string;
+    error: string;
+  }>;
+  nonCriticalParseErrorsCount: number;
   tabs?: Array<{
     name: string;
     headerRowNumber: number;
@@ -59,6 +77,8 @@ export async function getNormalizedServiceAvailability({
   const baseDiagnostics: NormalizedServiceAvailabilityDiagnostics = {
     selectedSource: "normalized_sheets",
     headersDetected: false,
+    criticalTabsOk: false,
+    nonCriticalParseErrorsCount: 0,
     sheetIdRedacted: sheetId ? redactSheetId(sheetId) : undefined,
   };
 
@@ -77,7 +97,11 @@ export async function getNormalizedServiceAvailability({
 
   try {
     const sheetsClient = client ?? new GoogleNormalizedSheetsClient();
-    const snapshot = await readNormalizedServiceSheet(serviceKey, sheetsClient, env);
+    const snapshot = await readNormalizedAvailabilitySnapshot({
+      serviceKey,
+      sheetId,
+      client: sheetsClient,
+    });
     const tabs = Object.values(snapshot.tabs);
     const parseErrors = tabs
       .filter((tab) => tab.parseError)
@@ -85,10 +109,24 @@ export async function getNormalizedServiceAvailability({
         tab: tab.tab,
         error: tab.parseError ?? "parse_error",
       }));
+    const criticalParseErrors = parseErrors.filter((error) => isAvailabilityBlockingTab(error.tab));
+    const nonCriticalParseErrors = parseErrors.filter((error) => !isAvailabilityRelevantTab(error.tab));
+    const directSeatsAvailable = hasDirectAvailableSeats(snapshot);
+    const occupancyParseErrors = parseErrors.filter((error) => error.tab === "Inscripciones");
+    const blockingParseErrors = [
+      ...criticalParseErrors,
+      ...(occupancyParseErrors.length > 0 && !directSeatsAvailable ? occupancyParseErrors : []),
+    ];
+    const occupancyUnavailableWithDirectSeats = occupancyParseErrors.length > 0 && directSeatsAvailable;
     const diagnostics: NormalizedServiceAvailabilityDiagnostics = {
       ...baseDiagnostics,
-      headersDetected: tabs.every((tab) => tab.headerRowIndex >= 0),
+      headersDetected: blockingParseErrors.length === 0,
+      criticalTabsOk: blockingParseErrors.length === 0,
       parseErrors,
+      criticalParseErrors: blockingParseErrors,
+      nonCriticalParseErrors,
+      nonCriticalParseErrorsCount: nonCriticalParseErrors.length,
+      errorType: occupancyUnavailableWithDirectSeats ? "occupancy_unavailable_using_direct_seats" : null,
       tabs: tabs.map((tab) => ({
         name: tab.tab,
         headerRowNumber: tab.headerRowIndex + 1,
@@ -96,7 +134,7 @@ export async function getNormalizedServiceAvailability({
       })),
     };
 
-    if (parseErrors.length > 0) {
+    if (blockingParseErrors.length > 0) {
       return {
         ok: false,
         serviceKey,
@@ -117,7 +155,7 @@ export async function getNormalizedServiceAvailability({
       reason: sessions.length > 0 ? "sessions_available" : "no_sessions_available",
       sessions,
       snapshot,
-      diagnostics,
+      diagnostics: sessions.length > 0 ? diagnostics : { ...diagnostics, errorType: null },
     };
   } catch (error) {
     return {
@@ -127,10 +165,73 @@ export async function getNormalizedServiceAvailability({
       sessions: [],
       diagnostics: {
         ...baseDiagnostics,
+        criticalTabsOk: false,
         errorType: classifyAvailabilityError(error),
       },
     };
   }
+}
+
+async function readNormalizedAvailabilitySnapshot(input: {
+  serviceKey: MaternalyNormalizedServiceKey;
+  sheetId: string;
+  client: NormalizedSheetsClient;
+}): Promise<NormalizedServiceSheetSnapshot> {
+  const tabEntries = await Promise.all(
+    NORMALIZED_REQUIRED_TABS.map(async (tab) => [
+      tab,
+      await readAvailabilityTab(input.client, input.sheetId, tab),
+    ] as const),
+  );
+
+  return {
+    serviceKey: input.serviceKey,
+    sheetId: input.sheetId,
+    tabs: Object.fromEntries(tabEntries) as Record<NormalizedRequiredTab, NormalizedTabSnapshot>,
+  };
+}
+
+async function readAvailabilityTab(
+  client: NormalizedSheetsClient,
+  sheetId: string,
+  tab: NormalizedRequiredTab,
+): Promise<NormalizedTabSnapshot> {
+  try {
+    return {
+      tab,
+      ...rowsToObjects(await client.readTabRows(sheetId, tab), { tab }),
+    };
+  } catch (error) {
+    return emptyTabSnapshot(tab, classifyAvailabilityError(error));
+  }
+}
+
+function emptyTabSnapshot(tab: NormalizedRequiredTab, parseError: string): NormalizedTabSnapshot {
+  return {
+    tab,
+    headers: [],
+    normalizedHeaders: [],
+    headerRowIndex: -1,
+    rows: [],
+    parseError,
+  };
+}
+
+function isAvailabilityBlockingTab(tab: string): boolean {
+  return tab === "Grupos_Ediciones" || tab === "Sesiones";
+}
+
+function isAvailabilityRelevantTab(tab: string): boolean {
+  return isAvailabilityBlockingTab(tab) || tab === "Inscripciones";
+}
+
+function hasDirectAvailableSeats(snapshot: NormalizedServiceSheetSnapshot): boolean {
+  const sessions = snapshot.tabs.Sesiones;
+  return (
+    !sessions.parseError &&
+    hasColumn(sessions.headers, "availableSeats") &&
+    sessions.rows.some((row) => getCell(row, "availableSeats"))
+  );
 }
 
 function classifyAvailabilityError(error: unknown): string {

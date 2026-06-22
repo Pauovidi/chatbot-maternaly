@@ -37,6 +37,11 @@ describe("normalized Maternaly WhatsApp flow", () => {
       .at(-1)?.payload as Record<string, unknown> | undefined;
   }
 
+  function corruptTab(workbook: Record<string, unknown[][]>, tab: string) {
+    workbook[tab] = [[tab], ["fila sin columnas normalizadas"]];
+    return workbook;
+  }
+
   it("handles Twilio inbound for BLW without hotel copy", async () => {
     const client = new InMemoryNormalizedSheetsClient(createNormalizedWorkbook());
     const result = await handleInboundMaternalyWhatsApp(
@@ -242,6 +247,157 @@ describe("normalized Maternaly WhatsApp flow", () => {
       reason: "sessions_available",
       sessionsCount: 2,
     });
+  });
+
+  it.each(["taller blw", "quiero apuntarme al taller blw"])(
+    "lists BLW availability for '%s' even when a non-critical tab has parse errors",
+    async (body) => {
+      const store = makeStore();
+      const client = new InMemoryNormalizedSheetsClient(
+        corruptTab(createRealTemplateWorkbook({ multiSession: true, sessionCapacity: "14" }), "Servicio_Config"),
+      );
+      const env = normalizedTestEnv();
+
+      await handleInboundMaternalyWhatsApp(
+        {
+          from: `+346001129${body.length}`,
+          body: "reiniciar",
+          messageSid: `SM_BLW_NON_CRITICAL_RESET_${body.length}`,
+        },
+        store,
+        { normalizedSheetsClient: client, normalizedEnv: env },
+      );
+
+      const result = await handleInboundMaternalyWhatsApp(
+        {
+          from: `+346001129${body.length}`,
+          body,
+          messageSid: `SM_BLW_NON_CRITICAL_${body.length}`,
+        },
+        store,
+        { normalizedSheetsClient: client, normalizedEnv: env },
+      );
+
+      const reply = result.botReply?.body ?? "";
+      expect(reply).toMatch(/Opciones para Taller BLW/i);
+      expect(reply).toContain("2026-09-02 17:00 Erandio (14 plazas disponibles)");
+      expect(reply).toContain("2026-09-25 17:00 Bilbao (14 plazas disponibles)");
+      expect(reply).not.toMatch(/no puedo validar disponibilidad/i);
+      expect(reply).not.toMatch(/disponibilidad a validar/i);
+      expect(lastPayload(result.conversation.events, "maternaly_availability_checked")).toMatchObject({
+        ok: true,
+        reason: "sessions_available",
+        criticalTabsOk: true,
+        nonCriticalParseErrorsCount: 1,
+        sessionsCount: 2,
+      });
+      expect(result.conversation.events.map((event) => event.eventType)).not.toContain(
+        "maternaly_availability_fallback",
+      );
+    },
+  );
+
+  it("lists BLW availability when Inscripciones fails but Sesiones has direct available seats", async () => {
+    const client = new InMemoryNormalizedSheetsClient(
+      corruptTab(createRealTemplateWorkbook({ multiSession: true, sessionCapacity: "14" }), "Inscripciones"),
+    );
+
+    const result = await handleInboundMaternalyWhatsApp(
+      {
+        from: "+34600111904",
+        body: "quiero reservar taller blw",
+        messageSid: "SM_BLW_OCCUPANCY_UNAVAILABLE_1",
+      },
+      makeStore(),
+      { normalizedSheetsClient: client, normalizedEnv: normalizedTestEnv() },
+    );
+
+    expect(result.botReply?.body).toMatch(/Opciones para Taller BLW/i);
+    expect(result.botReply?.body).toContain("2026-09-02 17:00 Erandio (14 plazas disponibles)");
+    expect(result.botReply?.body).not.toMatch(/no puedo validar disponibilidad|disponibilidad a validar/i);
+    expect(lastPayload(result.conversation.events, "maternaly_availability_checked")).toMatchObject({
+      ok: true,
+      reason: "sessions_available",
+      criticalTabsOk: true,
+      errorType: "occupancy_unavailable_using_direct_seats",
+      sessionsCount: 2,
+    });
+  });
+
+  it("falls back with a clear reason when Sesiones cannot be parsed", async () => {
+    const client = new InMemoryNormalizedSheetsClient(
+      corruptTab(createRealTemplateWorkbook({ multiSession: true, sessionCapacity: "14" }), "Sesiones"),
+    );
+
+    const result = await handleInboundMaternalyWhatsApp(
+      {
+        from: "+34600111905",
+        body: "quiero reservar taller blw",
+        messageSid: "SM_BLW_SESIONES_PARSE_ERROR_1",
+      },
+      makeStore(),
+      { normalizedSheetsClient: client, normalizedEnv: normalizedTestEnv() },
+    );
+
+    expect(result.botReply?.body).toMatch(/no puedo validar disponibilidad/i);
+    const checked = lastPayload(result.conversation.events, "maternaly_availability_checked");
+    expect(checked).toMatchObject({
+      ok: false,
+      reason: "header_not_found",
+      criticalTabsOk: false,
+      sessionsCount: 0,
+    });
+    expect(lastPayload(result.conversation.events, "maternaly_availability_fallback")).toMatchObject({
+      reason: "header_not_found",
+      sessionsCount: 0,
+    });
+  });
+
+  it("does not let a Clientes_Local parse error block listing but blocks the write plan", async () => {
+    const store = makeStore();
+    const client = new InMemoryNormalizedSheetsClient(
+      corruptTab(createRealTemplateWorkbook({ multiSession: true, sessionCapacity: "14" }), "Clientes_Local"),
+    );
+    const env = normalizedTestEnv();
+
+    const first = await handleInboundMaternalyWhatsApp(
+      {
+        from: "+34600111906",
+        body: "quiero reservar taller blw",
+        messageSid: "SM_BLW_CLIENTES_PARSE_1",
+      },
+      store,
+      { normalizedSheetsClient: client, normalizedEnv: env },
+    );
+    expect(first.botReply?.body).toMatch(/Opciones para Taller BLW/i);
+    expect(first.botReply?.body).not.toMatch(/no puedo validar disponibilidad/i);
+
+    await handleInboundMaternalyWhatsApp(
+      {
+        from: "+34600111906",
+        body: "opción 1",
+        messageSid: "SM_BLW_CLIENTES_PARSE_2",
+      },
+      store,
+      { normalizedSheetsClient: client, normalizedEnv: env },
+    );
+
+    const result = await handleInboundMaternalyWhatsApp(
+      {
+        from: "+34600111906",
+        body: "Soy Marta Lopez, telefono +34 600 111 222, email marta@example.test, 1 persona, fecha nacimiento bebé 2025-01-15",
+        messageSid: "SM_BLW_CLIENTES_PARSE_3",
+      },
+      store,
+      { normalizedSheetsClient: client, normalizedEnv: env },
+    );
+
+    expect(result.botReply?.body).toMatch(/No puedo cerrar|revisión/i);
+    expect(result.conversation.mode).toBe("human");
+    expect(client.appended).toHaveLength(0);
+    expect(JSON.stringify(lastPayload(result.conversation.events, "maternaly_tool_executed")?.blockedReasons)).toContain(
+      "missing_required_columns:Clientes_Local",
+    );
   });
 
   it("emits a fallback event only when BLW has no available sessions", async () => {
