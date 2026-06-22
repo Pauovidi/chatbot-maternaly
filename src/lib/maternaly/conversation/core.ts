@@ -91,6 +91,17 @@ interface NormalizedToolResult {
   error?: string;
 }
 
+interface ContextualRegistrationDiagnostics {
+  source: "contextual_reducer";
+  phoneFromInbound: boolean;
+  phoneFromMessage: boolean;
+  fullNameDetected: boolean;
+  emailDetected: boolean;
+  peopleCountDetected: boolean;
+  dateMappedTo?: "babyBirthDate" | "fppOrDueDate";
+  changed: boolean;
+}
+
 function nowIso() {
   return new Date().toISOString();
 }
@@ -114,6 +125,235 @@ function safeInternalError(value: string | undefined): string | undefined {
     .replace(/-----BEGIN[\s\S]*?-----END [^-]+-----/g, "[redacted-private-key]")
     .replace(/[A-Za-z0-9_=-]{64,}/g, "[redacted-token]")
     .slice(0, 240);
+}
+
+export function normalizeInboundWhatsappPhone(value: string | undefined): string | undefined {
+  const raw = value?.replace(/^whatsapp:/i, "").trim();
+  if (!raw) {
+    return undefined;
+  }
+
+  const hasPlus = raw.startsWith("+");
+  const digits = raw.replace(/\D/g, "");
+  if (digits.length < 8 || digits.length > 15) {
+    return undefined;
+  }
+
+  if (digits.startsWith("00") && digits.length > 10) {
+    return `+${digits.slice(2)}`;
+  }
+
+  if (digits.length === 9 && /^[6789]/.test(digits)) {
+    return `+34${digits}`;
+  }
+
+  if (digits.startsWith("34") && digits.length === 11) {
+    return `+${digits}`;
+  }
+
+  if (hasPlus || digits.length >= 10) {
+    return `+${digits}`;
+  }
+
+  return undefined;
+}
+
+function extractMessagePhone(message: string): string | undefined {
+  const match = message.match(/(?:\+?\d[\d\s().-]{6,}\d)/);
+  return normalizeInboundWhatsappPhone(match?.[0]);
+}
+
+function extractMessageEmail(message: string): string | undefined {
+  return message.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i)?.[0]?.trim().toLowerCase();
+}
+
+function hasSyntheticMarker(message: string): boolean {
+  return /\bprueba\b|example\.test|synthetic|test/i.test(message);
+}
+
+function normalizeDateLike(value: string | undefined): string | undefined {
+  const raw = value?.trim();
+  if (!raw) {
+    return undefined;
+  }
+
+  const iso = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  const local = raw.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})$/);
+  const year = iso ? Number(iso[1]) : local ? Number(local[3].length === 2 ? `20${local[3]}` : local[3]) : NaN;
+  const month = iso ? Number(iso[2]) : local ? Number(local[2]) : NaN;
+  const day = iso ? Number(iso[3]) : local ? Number(local[1]) : NaN;
+
+  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) {
+    return undefined;
+  }
+
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (
+    date.getUTCFullYear() !== year ||
+    date.getUTCMonth() !== month - 1 ||
+    date.getUTCDate() !== day
+  ) {
+    return undefined;
+  }
+
+  return `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+function extractDateFromMessage(message: string): string | undefined {
+  return normalizeDateLike(
+    message.match(/\b\d{4}-\d{2}-\d{2}\b/)?.[0] ??
+      message.match(/\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b/)?.[0],
+  );
+}
+
+function isFutureDate(isoDate: string): boolean {
+  const [year, month, day] = isoDate.split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  const now = new Date();
+  const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  return date.getTime() > today.getTime();
+}
+
+function extractContextualFullName(message: string): string | undefined {
+  const explicit = message.match(
+    /\b(?:(?:soy|me llamo|nombre(?:\s+y\s+apellidos)?[:\s]+)\s*)([A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+(?:\s+[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+){1,5})/i,
+  )?.[1];
+  const candidateSource = explicit ?? (() => {
+    const emailIndex = message.search(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
+    const phoneIndex = message.search(/(?:\+?\d[\d\s().-]{6,}\d)/);
+    const dateIndex = message.search(/\b\d{4}-\d{2}-\d{2}\b|\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b/);
+    const commaIndex = message.indexOf(",");
+    const limits = [emailIndex, phoneIndex, dateIndex, commaIndex].filter((index) => index >= 0);
+    const end = limits.length > 0 ? Math.min(...limits) : message.length;
+    return message.slice(0, end);
+  })();
+  const candidate = candidateSource
+    .replace(/^\s*(?:soy|me llamo|nombre(?:\s+y\s+apellidos)?[:\s]+)\s*/i, "")
+    .trim();
+  const normalized = normalize(candidate);
+  if (
+    !candidate ||
+    /^(?:voy|vamos|somos|fecha|fpp|email|correo|tel[eé]fono|telefono|opci[oó]n|persona|pareja|naci[oó]|beb[eé]|hola)\b/.test(normalized)
+  ) {
+    return undefined;
+  }
+
+  const tokens = candidate.match(/[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+/g) ?? [];
+  if (tokens.length < 2 || tokens.length > 6) {
+    return undefined;
+  }
+
+  return tokens.join(" ");
+}
+
+function inferContextualPeopleCount(message: string): number | undefined {
+  const text = normalize(message);
+  if (/\b(?:voy|vamos)\s+en\s+pareja\b|\bsomos\s+dos\b|\b2\s*personas?\b|\bdos\s+personas?\b/.test(text)) {
+    return 2;
+  }
+
+  if (/\b(?:voy|yo)\s+sol[ao]\b|\b1\s*persona\b|\buna\s+persona\b/.test(text)) {
+    return 1;
+  }
+
+  return undefined;
+}
+
+function mergeObservations(...values: Array<string | undefined>): string | undefined {
+  const parts = values
+    .flatMap((value) => (value ?? "").split("|"))
+    .map((value) => value.trim())
+    .filter(Boolean);
+  return parts.length > 0 ? Array.from(new Set(parts)).join(" | ") : undefined;
+}
+
+function extractContextualRegistrationSlots(input: {
+  message: string;
+  previous?: MaternalyNormalizedFlowState;
+  slots: MaternalyNluSlots;
+  serviceKey?: MaternalyNormalizedServiceKey;
+  inboundFrom?: string;
+}): {
+  slots: Partial<MaternalyNormalizedFlowState>;
+  diagnostics: ContextualRegistrationDiagnostics;
+} {
+  const inboundPhone = normalizeInboundWhatsappPhone(input.inboundFrom);
+  const messagePhone = extractMessagePhone(input.message);
+  const email = input.slots.email ?? extractMessageEmail(input.message);
+  const peopleCount = input.slots.people_count ?? inferContextualPeopleCount(input.message);
+  const collectingContact = input.previous?.stage === "collecting_contact";
+  const hasContactSignal = collectingContact || Boolean(email || messagePhone || peopleCount || input.message.includes(","));
+  const fullName = input.slots.full_name ?? (hasContactSignal ? extractContextualFullName(input.message) : undefined);
+  const contextualDate = extractDateFromMessage(input.message);
+  const syntheticContext = hasSyntheticMarker(
+    [input.message, input.previous?.fullName, input.previous?.email, input.previous?.observations]
+      .filter(Boolean)
+      .join(" "),
+  );
+  const contextualSlots: Partial<MaternalyNormalizedFlowState> = {};
+  const phone = inboundPhone ?? messagePhone;
+  const phoneDiscrepancy =
+    Boolean(inboundPhone && messagePhone && inboundPhone !== messagePhone);
+
+  if (fullName && !input.previous?.fullName && !input.slots.full_name) {
+    contextualSlots.fullName = fullName;
+  }
+
+  if (email && !input.previous?.email && !input.slots.email) {
+    contextualSlots.email = email;
+  }
+
+  if (peopleCount && !input.previous?.peopleCount && !input.slots.people_count) {
+    contextualSlots.peopleCount = peopleCount;
+  }
+
+  if (phone && (!input.previous?.phone || inboundPhone)) {
+    contextualSlots.phone = phone;
+  }
+
+  let dateMappedTo: ContextualRegistrationDiagnostics["dateMappedTo"];
+  if (contextualDate && collectingContact && input.serviceKey === "taller_blw" && !input.previous?.babyBirthDate && !input.slots.baby_birth_date) {
+    if (!isFutureDate(contextualDate) || syntheticContext) {
+      contextualSlots.babyBirthDate = contextualDate;
+      dateMappedTo = "babyBirthDate";
+    } else {
+      contextualSlots.observations = mergeObservations(
+        contextualSlots.observations,
+        "fecha_nacimiento_bebe_futura_requiere_aclaracion",
+      );
+    }
+  }
+
+  if (
+    contextualDate &&
+    collectingContact &&
+    input.serviceKey === "charla_embarazo_1_20" &&
+    !input.previous?.fppOrDueDate &&
+    !input.slots.fpp_or_due_date
+  ) {
+    contextualSlots.fppOrDueDate = contextualDate;
+    dateMappedTo = "fppOrDueDate";
+  }
+
+  if (phoneDiscrepancy) {
+    contextualSlots.observations = mergeObservations(
+      contextualSlots.observations,
+      "telefono_mensaje_difiere_de_whatsapp",
+    );
+  }
+
+  const diagnostics: ContextualRegistrationDiagnostics = {
+    source: "contextual_reducer",
+    phoneFromInbound: Boolean(inboundPhone && (contextualSlots.phone === inboundPhone || input.previous?.phone === inboundPhone)),
+    phoneFromMessage: Boolean(messagePhone),
+    fullNameDetected: Boolean(fullName),
+    emailDetected: Boolean(email),
+    peopleCountDetected: Boolean(peopleCount),
+    dateMappedTo,
+    changed: Object.keys(contextualSlots).length > 0,
+  };
+
+  return { slots: contextualSlots, diagnostics };
 }
 
 function classifySheetDiagnostics(toolResult: NormalizedToolResult | undefined): string[] | undefined {
@@ -298,32 +538,56 @@ export class MaternalyStateReducer {
     conversation: ConversationRecord;
     intent: StructuredIntent;
     message: string;
+    inbound?: MaternalyNormalizedInbound;
   }): MaternalyConversationState {
+    return this.reduceWithDiagnostics(input).state;
+  }
+
+  reduceWithDiagnostics(input: {
+    conversation: ConversationRecord;
+    intent: StructuredIntent;
+    message: string;
+    inbound?: MaternalyNormalizedInbound;
+  }): { state: MaternalyConversationState; diagnostics: ContextualRegistrationDiagnostics } {
     const previous = input.conversation.maternalyNormalizedFlow;
     const slots = input.intent.slots;
     const serviceKey = serviceKeyFromSlots(slots, previous);
+    const contextual = extractContextualRegistrationSlots({
+      message: input.message,
+      previous,
+      slots,
+      serviceKey,
+      inboundFrom: input.inbound?.from,
+    });
+    const observations = mergeObservations(
+      previous?.observations,
+      slots.observations,
+      contextual.slots.observations,
+    );
 
-    return {
+    const state = {
       ...(previous ?? { updatedAt: nowIso() }),
       ...definedEntries({
         serviceKey,
-        fullName: slots.full_name ?? previous?.fullName,
-        phone: slots.phone ?? previous?.phone,
-        email: slots.email ?? previous?.email,
-        peopleCount: slots.people_count ?? previous?.peopleCount,
+        fullName: slots.full_name ?? contextual.slots.fullName ?? previous?.fullName,
+        phone: contextual.slots.phone ?? slots.phone ?? previous?.phone,
+        email: slots.email ?? contextual.slots.email ?? previous?.email,
+        peopleCount: slots.people_count ?? contextual.slots.peopleCount ?? previous?.peopleCount,
         partnerName: slots.partner_name ?? previous?.partnerName,
         pregnancyWeek: slots.pregnancy_week ?? previous?.pregnancyWeek,
-        fppOrDueDate: slots.fpp_or_due_date ?? previous?.fppOrDueDate,
-        babyBirthDate: slots.baby_birth_date ?? previous?.babyBirthDate,
+        fppOrDueDate: slots.fpp_or_due_date ?? contextual.slots.fppOrDueDate ?? previous?.fppOrDueDate,
+        babyBirthDate: slots.baby_birth_date ?? contextual.slots.babyBirthDate ?? previous?.babyBirthDate,
         selectedSessionId: slots.selected_session_id ?? previous?.selectedSessionId,
         selectedGroupId: slots.selected_group_id ?? previous?.selectedGroupId,
         location: slots.location ?? previous?.location,
         modality: slots.modality ?? previous?.modality,
-        observations: slots.observations ?? previous?.observations,
+        observations,
       }),
       mode: input.conversation.mode,
       updatedAt: nowIso(),
     };
+
+    return { state, diagnostics: contextual.diagnostics };
   }
 }
 
@@ -572,11 +836,13 @@ export class MaternalyCoreAdapter {
     env?: NodeJS.ProcessEnv;
   }): Promise<MaternalyCoreResult> {
     const intent = await this.interpreter.interpret(input.inbound.text);
-    const state = this.reducer.reduce({
+    const reduced = this.reducer.reduceWithDiagnostics({
       conversation: input.conversation,
       intent,
       message: input.inbound.text,
+      inbound: input.inbound,
     });
+    const state = reduced.state;
     const decision = this.policy.decide({
       conversation: input.conversation,
       intent,
@@ -663,6 +929,21 @@ export class MaternalyCoreAdapter {
         idempotencyKey: toolResult.plan?.idempotencyKey ?? state.idempotencyKey,
         updatedAt: nowIso(),
       };
+      if (reduced.diagnostics.changed || reduced.diagnostics.phoneFromInbound || reduced.diagnostics.phoneFromMessage) {
+        events.push({
+          eventType: "maternaly_registration_slots_enriched",
+          payload: definedEntries({
+            source: reduced.diagnostics.source,
+            phoneFromInbound: reduced.diagnostics.phoneFromInbound,
+            phoneFromMessage: reduced.diagnostics.phoneFromMessage,
+            fullNameDetected: reduced.diagnostics.fullNameDetected,
+            emailDetected: reduced.diagnostics.emailDetected,
+            peopleCountDetected: reduced.diagnostics.peopleCountDetected,
+            dateMappedTo: reduced.diagnostics.dateMappedTo,
+            missingFieldsAfter: toolResult.missingFields,
+          }),
+        });
+      }
       events.push({
         eventType: "maternaly_availability_checked",
         payload: buildAvailabilityCheckedPayload(serviceKey, toolResult),

@@ -42,6 +42,38 @@ describe("normalized Maternaly WhatsApp flow", () => {
     return workbook;
   }
 
+  function withThirdBlwSession(workbook: Record<string, unknown[][]>) {
+    workbook.Grupos_Ediciones.push([
+      "grupo_blw_getxo",
+      "taller_blw",
+      "Taller BLW Getxo",
+      "Getxo",
+      "Presencial",
+      "14",
+      "Activa",
+      "sí",
+      "sí",
+    ]);
+    workbook.Sesiones.push([
+      "sesion_blw_getxo_20261010",
+      "grupo_blw_getxo",
+      "taller_blw",
+      "2026-10-10",
+      "17:00",
+      "20:00",
+      "Getxo",
+      "Presencial",
+      "Activa",
+      "14",
+      "0",
+      "14",
+      "sí",
+      "sí",
+      "",
+    ]);
+    return workbook;
+  }
+
   it("handles Twilio inbound for BLW without hotel copy", async () => {
     const client = new InMemoryNormalizedSheetsClient(createNormalizedWorkbook());
     const result = await handleInboundMaternalyWhatsApp(
@@ -133,6 +165,271 @@ describe("normalized Maternaly WhatsApp flow", () => {
     expect(client.appended).toHaveLength(0);
     expect(result.conversation.maternalyNormalizedFlow?.stage).toBe("write_planned");
     expect(result.conversation.events.map((event) => event.eventType)).toContain("maternaly_tool_executed");
+  });
+
+  it("uses the inbound WhatsApp phone and contextual BLW contact data after option 3", async () => {
+    const store = makeStore();
+    const client = new InMemoryNormalizedSheetsClient(
+      withThirdBlwSession(createRealTemplateWorkbook({ multiSession: true, sessionCapacity: "14" })),
+    );
+    const env = normalizedTestEnv();
+    const from = "whatsapp:+34999000111";
+
+    await handleInboundMaternalyWhatsApp(
+      {
+        from,
+        body: "reiniciar",
+        messageSid: "SM_CONTEXTUAL_BLW_RESET_1",
+      },
+      store,
+      { normalizedSheetsClient: client, normalizedEnv: env },
+    );
+
+    await handleInboundMaternalyWhatsApp(
+      {
+        from,
+        body: "quiero reservar taller blw",
+        messageSid: "SM_CONTEXTUAL_BLW_1",
+      },
+      store,
+      { normalizedSheetsClient: client, normalizedEnv: env },
+    );
+
+    const selected = await handleInboundMaternalyWhatsApp(
+      {
+        from,
+        body: "3",
+        messageSid: "SM_CONTEXTUAL_BLW_2",
+      },
+      store,
+      { normalizedSheetsClient: client, normalizedEnv: env },
+    );
+    expect(selected.conversation.maternalyNormalizedFlow?.selectedSessionId).toBe("sesion_blw_getxo_20261010");
+    expect(selected.botReply?.body).toMatch(/nombre y apellidos|email|fecha de nacimiento/i);
+    expect(selected.botReply?.body).not.toMatch(/tel[eé]fono/i);
+
+    const result = await handleInboundMaternalyWhatsApp(
+      {
+        from,
+        body: "PAU PRUEBAS, prueba.bot@example.test, voy en pareja, fecha 31/12/2026",
+        messageSid: "SM_CONTEXTUAL_BLW_3",
+      },
+      store,
+      { normalizedSheetsClient: client, normalizedEnv: env },
+    );
+
+    const reply = result.botReply?.body ?? "";
+    const state = result.conversation.maternalyNormalizedFlow;
+    expect(reply).toMatch(/solicitud preparada|pendiente de validación/i);
+    expect(reply).not.toMatch(/necesito|nombre y apellidos|fecha de nacimiento|tel[eé]fono/i);
+    expect(reply).not.toMatch(/plaza confirmada/i);
+    expect(state).toMatchObject({
+      stage: "write_planned",
+      phone: "+34999000111",
+      fullName: "PAU PRUEBAS",
+      email: "prueba.bot@example.test",
+      peopleCount: 2,
+      babyBirthDate: "2026-12-31",
+    });
+    expect(client.appended).toHaveLength(0);
+    expect(lastPayload(result.conversation.events, "maternaly_registration_slots_enriched")).toMatchObject({
+      source: "contextual_reducer",
+      phoneFromInbound: true,
+      fullNameDetected: true,
+      emailDetected: true,
+      peopleCountDetected: true,
+      dateMappedTo: "babyBirthDate",
+      missingFieldsAfter: [],
+    });
+  });
+
+  it("keeps the WhatsApp phone as operative contact when the BLW message includes a different phone", async () => {
+    const store = makeStore();
+    const client = new InMemoryNormalizedSheetsClient(
+      createRealTemplateWorkbook({ multiSession: true, sessionCapacity: "14" }),
+    );
+    const env = normalizedTestEnv();
+
+    await handleInboundMaternalyWhatsApp(
+      {
+        from: "whatsapp:+34999000111",
+        body: "quiero reservar taller blw",
+        messageSid: "SM_CONTEXTUAL_BLW_EXPLICIT_1",
+      },
+      store,
+      { normalizedSheetsClient: client, normalizedEnv: env },
+    );
+    await handleInboundMaternalyWhatsApp(
+      {
+        from: "whatsapp:+34999000111",
+        body: "1",
+        messageSid: "SM_CONTEXTUAL_BLW_EXPLICIT_2",
+      },
+      store,
+      { normalizedSheetsClient: client, normalizedEnv: env },
+    );
+
+    const result = await handleInboundMaternalyWhatsApp(
+      {
+        from: "whatsapp:+34999000111",
+        body: "PAU PRUEBAS, 999000222, prueba.bot@example.test, voy en pareja, fecha 31/12/2026",
+        messageSid: "SM_CONTEXTUAL_BLW_EXPLICIT_3",
+      },
+      store,
+      { normalizedSheetsClient: client, normalizedEnv: env },
+    );
+
+    expect(result.botReply?.body).toMatch(/solicitud preparada|pendiente de validación/i);
+    expect(result.botReply?.body).not.toMatch(/nombre y apellidos|fecha de nacimiento|tel[eé]fono|email|pareja/i);
+    expect(result.conversation.maternalyNormalizedFlow?.phone).toBe("+34999000111");
+    expect(result.conversation.maternalyNormalizedFlow?.observations).toContain("telefono_mensaje_difiere_de_whatsapp");
+    expect(lastPayload(result.conversation.events, "maternaly_registration_slots_enriched")).toMatchObject({
+      phoneFromInbound: true,
+      phoneFromMessage: true,
+      missingFieldsAfter: [],
+    });
+  });
+
+  it("does not ask for missing BLW name, phone or baby birth date for comma-separated contextual data", async () => {
+    const store = makeStore();
+    const client = new InMemoryNormalizedSheetsClient(
+      createRealTemplateWorkbook({ multiSession: true, sessionCapacity: "14" }),
+    );
+    const env = normalizedTestEnv();
+
+    await handleInboundMaternalyWhatsApp(
+      {
+        from: "whatsapp:+34999000111",
+        body: "quiero reservar taller blw",
+        messageSid: "SM_CONTEXTUAL_BLW_SCREENSHOT_1",
+      },
+      store,
+      { normalizedSheetsClient: client, normalizedEnv: env },
+    );
+    await handleInboundMaternalyWhatsApp(
+      {
+        from: "whatsapp:+34999000111",
+        body: "1",
+        messageSid: "SM_CONTEXTUAL_BLW_SCREENSHOT_2",
+      },
+      store,
+      { normalizedSheetsClient: client, normalizedEnv: env },
+    );
+
+    const result = await handleInboundMaternalyWhatsApp(
+      {
+        from: "whatsapp:+34999000111",
+        body: "PAU PRUEBAS, 999000111, pau.pruebas@example.test, voy en pareja, fecha 31/12/2026",
+        messageSid: "SM_CONTEXTUAL_BLW_SCREENSHOT_3",
+      },
+      store,
+      { normalizedSheetsClient: client, normalizedEnv: env },
+    );
+
+    const reply = result.botReply?.body ?? "";
+    expect(reply).not.toMatch(/necesito: nombre y apellidos/i);
+    expect(reply).not.toMatch(/fecha de nacimiento del beb[eé]/i);
+    expect(reply).not.toMatch(/tel[eé]fono/i);
+    expect(result.conversation.maternalyNormalizedFlow?.stage).toBe("write_planned");
+  });
+
+  it("maps a standalone date to BLW baby birth date while collecting contact data", async () => {
+    const store = makeStore();
+    const client = new InMemoryNormalizedSheetsClient(
+      createRealTemplateWorkbook({ multiSession: true, sessionCapacity: "14" }),
+    );
+    const env = normalizedTestEnv();
+
+    await handleInboundMaternalyWhatsApp(
+      {
+        from: "whatsapp:+34999000112",
+        body: "quiero reservar taller blw",
+        messageSid: "SM_CONTEXTUAL_BLW_DATE_ONLY_1",
+      },
+      store,
+      { normalizedSheetsClient: client, normalizedEnv: env },
+    );
+    await handleInboundMaternalyWhatsApp(
+      {
+        from: "whatsapp:+34999000112",
+        body: "1",
+        messageSid: "SM_CONTEXTUAL_BLW_DATE_ONLY_2",
+      },
+      store,
+      { normalizedSheetsClient: client, normalizedEnv: env },
+    );
+    const missingDate = await handleInboundMaternalyWhatsApp(
+      {
+        from: "whatsapp:+34999000112",
+        body: "PAU PRUEBAS, prueba.bot@example.test, voy en pareja",
+        messageSid: "SM_CONTEXTUAL_BLW_DATE_ONLY_3",
+      },
+      store,
+      { normalizedSheetsClient: client, normalizedEnv: env },
+    );
+    expect(missingDate.botReply?.body).toMatch(/fecha de nacimiento del beb[eé]/i);
+    expect(missingDate.botReply?.body).not.toMatch(/nombre y apellidos|tel[eé]fono|email|pareja/i);
+
+    const result = await handleInboundMaternalyWhatsApp(
+      {
+        from: "whatsapp:+34999000112",
+        body: "31/12/2026",
+        messageSid: "SM_CONTEXTUAL_BLW_DATE_ONLY_4",
+      },
+      store,
+      { normalizedSheetsClient: client, normalizedEnv: env },
+    );
+    expect(result.botReply?.body).toMatch(/solicitud preparada|pendiente de validación/i);
+    expect(result.conversation.maternalyNormalizedFlow?.babyBirthDate).toBe("2026-12-31");
+    expect(lastPayload(result.conversation.events, "maternaly_registration_slots_enriched")).toMatchObject({
+      dateMappedTo: "babyBirthDate",
+      missingFieldsAfter: [],
+    });
+  });
+
+  it("maps a contextual Charla date to FPP instead of baby birth date", async () => {
+    const store = makeStore();
+    const client = new InMemoryNormalizedSheetsClient(
+      createRealTemplateWorkbook({ serviceKey: "charla_embarazo_1_20", multiSession: true }),
+    );
+    const env = normalizedTestEnv();
+
+    await handleInboundMaternalyWhatsApp(
+      {
+        from: "whatsapp:+34999000113",
+        body: "quiero apuntarme a la charla embarazo",
+        messageSid: "SM_CONTEXTUAL_CHARLA_1",
+      },
+      store,
+      { normalizedSheetsClient: client, normalizedEnv: env },
+    );
+    await handleInboundMaternalyWhatsApp(
+      {
+        from: "whatsapp:+34999000113",
+        body: "opción 1",
+        messageSid: "SM_CONTEXTUAL_CHARLA_2",
+      },
+      store,
+      { normalizedSheetsClient: client, normalizedEnv: env },
+    );
+
+    const result = await handleInboundMaternalyWhatsApp(
+      {
+        from: "whatsapp:+34999000113",
+        body: "LAURA PRUEBAS, charla.prueba@example.test, somos dos, pareja Acompañante Prueba, fecha 31/12/2026",
+        messageSid: "SM_CONTEXTUAL_CHARLA_3",
+      },
+      store,
+      { normalizedSheetsClient: client, normalizedEnv: env },
+    );
+
+    expect(result.botReply?.body).toMatch(/solicitud preparada|pendiente de validación/i);
+    expect(result.conversation.maternalyNormalizedFlow?.fppOrDueDate).toBe("2026-12-31");
+    expect(result.conversation.maternalyNormalizedFlow?.babyBirthDate).toBeUndefined();
+    expect(lastPayload(result.conversation.events, "maternaly_registration_slots_enriched")).toMatchObject({
+      dateMappedTo: "fppOrDueDate",
+      missingFieldsAfter: [],
+    });
   });
 
   it.each([
