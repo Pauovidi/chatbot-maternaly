@@ -274,6 +274,60 @@ describe("normalized Maternaly write plan", () => {
     expect(interactionsRow.requiere_humano).toBe("no");
   });
 
+  it("maps Charla partner name to the real-template pareja_nombre column", async () => {
+    const { snapshot, session } = await buildRealFixture({
+      serviceKey: "charla_embarazo_1_20",
+      visualHeaderRows: true,
+      sessionCapacity: "14",
+    });
+    const plan = buildRegistrationWritePlan({
+      snapshot,
+      session,
+      draft: {
+        serviceKey: "charla_embarazo_1_20",
+        fullName: "PRUEBA BOT CHARLA",
+        phone: "+34999000131",
+        email: "prueba.bot.charla@example.test",
+        peopleCount: 2,
+        fppOrDueDate: "2026-12-31",
+        partnerName: "Tono",
+        notes: "Pareja/acompañante: Tono",
+      },
+      env: normalizedTestEnv(),
+    });
+
+    const registration = plan.operations.find((operation) => operation.tab === "Inscripciones");
+    expect(plan.blocked).toBe(false);
+    expect(registration?.values.pareja_nombre).toBe("Tono");
+  });
+
+  it("keeps Charla write plan unblocked when companion name is pending", async () => {
+    const { snapshot, session } = await buildRealFixture({
+      serviceKey: "charla_embarazo_1_20",
+      visualHeaderRows: true,
+      sessionCapacity: "14",
+    });
+    const plan = buildRegistrationWritePlan({
+      snapshot,
+      session,
+      draft: {
+        serviceKey: "charla_embarazo_1_20",
+        fullName: "PRUEBA BOT CHARLA",
+        phone: "+34999000132",
+        email: "prueba.bot.charla@example.test",
+        peopleCount: 2,
+        fppOrDueDate: "2026-12-31",
+        notes: "Acompañante: pendiente/no indicado",
+      },
+      env: normalizedTestEnv(),
+    });
+
+    const registration = plan.operations.find((operation) => operation.tab === "Inscripciones");
+    expect(plan.blocked).toBe(false);
+    expect(registration?.values.pareja_nombre).toBeUndefined();
+    expect(registration?.values.observaciones).toContain("Acompañante: pendiente/no indicado");
+  });
+
   it("idempotency blocks duplicate person and session", async () => {
     const first = await buildFixture();
     const draft = {

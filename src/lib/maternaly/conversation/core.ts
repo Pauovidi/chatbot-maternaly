@@ -98,6 +98,8 @@ interface ContextualRegistrationDiagnostics {
   fullNameDetected: boolean;
   emailDetected: boolean;
   peopleCountDetected: boolean;
+  partnerNameDetected: boolean;
+  partnerNameSkipped: boolean;
   dateMappedTo?: "babyBirthDate" | "fppOrDueDate";
   changed: boolean;
 }
@@ -259,6 +261,75 @@ function inferContextualPeopleCount(message: string): number | undefined {
   return undefined;
 }
 
+function shouldCollectOptionalPartnerName(input: {
+  previous?: MaternalyNormalizedFlowState;
+  slots: MaternalyNluSlots;
+  serviceKey?: MaternalyNormalizedServiceKey;
+  peopleCount?: number;
+}): boolean {
+  return Boolean(
+    input.serviceKey === "charla_embarazo_1_20" &&
+      !input.previous?.partnerName &&
+      !input.slots.partner_name &&
+      (input.peopleCount ?? input.previous?.peopleCount ?? 0) > 1,
+  );
+}
+
+function isPendingPartnerNameReply(message: string): boolean {
+  const text = normalize(message);
+  return /\b(?:no\s+lo\s+se|luego|pendiente|no\s+hace\s+falta|no\s+tengo\s+nombre|sin\s+nombre|somos\s+dos)\b/.test(text);
+}
+
+function isSessionSelectionReply(message: string, previous?: MaternalyNormalizedFlowState): boolean {
+  if (previous?.stage !== "choosing_session") {
+    return false;
+  }
+
+  const text = normalize(message).trim();
+  return /^(?:opcion\s*)?[1-9]$/.test(text) ||
+    /^(?:la\s+)?(?:primera|segunda|tercera|cuarta|quinta|sexta|septima|octava|novena)$/.test(text);
+}
+
+function normalizePartnerNameCandidate(value: string | undefined): string | undefined {
+  const raw = value
+    ?.replace(/[.,;:!?]+$/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!raw) {
+    return undefined;
+  }
+
+  const tokens = raw.match(/[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+/g) ?? [];
+  const normalized = normalize(tokens.join(" "));
+  if (
+    tokens.length < 1 ||
+    tokens.length > 4 ||
+    /^(?:hola|buenas|ok|vale|si|sí|no|gracias|perfecto|correcto|confirmo|pareja|acompanante|acompañante)$/i.test(normalized)
+  ) {
+    return undefined;
+  }
+
+  return tokens.join(" ");
+}
+
+function extractContextualPartnerName(message: string): string | undefined {
+  const explicit =
+    message.match(
+      /\b(?:mi\s+)?(?:pareja|acompa[nñ]ante)\s+(?:se\s+llama|es)\s+([A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+(?:\s+[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+){0,3})/i,
+    )?.[1] ??
+    message.match(/\bse\s+llama\s+([A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+(?:\s+[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+){0,3})/i)?.[1];
+  const explicitCandidate = normalizePartnerNameCandidate(explicit);
+  if (explicitCandidate) {
+    return explicitCandidate;
+  }
+
+  if (message.includes(",") || extractMessageEmail(message) || extractMessagePhone(message) || extractDateFromMessage(message)) {
+    return undefined;
+  }
+
+  return normalizePartnerNameCandidate(message);
+}
+
 function mergeObservations(...values: Array<string | undefined>): string | undefined {
   const parts = values
     .flatMap((value) => (value ?? "").split("|"))
@@ -281,6 +352,14 @@ function extractContextualRegistrationSlots(input: {
   const messagePhone = extractMessagePhone(input.message);
   const email = input.slots.email ?? extractMessageEmail(input.message);
   const peopleCount = input.slots.people_count ?? inferContextualPeopleCount(input.message);
+  const collectPartnerName = shouldCollectOptionalPartnerName({
+    previous: input.previous,
+    slots: input.slots,
+    serviceKey: input.serviceKey,
+    peopleCount,
+  });
+  const partnerNameSkipped = collectPartnerName && isPendingPartnerNameReply(input.message);
+  const partnerName = collectPartnerName && !partnerNameSkipped ? extractContextualPartnerName(input.message) : undefined;
   const collectingContact = input.previous?.stage === "collecting_contact";
   const hasContactSignal = collectingContact || Boolean(email || messagePhone || peopleCount || input.message.includes(","));
   const fullName = input.slots.full_name ?? (hasContactSignal ? extractContextualFullName(input.message) : undefined);
@@ -305,6 +384,17 @@ function extractContextualRegistrationSlots(input: {
 
   if (peopleCount && !input.previous?.peopleCount && !input.slots.people_count) {
     contextualSlots.peopleCount = peopleCount;
+  }
+
+  if (partnerName) {
+    contextualSlots.partnerName = partnerName;
+  }
+
+  if (partnerNameSkipped) {
+    contextualSlots.observations = mergeObservations(
+      contextualSlots.observations,
+      "acompañante pendiente",
+    );
   }
 
   if (phone && (!input.previous?.phone || inboundPhone)) {
@@ -349,6 +439,8 @@ function extractContextualRegistrationSlots(input: {
     fullNameDetected: Boolean(fullName),
     emailDetected: Boolean(email),
     peopleCountDetected: Boolean(peopleCount),
+    partnerNameDetected: Boolean(partnerName),
+    partnerNameSkipped,
     dateMappedTo,
     changed: Object.keys(contextualSlots).length > 0,
   };
@@ -515,7 +607,6 @@ function requiredFieldsForService(
   const serviceSpecific =
     serviceKey === "charla_embarazo_1_20"
       ? [
-          state.peopleCount && state.peopleCount > 1 && !state.partnerName ? "partnerName" : "",
           !state.fppOrDueDate && !state.pregnancyWeek ? "fppOrDueDate" : "",
         ]
       : [!state.babyBirthDate ? "babyBirthDate" : ""];
@@ -529,6 +620,9 @@ function notesFromState(state: MaternalyNormalizedFlowState) {
     state.fppOrDueDate ? `FPP/fecha relevante: ${state.fppOrDueDate}` : "",
     state.babyBirthDate ? `Fecha nacimiento bebé: ${state.babyBirthDate}` : "",
     state.partnerName ? `Pareja/acompañante: ${state.partnerName}` : "",
+    state.serviceKey === "charla_embarazo_1_20" && state.peopleCount && state.peopleCount > 1 && !state.partnerName
+      ? "Acompañante: pendiente/no indicado"
+      : "",
     state.location ? `Sede/modalidad preferida: ${state.location}` : "",
   ].filter(Boolean).join(" | ");
 }
@@ -551,11 +645,14 @@ export class MaternalyStateReducer {
   }): { state: MaternalyConversationState; diagnostics: ContextualRegistrationDiagnostics } {
     const previous = input.conversation.maternalyNormalizedFlow;
     const slots = input.intent.slots;
+    const registrationSlots = isSessionSelectionReply(input.message, previous)
+      ? { ...slots, people_count: undefined }
+      : slots;
     const serviceKey = serviceKeyFromSlots(slots, previous);
     const contextual = extractContextualRegistrationSlots({
       message: input.message,
       previous,
-      slots,
+      slots: registrationSlots,
       serviceKey,
       inboundFrom: input.inbound?.from,
     });
@@ -569,18 +666,18 @@ export class MaternalyStateReducer {
       ...(previous ?? { updatedAt: nowIso() }),
       ...definedEntries({
         serviceKey,
-        fullName: slots.full_name ?? contextual.slots.fullName ?? previous?.fullName,
-        phone: contextual.slots.phone ?? slots.phone ?? previous?.phone,
-        email: slots.email ?? contextual.slots.email ?? previous?.email,
-        peopleCount: slots.people_count ?? contextual.slots.peopleCount ?? previous?.peopleCount,
-        partnerName: slots.partner_name ?? previous?.partnerName,
-        pregnancyWeek: slots.pregnancy_week ?? previous?.pregnancyWeek,
-        fppOrDueDate: slots.fpp_or_due_date ?? contextual.slots.fppOrDueDate ?? previous?.fppOrDueDate,
-        babyBirthDate: slots.baby_birth_date ?? contextual.slots.babyBirthDate ?? previous?.babyBirthDate,
-        selectedSessionId: slots.selected_session_id ?? previous?.selectedSessionId,
-        selectedGroupId: slots.selected_group_id ?? previous?.selectedGroupId,
-        location: slots.location ?? previous?.location,
-        modality: slots.modality ?? previous?.modality,
+        fullName: registrationSlots.full_name ?? contextual.slots.fullName ?? previous?.fullName,
+        phone: contextual.slots.phone ?? registrationSlots.phone ?? previous?.phone,
+        email: registrationSlots.email ?? contextual.slots.email ?? previous?.email,
+        peopleCount: contextual.slots.peopleCount ?? registrationSlots.people_count ?? previous?.peopleCount,
+        partnerName: registrationSlots.partner_name ?? contextual.slots.partnerName ?? previous?.partnerName,
+        pregnancyWeek: registrationSlots.pregnancy_week ?? previous?.pregnancyWeek,
+        fppOrDueDate: registrationSlots.fpp_or_due_date ?? contextual.slots.fppOrDueDate ?? previous?.fppOrDueDate,
+        babyBirthDate: registrationSlots.baby_birth_date ?? contextual.slots.babyBirthDate ?? previous?.babyBirthDate,
+        selectedSessionId: registrationSlots.selected_session_id ?? previous?.selectedSessionId,
+        selectedGroupId: registrationSlots.selected_group_id ?? previous?.selectedGroupId,
+        location: registrationSlots.location ?? previous?.location,
+        modality: registrationSlots.modality ?? previous?.modality,
         observations,
       }),
       mode: input.conversation.mode,
@@ -939,9 +1036,26 @@ export class MaternalyCoreAdapter {
             fullNameDetected: reduced.diagnostics.fullNameDetected,
             emailDetected: reduced.diagnostics.emailDetected,
             peopleCountDetected: reduced.diagnostics.peopleCountDetected,
+            partnerNameDetected: reduced.diagnostics.partnerNameDetected,
+            partnerNameSkipped: reduced.diagnostics.partnerNameSkipped,
             dateMappedTo: reduced.diagnostics.dateMappedTo,
             missingFieldsAfter: toolResult.missingFields,
           }),
+        });
+      }
+      if (
+        serviceKey === "charla_embarazo_1_20" &&
+        toolResult.status === "write_result" &&
+        (state.peopleCount ?? 0) > 1 &&
+        !state.partnerName
+      ) {
+        events.push({
+          eventType: "maternaly_registration_soft_field_skipped",
+          payload: {
+            serviceKey,
+            field: "partnerName",
+            reason: "optional_not_blocking",
+          },
         });
       }
       events.push({
