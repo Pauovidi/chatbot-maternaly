@@ -1,5 +1,5 @@
 import { readMaternalyRuntimeConfig } from "@/lib/maternaly/config/env";
-import { GoogleSheetsClient } from "@/lib/maternaly/sheets/client";
+import { GoogleSheetsClient, type AppendRowResult } from "@/lib/maternaly/sheets/client";
 import {
   NORMALIZED_REQUIRED_TABS,
   type MaternalyNormalizedServiceKey,
@@ -30,7 +30,7 @@ export interface NormalizedSheetsClient {
     sheetId: string,
     tabTitle: string,
     values: Array<string | number | undefined>,
-  ): Promise<{ updatedRange?: string; updatedRows?: number }>;
+  ): Promise<AppendRowResult>;
 }
 
 export class GoogleNormalizedSheetsClient implements NormalizedSheetsClient {
@@ -44,7 +44,7 @@ export class GoogleNormalizedSheetsClient implements NormalizedSheetsClient {
     sheetId: string,
     tabTitle: string,
     values: Array<string | number | undefined>,
-  ): Promise<{ updatedRange?: string; updatedRows?: number }> {
+  ): Promise<AppendRowResult> {
     return this.client.appendRow(sheetId, tabTitle, values);
   }
 }

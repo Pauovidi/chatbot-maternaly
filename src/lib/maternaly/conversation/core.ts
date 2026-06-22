@@ -985,6 +985,9 @@ export class MaternalyCoreAdapter {
                 .map((tab) => ({ tab: tab.tab, error: tab.parseError }))
             : undefined,
           updatedRanges: toolResult.writeResult?.updatedRanges,
+          formattedRanges: toolResult.writeResult?.formattedRanges,
+          formatApplied: toolResult.writeResult?.formatApplied,
+          formatWarnings: toolResult.writeResult?.formatWarnings,
         },
       });
     }

@@ -92,6 +92,9 @@ async function writeSynthetic(serviceKey: MaternalyNormalizedServiceKey) {
       .filter((operation) => operation.operation === "append")
       .map((operation) => operation.tab),
     updatedRanges: result.updatedRanges,
+    formattedRanges: result.formattedRanges,
+    formatApplied: result.formatApplied,
+    formatWarnings: result.formatWarnings,
   };
 }
 

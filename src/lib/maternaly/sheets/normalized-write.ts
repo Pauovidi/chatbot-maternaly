@@ -57,6 +57,9 @@ export interface NormalizedRegistrationWriteResult {
   blockedReason?: string;
   plan: NormalizedRegistrationWritePlan;
   updatedRanges: string[];
+  formattedRanges: string[];
+  formatApplied: boolean;
+  formatWarnings: string[];
 }
 
 function buildIdempotencyKey(input: {
@@ -461,6 +464,9 @@ export async function applyRegistrationWritePlan(input: {
       blockedReason: input.plan.blockedReasons.join(" | ") || undefined,
       plan: input.plan,
       updatedRanges: [],
+      formattedRanges: [],
+      formatApplied: false,
+      formatWarnings: [],
     };
   }
 
@@ -472,10 +478,15 @@ export async function applyRegistrationWritePlan(input: {
       blockedReason: input.plan.blockedReasons.join(" | ") || "live_write_not_allowed",
       plan: input.plan,
       updatedRanges: [],
+      formattedRanges: [],
+      formatApplied: false,
+      formatWarnings: [],
     };
   }
 
   const updatedRanges: string[] = [];
+  const formattedRanges: string[] = [];
+  const formatWarnings: string[] = [];
   for (const operation of input.plan.operations) {
     if (operation.operation !== "append") {
       continue;
@@ -490,6 +501,12 @@ export async function applyRegistrationWritePlan(input: {
     if (result.updatedRange) {
       updatedRanges.push(result.updatedRange);
     }
+    if (result.formattedRange) {
+      formattedRanges.push(result.formattedRange);
+    }
+    if (result.formatWarning) {
+      formatWarnings.push(`${operation.tab}:${result.formatWarning}`);
+    }
   }
 
   return {
@@ -498,5 +515,8 @@ export async function applyRegistrationWritePlan(input: {
     mode: "live",
     plan: input.plan,
     updatedRanges,
+    formattedRanges,
+    formatApplied: updatedRanges.length > 0 && formattedRanges.length === updatedRanges.length,
+    formatWarnings,
   };
 }

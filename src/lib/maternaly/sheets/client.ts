@@ -17,6 +17,123 @@ export interface SpreadsheetProfile {
   readMethod: "service_account" | "public_csv";
 }
 
+export interface AppendRowResult {
+  updatedRange?: string;
+  updatedRows?: number;
+  formattedRange?: string;
+  formatApplied?: boolean;
+  formatWarning?: string;
+}
+
+interface ParsedA1Range {
+  sheetTitle: string;
+  startRowIndex: number;
+  endRowIndex: number;
+  startColumnIndex: number;
+  endColumnIndex: number;
+}
+
+function columnToIndex(column: string): number {
+  return column
+    .toUpperCase()
+    .split("")
+    .reduce((total, char) => total * 26 + char.charCodeAt(0) - 64, 0) - 1;
+}
+
+export function parseUpdatedA1Range(updatedRange: string): ParsedA1Range {
+  const match = updatedRange.match(/^(?:'((?:''|[^'])+)'|([^!]+))!([A-Z]+)(\d+):([A-Z]+)(\d+)$/i);
+  if (!match) {
+    throw new Error("invalid_updated_range");
+  }
+
+  const sheetTitle = (match[1] ?? match[2] ?? "").replace(/''/g, "'");
+  const startRowNumber = Number.parseInt(match[4], 10);
+  const endRowNumber = Number.parseInt(match[6], 10);
+  if (!sheetTitle || startRowNumber <= 1 || endRowNumber <= 1) {
+    throw new Error("format_skipped_header_or_invalid_range");
+  }
+
+  return {
+    sheetTitle,
+    startRowIndex: startRowNumber - 1,
+    endRowIndex: endRowNumber,
+    startColumnIndex: columnToIndex(match[3]),
+    endColumnIndex: columnToIndex(match[5]) + 1,
+  };
+}
+
+export function buildVisibleTextFormatRequest(
+  sheetId: number,
+  range: Omit<ParsedA1Range, "sheetTitle">,
+): sheets_v4.Schema$Request {
+  return {
+    repeatCell: {
+      range: {
+        sheetId,
+        startRowIndex: range.startRowIndex,
+        endRowIndex: range.endRowIndex,
+        startColumnIndex: range.startColumnIndex,
+        endColumnIndex: range.endColumnIndex,
+      },
+      cell: {
+        userEnteredFormat: {
+          textFormat: {
+            foregroundColor: {
+              red: 0,
+              green: 0,
+              blue: 0,
+            },
+          },
+        },
+      },
+      fields: "userEnteredFormat.textFormat.foregroundColor",
+    },
+  };
+}
+
+function safeFormatWarning(error: unknown, spreadsheetId: string): string {
+  const message = error instanceof Error ? error.message : String(error ?? "unknown_format_error");
+  return message.split(spreadsheetId).join("[sheet-id]").slice(0, 240);
+}
+
+export async function applyVisibleAppendFormat(input: {
+  client: sheets_v4.Sheets;
+  spreadsheetId: string;
+  updatedRange: string;
+}): Promise<{ formattedRange: string; formatApplied: true }> {
+  const parsed = parseUpdatedA1Range(input.updatedRange);
+  const profile = await input.client.spreadsheets.get({
+    spreadsheetId: input.spreadsheetId,
+    includeGridData: false,
+    fields: "sheets.properties(sheetId,title)",
+  });
+  const sheetId = profile.data.sheets?.find(
+    (sheet) => sheet.properties?.title === parsed.sheetTitle,
+  )?.properties?.sheetId;
+  if (sheetId === undefined || sheetId === null) {
+    throw new Error("sheet_title_not_found_for_format");
+  }
+
+  await input.client.spreadsheets.batchUpdate({
+    spreadsheetId: input.spreadsheetId,
+    requestBody: {
+      requests: [
+        buildVisibleTextFormatRequest(sheetId, {
+          startRowIndex: parsed.startRowIndex,
+          endRowIndex: parsed.endRowIndex,
+          startColumnIndex: parsed.startColumnIndex,
+          endColumnIndex: parsed.endColumnIndex,
+        }),
+      ],
+    },
+  });
+
+  return {
+    formattedRange: input.updatedRange,
+    formatApplied: true,
+  };
+}
+
 export class GoogleSheetsClient {
   private clientPromise: Promise<sheets_v4.Sheets> | null = null;
 
@@ -117,7 +234,7 @@ export class GoogleSheetsClient {
     spreadsheetId: string,
     tabTitle: string,
     values: Array<string | number | undefined>,
-  ): Promise<{ updatedRange?: string; updatedRows?: number }> {
+  ): Promise<AppendRowResult> {
     const client = await this.getClient();
     const escaped = tabTitle.replace(/'/g, "''");
     const response = await client.spreadsheets.values.append({
@@ -130,10 +247,24 @@ export class GoogleSheetsClient {
       },
     });
 
-    return {
-      updatedRange: response.data.updates?.updatedRange ?? undefined,
+    const updatedRange = response.data.updates?.updatedRange ?? undefined;
+    const result: AppendRowResult = {
+      updatedRange,
       updatedRows: response.data.updates?.updatedRows ?? undefined,
+      formatApplied: false,
     };
+
+    if (updatedRange) {
+      try {
+        const format = await applyVisibleAppendFormat({ client, spreadsheetId, updatedRange });
+        result.formattedRange = format.formattedRange;
+        result.formatApplied = format.formatApplied;
+      } catch (error) {
+        result.formatWarning = safeFormatWarning(error, spreadsheetId);
+      }
+    }
+
+    return result;
   }
 }
 

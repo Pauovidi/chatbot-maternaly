@@ -195,8 +195,12 @@ export class InMemoryNormalizedSheetsClient implements NormalizedSheetsClient {
     tabTitle: string;
     values: Array<string | number | undefined>;
   }> = [];
+  readonly formattedRanges: string[] = [];
 
-  constructor(private readonly workbook: Record<string, unknown[][]>) {}
+  constructor(
+    private readonly workbook: Record<string, unknown[][]>,
+    private readonly options: { failFormatting?: boolean; disableFormatting?: boolean } = {},
+  ) {}
 
   async readTabRows(_sheetId: string, tabTitle: string): Promise<unknown[][]> {
     const rows = this.workbook[tabTitle];
@@ -211,12 +215,34 @@ export class InMemoryNormalizedSheetsClient implements NormalizedSheetsClient {
     sheetId: string,
     tabTitle: string,
     values: Array<string | number | undefined>,
-  ): Promise<{ updatedRange?: string; updatedRows?: number }> {
+  ): Promise<{
+    updatedRange?: string;
+    updatedRows?: number;
+    formattedRange?: string;
+    formatApplied?: boolean;
+    formatWarning?: string;
+  }> {
     this.appended.push({ sheetId, tabTitle, values });
     this.workbook[tabTitle]?.push(values);
+    const updatedRange = `${tabTitle}!A${this.workbook[tabTitle]?.length ?? 1}:Z${this.workbook[tabTitle]?.length ?? 1}`;
+    if (this.options.failFormatting) {
+      return {
+        updatedRange,
+        updatedRows: 1,
+        formatApplied: false,
+        formatWarning: "synthetic_format_failure",
+      };
+    }
+
+    if (!this.options.disableFormatting) {
+      this.formattedRanges.push(updatedRange);
+    }
+
     return {
-      updatedRange: `${tabTitle}!A${this.workbook[tabTitle]?.length ?? 1}:Z${this.workbook[tabTitle]?.length ?? 1}`,
+      updatedRange,
       updatedRows: 1,
+      formattedRange: this.options.disableFormatting ? undefined : updatedRange,
+      formatApplied: !this.options.disableFormatting,
     };
   }
 }

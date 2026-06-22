@@ -7,8 +7,11 @@ import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
 import {
   TAB_REQUIRED_COLUMNS,
+  applyVisibleAppendFormat,
   buildMarkdownReport,
+  buildVisibleTextFormatRequest,
   detectHeaderRow,
+  parseUpdatedA1Range,
   redactSheetId,
   rowsToObjects,
   runLiveWriteTest,
@@ -164,18 +167,30 @@ function fakeServiceWorkbook(serviceKey: "charla_embarazo_1_20" | "taller_blw", 
   };
 }
 
-function fakeSheets(workbooks: Record<string, Record<string, unknown[][]>>) {
+function fakeSheets(
+  workbooks: Record<string, Record<string, unknown[][]>>,
+  options: { failFormatting?: boolean } = {},
+) {
   const tabFromRange = (range: string) => range.match(/^'((?:''|[^'])+)'!/)?.[1].replace(/''/g, "'");
+  const formatRequests: unknown[] = [];
 
   return {
+    formatRequests,
     spreadsheets: {
       get: async ({ spreadsheetId }: { spreadsheetId: string }) => ({
         data: {
-          sheets: Object.keys(workbooks[spreadsheetId] ?? {}).map((title) => ({
-            properties: { title },
+          sheets: Object.keys(workbooks[spreadsheetId] ?? {}).map((title, index) => ({
+            properties: { title, sheetId: index + 100 },
           })),
         },
       }),
+      batchUpdate: async (request: unknown) => {
+        if (options.failFormatting) {
+          throw new Error("synthetic_format_failure");
+        }
+        formatRequests.push(request);
+        return { data: {} };
+      },
       values: {
         get: async ({ spreadsheetId, range }: { spreadsheetId: string; range: string }) => ({
           data: {
@@ -372,6 +387,46 @@ describe("maternaly live write Node script", () => {
     });
   });
 
+  it("parses and formats an appended row range with black visible text", async () => {
+    expect(parseUpdatedA1Range("Clientes_Local!A5:P5")).toMatchObject({
+      sheetTitle: "Clientes_Local",
+      startRowIndex: 4,
+      endRowIndex: 5,
+      startColumnIndex: 0,
+      endColumnIndex: 16,
+    });
+
+    const sheets = fakeSheets({
+      sheet_blw_synthetic: fakeServiceWorkbook("taller_blw", true),
+    });
+    await expect(
+      applyVisibleAppendFormat({
+        sheets,
+        sheetId: "sheet_blw_synthetic",
+        updatedRange: "Clientes_Local!A5:P5",
+      }),
+    ).resolves.toEqual({
+      formattedRange: "Clientes_Local!A5:P5",
+      formatApplied: true,
+    });
+
+    expect(sheets.formatRequests).toEqual([
+      {
+        spreadsheetId: "sheet_blw_synthetic",
+        requestBody: {
+          requests: [
+            buildVisibleTextFormatRequest(100, {
+              startRowIndex: 4,
+              endRowIndex: 5,
+              startColumnIndex: 0,
+              endColumnIndex: 16,
+            }),
+          ],
+        },
+      },
+    ]);
+  });
+
   it("does not treat visual title rows as headers in the Node parser", () => {
     const detection = detectHeaderRow(
       [
@@ -418,23 +473,66 @@ describe("maternaly live write Node script", () => {
     const reportDir = await mkdtemp(path.join(tmpdir(), "maternaly-live-write-partial-"));
 
     try {
+      const sheets = fakeSheets({
+        sheet_charla_synthetic: fakeServiceWorkbook("charla_embarazo_1_20", false),
+        sheet_blw_synthetic: fakeServiceWorkbook("taller_blw", true),
+      });
       const result = await runLiveWriteTest({
         env: liveEnv({ MATERNALY_LIVE_WRITE_TEST_REPORT_DIR: reportDir }),
         now: new Date("2026-06-21T00:00:00.000Z"),
-        sheets: fakeSheets({
-          sheet_charla_synthetic: fakeServiceWorkbook("charla_embarazo_1_20", false),
-          sheet_blw_synthetic: fakeServiceWorkbook("taller_blw", true),
-        }),
+        sheets,
       });
 
       expect(result.ok).toBe(true);
       expect(result.reason).toBe("partial_success");
       expect(result.exitCode).toBe(0);
       expect(result.appendApplied).toBe(3);
+      expect(result.formattedRanges).toEqual([
+        "Clientes_Local!A2:AZ2",
+        "Inscripciones!A2:AZ2",
+        "Interacciones_Chatbot!A2:AZ2",
+      ]);
+      expect(result.formatApplied).toBe(true);
+      expect(result.formatWarnings).toEqual([]);
       expect(result.services.map((service) => [service.serviceKey, service.status])).toEqual([
         ["charla_embarazo_1_20", "skipped_no_available_session"],
         ["taller_blw", "applied"],
       ]);
+      expect(sheets.formatRequests).toHaveLength(3);
+      expect(JSON.stringify(sheets.formatRequests)).toContain('"foregroundColor":{"red":0,"green":0,"blue":0}');
+    } finally {
+      await rm(reportDir, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps live-write applied when row formatting fails after append", async () => {
+    const reportDir = await mkdtemp(path.join(tmpdir(), "maternaly-live-write-format-warning-"));
+
+    try {
+      const result = await runLiveWriteTest({
+        env: liveEnv({ MATERNALY_LIVE_WRITE_TEST_REPORT_DIR: reportDir }),
+        now: new Date("2026-06-21T00:00:00.000Z"),
+        sheets: fakeSheets({
+          sheet_charla_synthetic: fakeServiceWorkbook("charla_embarazo_1_20", false),
+          sheet_blw_synthetic: fakeServiceWorkbook("taller_blw", true),
+        }, { failFormatting: true }),
+      });
+
+      expect(result.ok).toBe(true);
+      expect(result.reason).toBe("partial_success");
+      expect(result.appendApplied).toBe(3);
+      expect(result.formattedRanges).toEqual([]);
+      expect(result.formatApplied).toBe(false);
+      expect(result.formatWarnings).toEqual([
+        "Clientes_Local:synthetic_format_failure",
+        "Inscripciones:synthetic_format_failure",
+        "Interacciones_Chatbot:synthetic_format_failure",
+      ]);
+      expect(result.services.find((service) => service.serviceKey === "taller_blw")).toMatchObject({
+        status: "applied",
+        appendApplied: 3,
+        formatApplied: false,
+      });
     } finally {
       await rm(reportDir, { recursive: true, force: true });
     }

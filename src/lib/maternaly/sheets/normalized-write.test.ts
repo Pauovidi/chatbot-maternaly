@@ -95,6 +95,9 @@ describe("normalized Maternaly write plan", () => {
 
     expect(result.ok).toBe(true);
     expect(result.applied).toBe(false);
+    expect(result.formattedRanges).toEqual([]);
+    expect(result.formatApplied).toBe(false);
+    expect(result.formatWarnings).toEqual([]);
     expect(client.appended).toHaveLength(0);
   });
 
@@ -141,10 +144,57 @@ describe("normalized Maternaly write plan", () => {
 
     expect(result.ok).toBe(true);
     expect(result.applied).toBe(true);
+    expect(result.formattedRanges).toEqual([
+      "Clientes_Local!A2:Z2",
+      "Inscripciones!A2:Z2",
+      "Interacciones_Chatbot!A2:Z2",
+    ]);
+    expect(result.formatApplied).toBe(true);
+    expect(result.formatWarnings).toEqual([]);
     expect(client.appended.map((item) => item.tabTitle)).toEqual([
       "Clientes_Local",
       "Inscripciones",
       "Interacciones_Chatbot",
+    ]);
+  });
+
+  it("keeps live append success when visible formatting returns a warning", async () => {
+    const client = new InMemoryNormalizedSheetsClient(createNormalizedWorkbook(), {
+      failFormatting: true,
+    });
+    const snapshot = await readNormalizedServiceSheet("taller_blw", client, normalizedTestEnv());
+    const session = listAvailableSessionsFromSnapshot(snapshot)[0];
+    if (!session) {
+      throw new Error("missing test session");
+    }
+    const plan = buildRegistrationWritePlan({
+      snapshot,
+      session,
+      draft: {
+        serviceKey: "taller_blw",
+        fullName: "Marta Lopez",
+        phone: "+34600111222",
+        email: "marta@example.test",
+        peopleCount: 1,
+      },
+      env: normalizedTestEnv({
+        MATERNALY_NORMALIZED_SHEETS_WRITE_MODE: "live",
+        GOOGLE_SHEETS_ACCESS_MODE: "live",
+        BOT_SHEETS_LIVE_WRITE_ENABLED: "true",
+      }),
+    });
+
+    const result = await applyRegistrationWritePlan({ snapshot, client, plan });
+
+    expect(result.ok).toBe(true);
+    expect(result.applied).toBe(true);
+    expect(result.updatedRanges).toHaveLength(3);
+    expect(result.formattedRanges).toEqual([]);
+    expect(result.formatApplied).toBe(false);
+    expect(result.formatWarnings).toEqual([
+      "Clientes_Local:synthetic_format_failure",
+      "Inscripciones:synthetic_format_failure",
+      "Interacciones_Chatbot:synthetic_format_failure",
     ]);
   });
 
@@ -178,6 +228,12 @@ describe("normalized Maternaly write plan", () => {
     const result = await applyRegistrationWritePlan({ snapshot, client, plan });
     expect(result.ok).toBe(true);
     expect(result.applied).toBe(true);
+    expect(result.formatApplied).toBe(true);
+    expect(result.formattedRanges).toEqual([
+      "Clientes_Local!A4:Z4",
+      "Inscripciones!A4:Z4",
+      "Interacciones_Chatbot!A4:Z4",
+    ]);
 
     const clientsRow = appendedRowByHeader(
       snapshot.tabs.Clientes_Local.headers,

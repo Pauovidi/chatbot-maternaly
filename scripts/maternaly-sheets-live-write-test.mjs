@@ -716,6 +716,95 @@ function escapeSheetName(tabTitle) {
   return tabTitle.replace(/'/g, "''");
 }
 
+function columnToIndex(column) {
+  return column
+    .toUpperCase()
+    .split("")
+    .reduce((total, char) => total * 26 + char.charCodeAt(0) - 64, 0) - 1;
+}
+
+export function parseUpdatedA1Range(updatedRange) {
+  const match = String(updatedRange ?? "").match(/^(?:'((?:''|[^'])+)'|([^!]+))!([A-Z]+)(\d+):([A-Z]+)(\d+)$/i);
+  if (!match) {
+    throw new Error("invalid_updated_range");
+  }
+
+  const sheetTitle = (match[1] ?? match[2] ?? "").replace(/''/g, "'");
+  const startRowNumber = Number.parseInt(match[4], 10);
+  const endRowNumber = Number.parseInt(match[6], 10);
+  if (!sheetTitle || startRowNumber <= 1 || endRowNumber <= 1) {
+    throw new Error("format_skipped_header_or_invalid_range");
+  }
+
+  return {
+    sheetTitle,
+    startRowIndex: startRowNumber - 1,
+    endRowIndex: endRowNumber,
+    startColumnIndex: columnToIndex(match[3]),
+    endColumnIndex: columnToIndex(match[5]) + 1,
+  };
+}
+
+export function buildVisibleTextFormatRequest(sheetId, range) {
+  return {
+    repeatCell: {
+      range: {
+        sheetId,
+        startRowIndex: range.startRowIndex,
+        endRowIndex: range.endRowIndex,
+        startColumnIndex: range.startColumnIndex,
+        endColumnIndex: range.endColumnIndex,
+      },
+      cell: {
+        userEnteredFormat: {
+          textFormat: {
+            foregroundColor: {
+              red: 0,
+              green: 0,
+              blue: 0,
+            },
+          },
+        },
+      },
+      fields: "userEnteredFormat.textFormat.foregroundColor",
+    },
+  };
+}
+
+export async function applyVisibleAppendFormat({ sheets, sheetId, updatedRange }) {
+  const parsed = parseUpdatedA1Range(updatedRange);
+  const response = await sheets.spreadsheets.get({
+    spreadsheetId: sheetId,
+    includeGridData: false,
+    fields: "sheets.properties(sheetId,title)",
+  });
+  const numericSheetId = response.data.sheets?.find(
+    (sheet) => sheet.properties?.title === parsed.sheetTitle,
+  )?.properties?.sheetId;
+  if (numericSheetId === undefined || numericSheetId === null) {
+    throw new Error("sheet_title_not_found_for_format");
+  }
+
+  await sheets.spreadsheets.batchUpdate({
+    spreadsheetId: sheetId,
+    requestBody: {
+      requests: [
+        buildVisibleTextFormatRequest(numericSheetId, {
+          startRowIndex: parsed.startRowIndex,
+          endRowIndex: parsed.endRowIndex,
+          startColumnIndex: parsed.startColumnIndex,
+          endColumnIndex: parsed.endColumnIndex,
+        }),
+      ],
+    },
+  });
+
+  return {
+    formattedRange: updatedRange,
+    formatApplied: true,
+  };
+}
+
 async function profileTabs(sheets, sheetId) {
   const response = await sheets.spreadsheets.get({
     spreadsheetId: sheetId,
@@ -739,7 +828,7 @@ async function readTab(sheets, sheetId, tabTitle) {
   return rowsToObjects(response.data.values ?? [], tabTitle);
 }
 
-async function appendTabRow(sheets, sheetId, tabTitle, headers, values) {
+async function appendTabRow(sheets, sheetId, tabTitle, headers, values, env) {
   const response = await sheets.spreadsheets.values.append({
     spreadsheetId: sheetId,
     range: `'${escapeSheetName(tabTitle)}'!A:AZ`,
@@ -750,10 +839,24 @@ async function appendTabRow(sheets, sheetId, tabTitle, headers, values) {
     },
   });
 
-  return {
-    updatedRange: response.data.updates?.updatedRange,
+  const updatedRange = response.data.updates?.updatedRange;
+  const result = {
+    updatedRange,
     updatedRows: response.data.updates?.updatedRows ?? 0,
+    formatApplied: false,
   };
+
+  if (updatedRange) {
+    try {
+      const format = await applyVisibleAppendFormat({ sheets, sheetId, updatedRange });
+      result.formattedRange = format.formattedRange;
+      result.formatApplied = format.formatApplied;
+    } catch (error) {
+      result.formatWarning = sanitizeErrorMessage(error, env);
+    }
+  }
+
+  return result;
 }
 
 function knownSensitiveValues(env) {
@@ -793,6 +896,9 @@ async function processService({ sheets, service, idempotencyKey, createdAt, env 
     appendAttempts: 0,
     appendApplied: 0,
     updatedRanges: [],
+    formattedRanges: [],
+    formatApplied: false,
+    formatWarnings: [],
     missingTabs: [],
     missingColumns: [],
     duplicateTabs: [],
@@ -881,19 +987,31 @@ async function processService({ sheets, service, idempotencyKey, createdAt, env 
         tab,
         tabs[tab].headers,
         valuesByTab[tab],
+        env,
       );
       result.appendApplied += appendResult.updatedRows > 0 ? 1 : 0;
       if (appendResult.updatedRange) {
         result.updatedRanges.push(appendResult.updatedRange);
+      }
+      if (appendResult.formattedRange) {
+        result.formattedRanges.push(appendResult.formattedRange);
+      }
+      if (appendResult.formatWarning) {
+        result.formatWarnings.push(`${tab}:${appendResult.formatWarning}`);
       }
       result.tabResults.push({
         tab,
         operation: "append",
         updatedRows: appendResult.updatedRows,
         updatedRange: appendResult.updatedRange,
+        formattedRange: appendResult.formattedRange,
+        formatApplied: appendResult.formatApplied,
+        formatWarning: appendResult.formatWarning,
       });
     }
 
+    result.formatApplied =
+      result.updatedRanges.length > 0 && result.formattedRanges.length === result.updatedRanges.length;
     result.status = result.appendApplied === WRITE_TABS.length ? "applied" : "partial_applied";
     return result;
   } catch (error) {
@@ -917,6 +1035,8 @@ export function buildMarkdownReport(result) {
     `- live_write_attempted: ${result.liveWriteAttempted}`,
     `- append_attempts: ${result.appendAttempts}`,
     `- append_applied: ${result.appendApplied}`,
+    `- formatted_ranges: ${result.services.flatMap((service) => service.formattedRanges ?? []).length}`,
+    `- format_warnings: ${result.services.flatMap((service) => service.formatWarnings ?? []).length}`,
     "",
     "## Target Sheets",
     "",
@@ -992,6 +1112,9 @@ export async function runLiveWriteTest(options = {}) {
     liveWriteAttempted: false,
     appendAttempts: 0,
     appendApplied: 0,
+    formattedRanges: [],
+    formatApplied: false,
+    formatWarnings: [],
     validation: publicValidation(validation),
     services: [],
     reportPaths: [],
@@ -1027,7 +1150,11 @@ export async function runLiveWriteTest(options = {}) {
     result.services.push(serviceResult);
     result.appendAttempts += serviceResult.appendAttempts;
     result.appendApplied += serviceResult.appendApplied;
+    result.formattedRanges.push(...(serviceResult.formattedRanges ?? []));
+    result.formatWarnings.push(...(serviceResult.formatWarnings ?? []));
   }
+  result.formatApplied =
+    result.appendApplied > 0 && result.formattedRanges.length === result.appendApplied;
 
   result.skipped = result.services.every((service) => service.appendApplied === 0);
   const successfulStatuses = ["applied", "skipped_duplicate_idempotency_key"];
