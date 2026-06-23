@@ -880,7 +880,7 @@ input {
 
 .conversation-sidebar {
   display: grid;
-  grid-template-rows: auto auto auto auto minmax(0, 1fr);
+  grid-template-rows: auto auto auto auto auto minmax(0, 1fr);
   gap: 0.65rem;
   padding: 0.8rem;
   overflow: hidden;
@@ -976,6 +976,12 @@ input {
   padding-inline: 0.2rem;
 }
 
+.conversation-sidebar-status {
+  display: grid;
+  gap: 0.45rem;
+  min-height: 0;
+}
+
 .conversation-tabs {
   display: flex;
   flex-wrap: wrap;
@@ -1008,7 +1014,8 @@ input {
   align-content: start;
   gap: 0.6rem;
   min-height: 0;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
   padding-right: 0.2rem;
 }
 
@@ -1319,12 +1326,9 @@ input {
 
 .conversation-composer {
   display: grid;
-  grid-template-areas:
-    "field actions"
-    "hint hint";
+  grid-template-areas: "field actions";
   grid-template-columns: minmax(0, 1fr) auto;
   column-gap: 0.6rem;
-  row-gap: 0.25rem;
   align-items: end;
   flex: 0 0 auto;
   border-top: 1px solid rgba(34, 49, 35, 0.08);
@@ -1471,9 +1475,9 @@ input {
 }
 
 .conversation-sidebar {
-  grid-template-rows: auto auto auto auto minmax(0, 1fr);
-  gap: 0.65rem;
-  padding: 0.8rem;
+  grid-template-rows: auto auto auto auto auto minmax(0, 1fr);
+  gap: 0.55rem;
+  padding: 0.72rem;
   overflow: hidden;
 }
 
@@ -1529,6 +1533,7 @@ input {
 
 .conversation-list {
   min-height: 0;
+  overflow-y: auto;
 }
 
 .conversation-client-unknown {
@@ -1656,12 +1661,9 @@ input {
 }
 
 .conversation-composer {
-  grid-template-areas:
-    "field actions"
-    "hint hint";
+  grid-template-areas: "field actions";
   grid-template-columns: minmax(0, 1fr) auto;
   column-gap: 0.55rem;
-  row-gap: 0.22rem;
   flex: 0 0 auto;
   padding-top: 0.35rem;
 }
@@ -1775,8 +1777,7 @@ input {
   .conversation-composer {
     grid-template-areas:
       "field"
-      "actions"
-      "hint";
+      "actions";
   }
 
   .conversation-composer-actions {

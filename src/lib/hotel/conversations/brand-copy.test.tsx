@@ -126,9 +126,11 @@ describe("conversations panel visible demo copy", () => {
     );
 
     expect(html).toContain("Inbox WhatsApp Maternaly");
-    expect(html).toContain("Proveedor: WhatsApp");
     expect(html).toContain("Estado técnico");
-    expect(html).toContain("Mock");
+    expect(html).not.toContain("Proveedor:");
+    expect(html).not.toContain("LLM:");
+    expect(html).not.toContain("Sheets:");
+    expect(html).not.toContain("Writes:");
     expect(html).not.toContain("Registro de entrada");
     expect(html).toContain("Pendientes");
     expect(html).toContain("Humano");
@@ -137,8 +139,10 @@ describe("conversations panel visible demo copy", () => {
     expect(html).toContain("Marta R.");
     expect(html).toContain("Servicio: AIPAP Agua");
     expect(html).toContain("Respuesta manual del equipo");
-    expect(html).toContain("Adjuntar vídeo");
-    expect(html).toContain("Modo demo: se guarda en el timeline, no sale por WhatsApp real.");
+    expect(html).toContain("Enviar");
+    expect(html).not.toContain("Adjuntar vídeo");
+    expect(html).not.toContain("Modo demo: se guarda en el timeline, no sale por WhatsApp real.");
+    expect(html).not.toContain("Twilio Sandbox activo");
     expect(html).toContain("Actualizar");
     expect(html).not.toContain("conversation-notice");
     expect(html).not.toContain("No hay conversaciones para este filtro");
@@ -174,13 +178,13 @@ describe("conversations panel visible demo copy", () => {
       <ConversationsPanel initialDashboard={dashboard} whatsAppProviderMode="twilio" />,
     );
 
-    expect(mock).toContain("Proveedor: WhatsApp");
-    expect(mock).toContain("Mock");
-    expect(mock).toContain("Modo demo: se guarda en el timeline, no sale por WhatsApp real.");
-    expect(ycloud).toContain("Proveedor: WhatsApp");
-    expect(ycloud).toContain("YCloud");
-    expect(ycloud).toContain("YCloud configurado como provider principal");
-    expect(legacy).toContain("Twilio Sandbox");
+    for (const html of [mock, ycloud, legacy]) {
+      expect(html).toContain("Estado técnico");
+      expect(html).not.toContain("Proveedor: WhatsApp");
+      expect(html).not.toContain("Modo demo: se guarda en el timeline, no sale por WhatsApp real.");
+      expect(html).not.toContain("YCloud configurado como provider principal");
+      expect(html).not.toContain("Twilio Sandbox activo");
+    }
   });
 
   it("renders client directory badges without exposing NIF", () => {
@@ -239,10 +243,10 @@ describe("conversations panel visible demo copy", () => {
 
     expect(surfaces).toContain("Panel de conversaciones");
     expect(surfaces).toContain("Centraliza WhatsApp, handoffs del bot, servicio detectado");
-    expect(surfaces).toContain("Proveedor: WhatsApp");
+    expect(surfaces).toContain("Estado técnico");
     expect(surfaces).toContain("entryRegistryVisible");
-    expect(surfaces).toContain("Adjuntar vídeo");
-    expect(surfaces).toContain("media-mock");
+    expect(surfaces).not.toContain("Adjuntar vídeo");
+    expect(surfaces).not.toContain("media-mock");
     expect(surfaces).toContain("Web Maternaly");
     expect(surfaces).not.toContain('href="/ops"');
     expect(surfaces).not.toContain('href: "/ops"');
@@ -310,8 +314,8 @@ describe("conversations panel visible demo copy", () => {
     expect(doc).toContain("No guardar videos en DB");
     expect(doc).toContain("Cloudflare R2");
     expect(doc).toContain("MinIO");
-    expect(panel).toContain("Adjuntar vídeo");
-    expect(panel).toContain("Mock");
+    expect(panel).not.toContain("Adjuntar vídeo");
+    expect(panel).not.toContain("media-mock");
     expect(panel).not.toContain('type="file"');
     expect(panel).not.toContain("MediaUrl");
   });

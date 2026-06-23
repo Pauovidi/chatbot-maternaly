@@ -5,7 +5,7 @@ import { demoFormUrl } from "@/components/demo-data";
 export function PublicSiteHeader() {
   return (
     <header className="sticky top-0 z-40 border-b border-[var(--primary-border)] bg-[rgba(251,247,250,0.95)] backdrop-blur-sm">
-      <div className="mx-auto grid min-h-[5rem] max-w-6xl grid-cols-[auto_1fr_auto] items-center gap-6 px-6 py-3 lg:px-10">
+      <div className="mx-auto grid min-h-[4.75rem] max-w-[1200px] grid-cols-[auto_1fr_auto] items-center gap-6 px-5 py-3 sm:px-6 lg:px-8">
         <Link href="/" className="flex items-center" aria-label="Maternaly">
           <Image
             src="/brand/maternaly-logo-fondo-transparente.png"

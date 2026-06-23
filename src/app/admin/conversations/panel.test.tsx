@@ -52,9 +52,11 @@ describe("conversation panel operational UI", () => {
     expect(html).toContain("Aún no hay conversaciones.");
     expect(html).toContain("Cuando llegue el primer mensaje de WhatsApp, aparecerá aquí.");
     expect(html).toContain("No se pudo cargar la store de conversaciones.");
-    expect(html).toContain("LLM:");
-    expect(html).toContain("Sheets:");
-    expect(html).toContain("Writes:");
+    expect(html).toContain("Estado técnico");
+    expect(html).not.toContain("Proveedor:");
+    expect(html).not.toContain("LLM:");
+    expect(html).not.toContain("Sheets:");
+    expect(html).not.toContain("Writes:");
     expect(html).not.toContain("Registro de entrada");
   });
 
@@ -111,9 +113,13 @@ describe("conversation panel operational UI", () => {
     );
 
     expect(html).toContain("Estado técnico");
-    expect(html).toContain("Proveedor: WhatsApp");
-    expect(html).toContain("YCloud");
+    expect(html).not.toContain("Proveedor:");
+    expect(html).not.toContain("LLM:");
+    expect(html).not.toContain("Sheets:");
+    expect(html).not.toContain("Writes:");
+    expect(html).not.toContain("YCloud configurado");
     expect(html).not.toContain("Twilio Sandbox activo para pruebas de WhatsApp.");
+    expect(html).not.toContain("Twilio Sandbox activo: revisa el mensaje antes de enviarlo.");
     expect(html).not.toContain("conversation-notice");
     expect(html.toLowerCase()).not.toContain("nif");
     expect(html.toLowerCase()).not.toContain("dni");
@@ -130,10 +136,12 @@ describe("conversation panel operational UI", () => {
     expect(html).toContain("conversation-composer-field");
     expect(html).toContain("conversation-composer-actions");
     expect(html).toContain("conversation-send-button");
-    expect(html).toContain("conversation-video-mock-button");
     expect(html).toContain("Respuesta manual del equipo");
     expect(html).toContain("Enviar");
-    expect(html).toContain("Adjuntar vídeo");
+    expect(html).not.toContain("conversation-video-mock-button");
+    expect(html).not.toContain("Adjuntar vídeo");
+    expect(html).not.toContain("Modo demo:");
+    expect(html).not.toContain("Twilio Sandbox activo");
   });
 
   it("keeps inbox filters compact in narrow layouts", () => {
@@ -147,10 +155,12 @@ describe("conversation panel operational UI", () => {
       expect(html).toContain(label);
     }
 
-    expect(css).toContain("grid-template-rows: auto auto auto auto minmax(0, 1fr)");
+    expect(css).toContain("grid-template-rows: auto auto auto auto auto minmax(0, 1fr)");
     expect(css).toContain(".conversation-tabs");
     expect(css).toContain("flex-wrap: nowrap");
     expect(css).toContain("overflow-x: auto");
+    expect(css).toContain("overflow-y: auto");
+    expect(css).toContain(".conversation-sidebar-status");
     expect(css).toContain("white-space: nowrap");
     expect(html).not.toContain("En humano");
   });

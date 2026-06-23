@@ -8,7 +8,6 @@ import {
   Circle,
   Archive,
   ExternalLink,
-  Film,
   MessageSquareText,
   RefreshCcw,
   Search,
@@ -143,6 +142,7 @@ export function ConversationsPanel({
   const [query, setQuery] = useState("");
   const [mode, setMode] = useState<FilterMode>("all");
   const [reply, setReply] = useState("");
+  const [technicalStatusOpen, setTechnicalStatusOpen] = useState(false);
   const [error, setError] = useState(initialLoadError ?? "");
   const [pollError, setPollError] = useState("");
   const [lastUpdatedAt, setLastUpdatedAt] = useState(initialLastUpdatedAt);
@@ -373,16 +373,6 @@ export function ConversationsPanel({
     });
   }
 
-  function requestVideoMock(conversation: ConversationRecord) {
-    run(async () => {
-      await postAction(
-        `/api/conversations/${encodeURIComponent(conversation.id)}/media-mock`,
-        { kind: "video" },
-      );
-      await refresh(undefined, undefined, { force: true });
-    });
-  }
-
   function archiveSelectedConversation(conversation: ConversationRecord) {
     run(async () => {
       await postAction(
@@ -415,24 +405,32 @@ export function ConversationsPanel({
             </Link>
           ) : null}
         </div>
-        <details className="conversation-technical-status">
+        <details
+          className="conversation-technical-status"
+          open={technicalStatusOpen}
+          onToggle={(event) => setTechnicalStatusOpen(event.currentTarget.open)}
+        >
           <summary>Estado técnico</summary>
-          <span className={`conversation-transport conversation-transport-${whatsAppProviderMode}`}>
-            <Circle size={10} fill="currentColor" />
-            Proveedor: WhatsApp · {formatProviderMode(whatsAppProviderMode)}
-          </span>
-          <span className="conversation-transport conversation-transport-mock">
-            <Circle size={10} fill="currentColor" />
-            LLM: {llmProvider === "mock" ? "Mock" : "OpenAI"}
-          </span>
-          <span className="conversation-transport conversation-transport-mock">
-            <Circle size={10} fill="currentColor" />
-            Sheets: {formatSheetsAccessMode(sheetsAccessMode)}
-          </span>
-          <span className="conversation-transport conversation-transport-mock">
-            <Circle size={10} fill="currentColor" />
-            Writes: {sheetsWriteEnabled ? "activados" : "bloqueados"}
-          </span>
+          {technicalStatusOpen ? (
+            <div className="conversation-technical-status-content">
+              <span className={`conversation-transport conversation-transport-${whatsAppProviderMode}`}>
+                <Circle size={10} fill="currentColor" />
+                Proveedor: WhatsApp · {formatProviderMode(whatsAppProviderMode)}
+              </span>
+              <span className="conversation-transport conversation-transport-mock">
+                <Circle size={10} fill="currentColor" />
+                LLM: {llmProvider === "mock" ? "Mock" : "OpenAI"}
+              </span>
+              <span className="conversation-transport conversation-transport-mock">
+                <Circle size={10} fill="currentColor" />
+                Sheets: {formatSheetsAccessMode(sheetsAccessMode)}
+              </span>
+              <span className="conversation-transport conversation-transport-mock">
+                <Circle size={10} fill="currentColor" />
+                Writes: {sheetsWriteEnabled ? "activados" : "bloqueados"}
+              </span>
+            </div>
+          ) : null}
         </details>
       </div>
 
@@ -473,13 +471,15 @@ export function ConversationsPanel({
               Actualizar
             </button>
           </div>
-          <div className="conversation-poll-status" role="status" aria-live="polite">
-            {pollError ||
-              (lastUpdatedAt
-                ? `Actualizado ${formatUpdatedAt(lastUpdatedAt)}`
-                : "Actualizado")}
+          <div className="conversation-sidebar-status">
+            <div className="conversation-poll-status" role="status" aria-live="polite">
+              {pollError ||
+                (lastUpdatedAt
+                  ? `Actualizado ${formatUpdatedAt(lastUpdatedAt)}`
+                  : "Actualizado")}
+            </div>
+            {error ? <div className="conversation-error">{error}</div> : null}
           </div>
-          {error ? <div className="conversation-error">{error}</div> : null}
 
           <div className="conversation-tabs" role="tablist" aria-label="Filtros">
             {filters.map((filter) => (
@@ -696,25 +696,7 @@ export function ConversationsPanel({
                     <Send size={17} />
                     Enviar
                   </button>
-                  <button
-                    className="conversation-video-mock-button"
-                    type="button"
-                    onClick={() => requestVideoMock(selected)}
-                    disabled={isPending || Boolean(selected.archivedAt)}
-                    title="Mock: requiere almacenamiento de archivos"
-                  >
-                    <Film size={17} />
-                    Adjuntar vídeo
-                    <small>Mock</small>
-                  </button>
                 </div>
-                <small className="conversation-composer-hint">
-                  {whatsAppProviderMode === "mock"
-                    ? "Modo demo: se guarda en el timeline, no sale por WhatsApp real."
-                    : whatsAppProviderMode === "ycloud"
-                      ? "YCloud configurado como provider principal: revisa el mensaje antes de enviarlo."
-                      : "Twilio Sandbox activo: revisa el mensaje antes de enviarlo."}
-                </small>
               </div>
             </>
           ) : (
