@@ -45,6 +45,7 @@ COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 COPY --from=builder --chown=nextjs:nodejs /app/db/migrations ./db/migrations
 COPY --from=builder --chown=nextjs:nodejs /app/scripts/db-migrate.mjs ./scripts/db-migrate.mjs
 COPY --from=builder --chown=nextjs:nodejs /app/scripts/maternaly-sheets-live-write-test.mjs ./scripts/maternaly-sheets-live-write-test.mjs
+COPY --from=builder --chown=nextjs:nodejs /app/scripts/maternaly-sheets-sync-group-tabs.mjs ./scripts/maternaly-sheets-sync-group-tabs.mjs
 
 USER nextjs
 EXPOSE 3000
