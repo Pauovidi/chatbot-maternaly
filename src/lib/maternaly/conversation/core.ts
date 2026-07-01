@@ -2,6 +2,7 @@ import type { ConversationRecord, MaternalyNormalizedFlowState } from "@/lib/hot
 import { MaternalyCopyRenderer } from "@/lib/maternaly/conversation/copy-renderer";
 import type { MaternalyRenderedMessage } from "@/lib/maternaly/conversation/outbox";
 import {
+  findKnowledgeService,
   getKnowledgeService,
   getKnowledgeServiceByNormalizedKey,
   type KnowledgeService,
@@ -657,6 +658,51 @@ function serviceFromDecision(decision: PolicyDecision, state?: MaternalyNormaliz
   );
 }
 
+function serviceFromConversationContext(conversation: ConversationRecord): KnowledgeService | null {
+  return (
+    getKnowledgeServiceByNormalizedKey(conversation.maternalyNormalizedFlow?.serviceKey) ??
+    findKnowledgeService(conversation.serviceDetected ?? "") ??
+    null
+  );
+}
+
+function shouldUsePreviousServiceForPricing(intent: StructuredIntent): boolean {
+  return Boolean(
+    intent.service_question_focus === "pricing" &&
+      !intent.service_candidate &&
+      !intent.slots.service_id &&
+      !intent.slots.normalized_service_key &&
+      !intent.needs_availability_lookup &&
+      !hasRegistrationDataSlots(intent.slots) &&
+      ["general_info", "service_question"].includes(intent.intent),
+  );
+}
+
+function enrichIntentWithConversationServiceContext(
+  intent: StructuredIntent,
+  conversation: ConversationRecord,
+): StructuredIntent {
+  if (!shouldUsePreviousServiceForPricing(intent)) {
+    return intent;
+  }
+
+  const service = serviceFromConversationContext(conversation);
+  if (!service) {
+    return intent;
+  }
+
+  return {
+    ...intent,
+    service_candidate: service.id,
+    slots: {
+      ...intent.slots,
+      service_id: service.id,
+      service_name: service.name,
+      normalized_service_key: service.normalizedServiceKey ?? intent.slots.normalized_service_key,
+    },
+  };
+}
+
 function toPersistedState(state: MaternalyConversationState): MaternalyNormalizedFlowState {
   const persisted: Partial<MaternalyConversationState> = { ...state };
   delete persisted.mode;
@@ -1097,7 +1143,8 @@ export class MaternalyCoreAdapter {
     const stateBefore = input.conversation.maternalyNormalizedFlow;
     const openaiCallExpected = inferOpenAiCall(input.env);
     const nluStartedAt = Date.now();
-    const intent = await this.interpreter.interpret(input.inbound.text);
+    const interpretedIntent = await this.interpreter.interpret(input.inbound.text);
+    const intent = enrichIntentWithConversationServiceContext(interpretedIntent, input.conversation);
     const nluTotalMs = elapsedSince(nluStartedAt);
     const reducerStartedAt = Date.now();
     const reduced = this.reducer.reduceWithDiagnostics({

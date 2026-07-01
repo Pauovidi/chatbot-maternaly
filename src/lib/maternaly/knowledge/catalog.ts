@@ -300,5 +300,9 @@ export function getKnowledgeService(id: string | undefined): KnowledgeService | 
 export function getKnowledgeServiceByNormalizedKey(
   key: MaternalyNormalizedServiceKey | undefined,
 ): KnowledgeService | null {
+  if (!key) {
+    return null;
+  }
+
   return MATERNALY_KNOWLEDGE_SERVICES.find((service) => service.normalizedServiceKey === key) ?? null;
 }

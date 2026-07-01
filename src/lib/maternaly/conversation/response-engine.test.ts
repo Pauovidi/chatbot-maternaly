@@ -9,6 +9,8 @@ import {
 const forbiddenResponsePattern =
   /\b(?:hotel|perros|canino|vacunas|comida|visitas|residencia|qu[eé]\s+traer)\b/i;
 const emojiPattern = /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu;
+const clinicalClosing =
+  "Si el sangrado, el dolor o cualquier síntoma importante empeora, mi recomendación es que contactes lo antes posible con tu médico o acudas a urgencias.";
 
 function countEmojis(text: string): number {
   return Array.from(text.matchAll(emojiPattern)).length;
@@ -153,9 +155,24 @@ describe("Maternaly response engine", () => {
     expect(result.intent.safety_flags).toContain("clinical_or_diagnostic_escalation");
     expect(result.reply).toMatch(/profesional|equipo de Maternaly/i);
     expect(result.reply).toMatch(/No puedo hacer diagn[oó]stico/i);
-    expect(result.reply).toMatch(/urgencias|profesional sanitario/i);
+    expect(result.reply).toContain(clinicalClosing);
+    expect(result.reply).not.toContain("no esperes a la respuesta del bot");
+    expect(result.reply).not.toContain("continúa o te preocupa");
     expect(result.reply).not.toMatch(/lo dejo preparado/i);
     expect(result.reply).not.toMatch(/beneficios|precio|horarios/i);
     expect(countEmojis(result.reply)).toBe(0);
+  });
+
+  it("answers a bare price question safely when no service context exists", async () => {
+    vi.stubEnv("LLM_PROVIDER", "mock");
+
+    const result = await buildMaternalyWhatsAppReply("precio");
+
+    expect(result.intent.service_question_focus).toBe("pricing");
+    expect(result.reply).toMatch(/charlas de embarazo|taller BLW|Pilates|Maternaly/i);
+    expect(result.reply).not.toContain("59 €/mes");
+    expect(result.reply).not.toContain("99 €/mes");
+    expect(result.reply).not.toContain("45 €/persona");
+    expect(result.reply).not.toContain("75 €/pareja");
   });
 });

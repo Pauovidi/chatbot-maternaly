@@ -5,6 +5,8 @@ import {
 } from "@/lib/maternaly/conversation/copy-renderer";
 
 const emojiPattern = /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu;
+const clinicalClosing =
+  "Si el sangrado, el dolor o cualquier síntoma importante empeora, mi recomendación es que contactes lo antes posible con tu médico o acudas a urgencias.";
 
 function countEmojis(text: string): number {
   return Array.from(text.matchAll(emojiPattern)).length;
@@ -221,7 +223,9 @@ describe("MaternalyCopyRenderer availability guardrails", () => {
 
     expect(reply).toMatch(/profesional|equipo de Maternaly/i);
     expect(reply).toMatch(/No puedo hacer diagn[oó]stico/i);
-    expect(reply).toMatch(/urgencias|profesional sanitario/i);
+    expect(reply).toContain(clinicalClosing);
+    expect(reply).not.toContain("no esperes a la respuesta del bot");
+    expect(reply).not.toContain("continúa o te preocupa");
     expect(reply).not.toMatch(/lo dejo preparado/i);
     expect(countEmojis(reply)).toBe(0);
   });

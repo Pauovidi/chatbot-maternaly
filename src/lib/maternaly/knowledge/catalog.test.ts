@@ -11,6 +11,7 @@ describe("Maternaly knowledge catalog", () => {
     expect(findKnowledgeService("quiero apuntarme al taller BLW")?.normalizedServiceKey).toBe("taller_blw");
     expect(findKnowledgeService("charla informativa embarazo")?.normalizedServiceKey).toBe("charla_embarazo_1_20");
     expect(getKnowledgeServiceByNormalizedKey("taller_blw")?.pricing).toContain("45 €/persona");
+    expect(getKnowledgeServiceByNormalizedKey(undefined)).toBeNull();
   });
 
   it("includes the enriched Pilates embarazo knowledge without making it a normalized Sheet flow", () => {

@@ -110,7 +110,7 @@ export class MaternalyCopyRenderer {
         return "Listo, he reiniciado la conversación y seguimos poquito a poco. ¿Qué te apetece mirar ahora de Maternaly? 💛";
       case "handoff":
         if (input.decision.reason === "clinical_safety_requires_professional") {
-          return "Siento que estés pasando por eso. Por seguridad, esto debe revisarlo una profesional cuanto antes. No puedo hacer diagnóstico por WhatsApp, así que te paso con el equipo de Maternaly para que lo miren contigo. Si el sangrado, el dolor o cualquier síntoma importante continúa o te preocupa, no esperes a la respuesta del bot y contacta con tu profesional sanitario o urgencias.";
+          return "Siento que estés pasando por eso. Por seguridad, esto debe revisarlo una profesional cuanto antes. No puedo hacer diagnóstico por WhatsApp, así que te paso con el equipo de Maternaly para que lo miren contigo. Si el sangrado, el dolor o cualquier síntoma importante empeora, mi recomendación es que contactes lo antes posible con tu médico o acudas a urgencias.";
         }
         if (input.decision.reason === "cancel_or_reschedule_requires_human") {
           return "Para cambios de fecha o cancelaciones, lo revisa directamente el equipo de Maternaly para hacerlo con seguridad. Te paso con una persona.";

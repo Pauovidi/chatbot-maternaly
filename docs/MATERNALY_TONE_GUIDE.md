@@ -24,7 +24,7 @@
 
 - Si hay dolor fuerte, sangrado, fiebre, contracciones fuertes, pérdida de líquido, no nota al bebé, se encuentra muy mal, contraindicaciones, síntomas importantes o dudas personales delicadas, derivar al equipo/profesional.
 - No diagnosticar, no pautar tratamiento y no minimizar síntomas.
-- Fórmula segura: reconocer con calidez, explicar que debe revisarlo una profesional cuanto antes, pasar a modo humano/manual review y avisar que no espere al bot ante síntomas importantes.
+- Fórmula segura: reconocer con calidez, explicar que debe revisarlo una profesional cuanto antes, pasar a modo humano/manual review y cerrar con una recomendación clara de contacto médico o urgencias si los síntomas importantes empeoran.
 
 ## Antes / Después
 
@@ -53,4 +53,4 @@ Cálido:
 `Ahora mismo no puedo dejar la solicitud cerrada con seguridad. La dejo pendiente para que el equipo de Maternaly la revise con cuidado.`
 
 Riesgo clínico:
-`Siento que estés pasando por eso. Por seguridad, esto debe revisarlo una profesional cuanto antes. No puedo hacer diagnóstico por WhatsApp, así que te paso con el equipo de Maternaly para que lo miren contigo. Si el sangrado, el dolor o cualquier síntoma importante continúa o te preocupa, no esperes a la respuesta del bot y contacta con tu profesional sanitario o urgencias.`
+`Siento que estés pasando por eso. Por seguridad, esto debe revisarlo una profesional cuanto antes. No puedo hacer diagnóstico por WhatsApp, así que te paso con el equipo de Maternaly para que lo miren contigo. Si el sangrado, el dolor o cualquier síntoma importante empeora, mi recomendación es que contactes lo antes posible con tu médico o acudas a urgencias.`
