@@ -8,6 +8,11 @@ import {
 
 const forbiddenResponsePattern =
   /\b(?:hotel|perros|canino|vacunas|comida|visitas|residencia|qu[eé]\s+traer)\b/i;
+const emojiPattern = /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu;
+
+function countEmojis(text: string): number {
+  return Array.from(text.matchAll(emojiPattern)).length;
+}
 
 describe("Maternaly response engine", () => {
   afterEach(() => {
@@ -41,5 +46,78 @@ describe("Maternaly response engine", () => {
     expect(containsLegacyHotelKnowledge(unsafe)).toBe(true);
     expect(ensureMaternalySafeReply(unsafe)).toBe(MATERNALY_SAFE_FALLBACK);
     expect(MATERNALY_SAFE_FALLBACK).not.toMatch(forbiddenResponsePattern);
+  });
+
+  it("answers Pilates benefits with warm controlled copy and real knowledge", async () => {
+    vi.stubEnv("LLM_PROVIDER", "mock");
+
+    const result = await buildMaternalyWhatsAppReply("qué beneficios tiene pilates embarazo");
+
+    expect(result.reply).toMatch(/cercana|cuidarte|calma|bienestar/i);
+    expect(result.reply).toMatch(/tono muscular|fuerza|resistencia/i);
+    expect(result.reply).toMatch(/circulaci[oó]n|postura|suelo p[eé]lvico/i);
+    expect(result.reply).not.toMatch(forbiddenResponsePattern);
+    expect(countEmojis(result.reply)).toBeLessThanOrEqual(2);
+  });
+
+  it("answers Bilbao Pilates schedules", async () => {
+    vi.stubEnv("LLM_PROVIDER", "mock");
+
+    const result = await buildMaternalyWhatsAppReply("horarios pilates embarazo bilbao");
+
+    expect(result.reply).toContain("Bilbao");
+    expect(result.reply).toMatch(/lunes 10:00-11:00/i);
+    expect(result.reply).toMatch(/lunes 18:15-19:15/i);
+    expect(result.reply).toMatch(/mi[eé]rcoles 17:00-18:00/i);
+    expect(result.reply).toMatch(/mi[eé]rcoles 18:15-19:15/i);
+    expect(countEmojis(result.reply)).toBeLessThanOrEqual(2);
+  });
+
+  it("answers Erandio Pilates schedules", async () => {
+    vi.stubEnv("LLM_PROVIDER", "mock");
+
+    const result = await buildMaternalyWhatsAppReply("pilates embarazo erandio");
+
+    expect(result.reply).toContain("Erandio");
+    expect(result.reply).toMatch(/martes 17:30-18:30/i);
+    expect(result.reply).toMatch(/jueves 10:00-11:00/i);
+    expect(result.reply).toMatch(/jueves 17:30-18:30/i);
+    expect(countEmojis(result.reply)).toBeLessThanOrEqual(2);
+  });
+
+  it("answers Pilates start week and continuity through pregnancy", async () => {
+    vi.stubEnv("LLM_PROVIDER", "mock");
+
+    const result = await buildMaternalyWhatsAppReply("desde qué semana puedo hacer pilates embarazo");
+
+    expect(result.reply).toMatch(/semana 14/i);
+    expect(result.reply).toMatch(/final de la gestaci[oó]n/i);
+    expect(countEmojis(result.reply)).toBeLessThanOrEqual(2);
+  });
+
+  it("answers Pilates prices", async () => {
+    vi.stubEnv("LLM_PROVIDER", "mock");
+
+    const result = await buildMaternalyWhatsAppReply("precio pilates embarazo");
+
+    expect(result.reply).toContain("59 €/mes");
+    expect(result.reply).toContain("99 €/mes");
+    expect(result.reply).toMatch(/1 clase\/semana|2 clases\/semana/i);
+    expect(countEmojis(result.reply)).toBeLessThanOrEqual(2);
+  });
+
+  it("derives strong clinical symptoms to a professional without diagnosis or playful emoji", async () => {
+    vi.stubEnv("LLM_PROVIDER", "mock");
+
+    const result = await buildMaternalyWhatsAppReply(
+      "tengo dolor fuerte y sangrado después de pilates embarazo",
+    );
+
+    expect(result.intent.should_handoff).toBe(true);
+    expect(result.intent.safety_flags).toContain("clinical_or_diagnostic_escalation");
+    expect(result.reply).toMatch(/profesional|equipo de Maternaly/i);
+    expect(result.reply).toMatch(/No puedo hacer diagn[oó]stico/i);
+    expect(result.reply).not.toMatch(/beneficios|precio|horarios/i);
+    expect(countEmojis(result.reply)).toBe(0);
   });
 });

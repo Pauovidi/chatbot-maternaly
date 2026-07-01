@@ -637,7 +637,7 @@ describe("normalized Maternaly WhatsApp flow", () => {
       { normalizedSheetsClient: client, normalizedEnv: normalizedTestEnv() },
     );
 
-    expect(result.botReply?.body).toMatch(/no puedo validar disponibilidad/i);
+    expect(result.botReply?.body).toMatch(/no puedo comprobar la disponibilidad con seguridad/i);
     const checked = lastPayload(result.conversation.events, "maternaly_availability_checked");
     expect(checked).toMatchObject({
       ok: false,
@@ -690,7 +690,7 @@ describe("normalized Maternaly WhatsApp flow", () => {
       { normalizedSheetsClient: client, normalizedEnv: env },
     );
 
-    expect(result.botReply?.body).toMatch(/No puedo cerrar|revisión/i);
+    expect(result.botReply?.body).toMatch(/no puedo dejar la solicitud cerrada|revisión/i);
     expect(result.conversation.mode).toBe("human");
     expect(client.appended).toHaveLength(0);
     expect(JSON.stringify(lastPayload(result.conversation.events, "maternaly_tool_executed")?.blockedReasons)).toContain(

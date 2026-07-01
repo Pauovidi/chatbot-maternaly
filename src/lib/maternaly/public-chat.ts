@@ -17,11 +17,24 @@ export const MATERNALY_CHAT_QUICK_ACTIONS = [
 ] as const;
 
 export function getMaternalyChatWelcomeMessage(): string {
-  return "Hola, soy el asistente de Maternaly. Puedo ayudarte con información o preparar una solicitud para talleres y charlas.";
+  return "Hola, soy el asistente de Maternaly. Estoy aquí para ayudarte con calma con información o con una solicitud para talleres y charlas. ¿Qué necesitas mirar hoy? 🌸";
 }
 
 function buildPublicReplyFromIntent(intent: StructuredIntent): string {
   const renderer = new MaternalyCopyRenderer();
+  if (intent.intent === "handoff_request" || intent.should_handoff) {
+    return (
+      renderer.render({
+        decision: {
+          action: "handoff",
+          reason: intent.safety_flags.includes("clinical_or_diagnostic_escalation")
+            ? "clinical_safety_requires_professional"
+            : undefined,
+        },
+      }) ?? renderer.renderTechnicalFallback()
+    );
+  }
+
   if (intent.intent === "greeting") {
     return renderer.render({ decision: { action: "greeting" } }) ?? renderer.renderTechnicalFallback();
   }

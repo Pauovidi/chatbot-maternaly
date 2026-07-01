@@ -9,7 +9,25 @@ describe("Maternaly public chat", () => {
     const reply = resolveMaternalyChatReply("hola").text;
 
     expect(reply).toContain("Maternaly");
-    expect(reply).toMatch(/información|talleres|charlas/i);
+    expect(reply).toMatch(/calma|información|talleres|charlas/i);
     expect(reply).not.toMatch(forbiddenResponsePattern);
+  });
+
+  it("answers Pilates questions with the enriched warm knowledge", () => {
+    const reply = resolveMaternalyChatReply("precio pilates embarazo").text;
+
+    expect(reply).toContain("Pilates embarazo");
+    expect(reply).toContain("59 €/mes");
+    expect(reply).toContain("99 €/mes");
+    expect(reply).toMatch(/te apetece|equipo revise disponibilidad/i);
+    expect(reply).not.toMatch(forbiddenResponsePattern);
+  });
+
+  it("does not answer clinical warning signs as regular Pilates information", () => {
+    const reply = resolveMaternalyChatReply("tengo fiebre y sangrado, puedo hacer pilates embarazo").text;
+
+    expect(reply).toMatch(/profesional|equipo de Maternaly/i);
+    expect(reply).toMatch(/No puedo hacer diagn[oó]stico/i);
+    expect(reply).not.toMatch(/Precio:|horarios/i);
   });
 });

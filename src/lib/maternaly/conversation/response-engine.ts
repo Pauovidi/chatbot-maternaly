@@ -20,7 +20,16 @@ export function buildMaternalyReplyFromIntent(intent: StructuredIntent): string 
   }
 
   if (intent.intent === "handoff_request" || intent.should_handoff) {
-    return ensureMaternalySafeReply(renderer.render({ decision: { action: "handoff" } }));
+    return ensureMaternalySafeReply(
+      renderer.render({
+        decision: {
+          action: "handoff",
+          reason: intent.safety_flags.includes("clinical_or_diagnostic_escalation")
+            ? "clinical_safety_requires_professional"
+            : undefined,
+        },
+      }),
+    );
   }
 
   if (intent.intent === "privacy_question") {

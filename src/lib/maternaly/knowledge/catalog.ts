@@ -28,7 +28,7 @@ export interface KnowledgeService {
   nextQuestion: string;
 }
 
-export const MATERNALY_KNOWLEDGE_VERSION = "maternaly_kb_demo_2026_06_19_v1";
+export const MATERNALY_KNOWLEDGE_VERSION = "maternaly_kb_demo_2026_07_01_warm_pilates_v1";
 
 export const MATERNALY_KNOWLEDGE_SERVICES: KnowledgeService[] = [
   {
@@ -115,17 +115,37 @@ export const MATERNALY_KNOWLEDGE_SERVICES: KnowledgeService[] = [
   {
     id: "pilates",
     name: "Pilates Embarazo",
-    aliases: ["pilates", "pilates embarazo"],
+    aliases: ["pilates", "pilates embarazo", "pilates embarazadas", "pilates prenatal"],
     category: "informational",
-    summary: "Pilates para embarazo desde la semana 14 y hasta el final del embarazo.",
+    summary:
+      "Pilates para embarazo en grupos reducidos, desde la semana 14 y hasta el final de la gestación.",
     details: [
-      "Bilbao: lunes 10:00-11:00, 11:00-12:00, 17:00-18:00, 18:15-19:15; miércoles 10:00-11:00, 17:00-18:00, 18:15-19:15.",
-      "Erandio: martes 17:30-18:30; jueves 10:00-11:00, 11:00-12:00, 17:30-18:30.",
+      "Ayuda a mejorar el tono muscular y la forma física, aumenta fuerza y resistencia, favorece la circulación de las piernas y cuida la postura para aliviar molestias de espalda.",
+      "Trabaja conciencia corporal, control de la respiración y suelo pélvico, y aporta bienestar y relajación durante el embarazo.",
+      "Los grupos son reducidos para ofrecer atención personalizada y mantener medidas de higiene y seguridad.",
+      "Bilbao: lunes 10:00-11:00, lunes 11:00-12:00, lunes 17:00-18:00, lunes 18:15-19:15; miércoles 10:00-11:00, miércoles 17:00-18:00, miércoles 18:15-19:15.",
+      "Erandio: martes 17:30-18:30; jueves 10:00-11:00, jueves 11:00-12:00, jueves 17:30-18:30.",
     ],
     requiredData: ["sede de interés", "semana de embarazo", "preferencia horaria"],
     pricing: ["59 €/mes 1 clase/semana", "99 €/mes 2 clases/semana"],
-    safetyNotes: ["Responder como información salvo que exista Sheet fiable para reserva."],
-    nextQuestion: "¿Te interesa Bilbao o Erandio?",
+    sessions: [
+      { location: "Bilbao", modality: "presencial", weekday: "lunes", startTime: "10:00", endTime: "11:00" },
+      { location: "Bilbao", modality: "presencial", weekday: "lunes", startTime: "11:00", endTime: "12:00" },
+      { location: "Bilbao", modality: "presencial", weekday: "lunes", startTime: "17:00", endTime: "18:00" },
+      { location: "Bilbao", modality: "presencial", weekday: "lunes", startTime: "18:15", endTime: "19:15" },
+      { location: "Bilbao", modality: "presencial", weekday: "miércoles", startTime: "10:00", endTime: "11:00" },
+      { location: "Bilbao", modality: "presencial", weekday: "miércoles", startTime: "17:00", endTime: "18:00" },
+      { location: "Bilbao", modality: "presencial", weekday: "miércoles", startTime: "18:15", endTime: "19:15" },
+      { location: "Erandio", modality: "presencial", weekday: "martes", startTime: "17:30", endTime: "18:30" },
+      { location: "Erandio", modality: "presencial", weekday: "jueves", startTime: "10:00", endTime: "11:00" },
+      { location: "Erandio", modality: "presencial", weekday: "jueves", startTime: "11:00", endTime: "12:00" },
+      { location: "Erandio", modality: "presencial", weekday: "jueves", startTime: "17:30", endTime: "18:30" },
+    ],
+    safetyNotes: [
+      "Responder como información salvo que exista Sheet fiable para reserva.",
+      "Si la usuaria menciona dolor fuerte, sangrado, fiebre, contraindicaciones o una situación delicada, derivar al equipo/profesional.",
+    ],
+    nextQuestion: "¿Te apetece que deje tu interés preparado para que el equipo revise disponibilidad?",
   },
   {
     id: "aipap_terra",

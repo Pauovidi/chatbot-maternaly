@@ -838,7 +838,9 @@ export class MaternalyConversationPolicy {
         ? "cancel_or_reschedule_requires_human"
         : intent.safety_flags.includes("handoff_payment_or_invoice")
           ? "payment_or_invoice_requires_human"
-          : "user_or_safety_handoff";
+          : intent.safety_flags.includes("clinical_or_diagnostic_escalation")
+            ? "clinical_safety_requires_professional"
+            : "user_or_safety_handoff";
       return { action: "handoff", reason };
     }
 

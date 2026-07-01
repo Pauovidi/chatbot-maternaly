@@ -322,7 +322,11 @@ export class LlmIntentClassifier {
     const phone = extractPhone(message);
     const email = extractEmail(message);
     const hasContactData = Boolean(fullName || phone || email || peopleCount);
-    const clinical = service?.clinicalEscalation && /(dolor|mastitis|urgente|diagn[oó]stico|sangrado|fiebre|malestar)/.test(text);
+    const clinicalSignal =
+      /(dolor\s+fuerte|sangrado|fiebre|contracciones?|p[eé]rdida\s+de\s+l[ií]quido|mareo\s+fuerte|desmayo|urgente|diagn[oó]stico\s+(?:m[eé]dico|cl[ií]nico|personalizado|de mi|del resultado)|contraindicaci[oó]n|malestar\s+importante|mastitis)/.test(
+        text,
+      );
+    const clinical = clinicalSignal;
     const explicitGeneralInfo = /\b(que es|qué es|info|informaci[oó]n|precio|cu[aá]nto cuesta|cuanto cuesta)\b/.test(text);
     const serviceOnlyReservationRequest = Boolean(
       serviceKey &&
@@ -405,7 +409,7 @@ export class LlmIntentClassifier {
         paymentOrInvoiceHandoff ? "handoff_payment_or_invoice" : "",
         stopRequest ? "stop_requested_no_follow_up" : "",
         service?.id === "aipap_agua" ? "pool_access_justification_required" : "",
-        service?.clinicalEscalation ? "clinical_or_diagnostic_escalation" : "",
+        clinical ? "clinical_or_diagnostic_escalation" : "",
       ].filter(Boolean),
     });
   }

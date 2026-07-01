@@ -64,4 +64,16 @@ describe("Maternaly LLM interpreter", () => {
       safety_flags: expect.arrayContaining(["handoff_payment_or_invoice"]),
     });
   });
+
+  it("marks strong clinical warning signs for handoff even on informational activities", async () => {
+    const classifier = new LlmIntentClassifier();
+
+    await expect(
+      classifier.classify("tengo dolor fuerte y sangrado, puedo hacer pilates embarazo"),
+    ).resolves.toMatchObject({
+      service_candidate: "pilates",
+      should_handoff: true,
+      safety_flags: expect.arrayContaining(["clinical_or_diagnostic_escalation"]),
+    });
+  });
 });

@@ -163,4 +163,33 @@ describe("Maternaly conversation authority", () => {
       ]),
     );
   });
+
+  it("routes clinical warning signs through professional handoff copy", async () => {
+    const result = await new MaternalyCoreAdapter().handle({
+      conversation: fakeConversation(),
+      inbound: {
+        provider: "twilio_sandbox",
+        from: "whatsapp:+34600111222",
+        text: "tengo dolor fuerte y sangrado, puedo hacer pilates embarazo",
+      },
+    });
+
+    expect(result.intent).toMatchObject({
+      should_handoff: true,
+      service_candidate: "pilates",
+    });
+    expect(result.intent.safety_flags).toContain("clinical_or_diagnostic_escalation");
+    expect(result.reply).toMatch(/profesional|equipo de Maternaly/i);
+    expect(result.reply).toMatch(/No puedo hacer diagn[oó]stico/i);
+    expect(result.renderedMessage).toMatchObject({
+      kind: "text",
+      source: "copy_renderer",
+      renderer: "MaternalyCopyRenderer",
+    });
+    expect(result.authorityTrace.invariants.nluStructuredOnly).toBe(true);
+    expect(result.authorityTrace.policy).toMatchObject({
+      action: "handoff",
+      reason: "clinical_safety_requires_professional",
+    });
+  });
 });
