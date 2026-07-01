@@ -9,10 +9,11 @@ export const MATERNALY_OPENAI_SYSTEM_PROMPT = [
   "Tu única tarea es devolver JSON estructurado. No escribas la respuesta visible a la usuaria.",
   "Mantén contexto multi-turno si aparece en el input, interpreta slots útiles y no inventes disponibilidad, plazas, pagos ni facturas.",
   "Diferencia información general, interés, inscripción, selección de sesión, datos de inscripción, confirmación, pago, factura, humano, privacidad y reset.",
+  "Incluye service_question_focus estructurado cuando aplique: benefits, schedule, pricing, start_week, locations, booking, general, clinical_risk o unknown.",
   "Si falta un dato, márcalo en missing_fields; no te bloquees ni inventes datos.",
   "Dudas clínicas o diagnósticas deben marcar should_handoff=true.",
   "Cancelaciones, cambios de fecha o sede, reagendamientos, devoluciones, pagos, facturas y justificantes deben marcar should_handoff=true.",
-  "JSON schema: { intent, slots, needs_availability_lookup, confidence, missing_fields, should_handoff, safety_flags }.",
+  "JSON schema: { intent, slots, service_question_focus, needs_availability_lookup, confidence, missing_fields, should_handoff, safety_flags }.",
 ].join(" ");
 
 export type MaternalyIntent =
@@ -61,6 +62,7 @@ export interface StructuredIntent {
   intent: MaternalyIntent;
   slots: MaternalyNluSlots;
   service_candidate?: string;
+  service_question_focus: MaternalyServiceQuestionFocus;
   location_preference?: string;
   venue_preference?: string;
   time_preference?: string;
@@ -73,9 +75,21 @@ export interface StructuredIntent {
   safety_flags: string[];
 }
 
+export type MaternalyServiceQuestionFocus =
+  | "benefits"
+  | "schedule"
+  | "pricing"
+  | "start_week"
+  | "locations"
+  | "booking"
+  | "general"
+  | "clinical_risk"
+  | "unknown";
+
 const DEFAULT_INTENT: StructuredIntent = {
   intent: "unknown",
   slots: {},
+  service_question_focus: "unknown",
   needs_availability_lookup: false,
   confidence: 0.35,
   missing_fields: [],
@@ -108,6 +122,18 @@ const ALLOWED_INTENTS: MaternalyIntent[] = [
   "unknown",
 ];
 
+const ALLOWED_SERVICE_QUESTION_FOCUS: MaternalyServiceQuestionFocus[] = [
+  "benefits",
+  "schedule",
+  "pricing",
+  "start_week",
+  "locations",
+  "booking",
+  "general",
+  "clinical_risk",
+  "unknown",
+];
+
 function normalize(text: string): string {
   return text.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
 }
@@ -129,6 +155,53 @@ function validPeopleCount(value: unknown): number | undefined {
 function validPregnancyWeek(value: unknown): number | undefined {
   const number = typeof value === "number" ? value : Number.parseInt(String(value ?? ""), 10);
   return Number.isFinite(number) && number > 0 && number < 45 ? number : undefined;
+}
+
+function validServiceQuestionFocus(value: unknown): MaternalyServiceQuestionFocus {
+  return ALLOWED_SERVICE_QUESTION_FOCUS.includes(value as MaternalyServiceQuestionFocus)
+    ? (value as MaternalyServiceQuestionFocus)
+    : "unknown";
+}
+
+function detectServiceQuestionFocus(input: {
+  text: string;
+  service?: ReturnType<typeof findKnowledgeService>;
+  clinical: boolean;
+  wantsAvailability: boolean;
+  wantsBooking: boolean;
+  wantsPricing: boolean;
+}): MaternalyServiceQuestionFocus {
+  const { text, service, clinical, wantsAvailability, wantsBooking, wantsPricing } = input;
+
+  if (clinical) {
+    return "clinical_risk";
+  }
+
+  if (/\b(?:desde\s+qu[eé]\s+semana|semana\s+14|cu[aá]ndo\s+puedo\s+empezar|hasta\s+el\s+final)\b/.test(text)) {
+    return "start_week";
+  }
+
+  if (wantsPricing || /\b(?:precio|precios|tarifa|tarifas|cu[aá]nto cuesta|cuanto cuesta)\b|€/.test(text)) {
+    return "pricing";
+  }
+
+  if (wantsAvailability || /\b(?:horario|horarios|d[ií]as|clases|turnos)\b/.test(text)) {
+    return "schedule";
+  }
+
+  if (/\b(?:beneficios?|para qu[eé] sirve|qu[eé]\s+trabaja|ayuda|mejora)\b/.test(text)) {
+    return "benefits";
+  }
+
+  if (wantsBooking) {
+    return "booking";
+  }
+
+  if (service && /\b(?:d[oó]nde|sede|sedes|ubicaci[oó]n|bilbao|erandio)\b/.test(text)) {
+    return "locations";
+  }
+
+  return service ? "general" : "unknown";
 }
 
 function detectNormalizedServiceKey(serviceId?: string): MaternalyNormalizedServiceKey | undefined {
@@ -259,12 +332,23 @@ export function validateStructuredIntent(value: unknown): StructuredIntent {
   const locationPreference = compact(raw.location_preference) ?? slots.location;
   const peopleCount = validPeopleCount(raw.people_count) ?? slots.people_count;
   const pregnancyWeek = validPregnancyWeek(raw.pregnancy_week) ?? slots.pregnancy_week;
+  const safetyFlags = Array.from(
+    new Set([
+      ...(Array.isArray(raw.safety_flags) ? raw.safety_flags.map(String) : []),
+      ...forbiddenVisibleFields.map((field) => `nlu_visible_copy_field_stripped:${field}`),
+    ]),
+  );
+  const rawFocus = raw.service_question_focus ?? raw.question_focus;
+  const serviceQuestionFocus = safetyFlags.includes("clinical_or_diagnostic_escalation")
+    ? "clinical_risk"
+    : validServiceQuestionFocus(rawFocus);
 
   return {
     ...DEFAULT_INTENT,
     intent: ALLOWED_INTENTS.includes(intent) ? intent : "unknown",
     slots,
     service_candidate: serviceCandidate,
+    service_question_focus: serviceQuestionFocus,
     location_preference: locationPreference,
     venue_preference: compact(raw.venue_preference),
     time_preference: compact(raw.time_preference) ?? slots.preferred_time,
@@ -277,12 +361,7 @@ export function validateStructuredIntent(value: unknown): StructuredIntent {
         : DEFAULT_INTENT.confidence,
     missing_fields: Array.isArray(raw.missing_fields) ? raw.missing_fields.map(String) : [],
     should_handoff: Boolean(raw.should_handoff),
-    safety_flags: Array.from(
-      new Set([
-        ...(Array.isArray(raw.safety_flags) ? raw.safety_flags.map(String) : []),
-        ...forbiddenVisibleFields.map((field) => `nlu_visible_copy_field_stripped:${field}`),
-      ]),
-    ),
+    safety_flags: safetyFlags,
   };
 }
 
@@ -301,6 +380,7 @@ export class LlmIntentClassifier {
     const serviceKey = detectNormalizedServiceKey(service?.id);
     const wantsAvailability = /(horarios?|plazas?|disponibilidad|hay hueco|hueco|fechas?)/.test(text);
     const wantsRegistration = /(reserv|apunt|inscrib|preinscrib|plaza|me interesa|quiero)/.test(text);
+    const wantsBookingFocus = /(reserv|apunt|inscrib|preinscrib|plaza)/.test(text);
     const wantsPayment = /\b(pago|pagar|link|enlace)\b/.test(text);
     const wantsInvoice = /(factura|justificante)/.test(text);
     const cancelOrReschedule =
@@ -323,7 +403,7 @@ export class LlmIntentClassifier {
     const email = extractEmail(message);
     const hasContactData = Boolean(fullName || phone || email || peopleCount);
     const clinicalSignal =
-      /(dolor\s+fuerte|sangrado|fiebre|contracciones?|p[eé]rdida\s+de\s+l[ií]quido|mareo\s+fuerte|desmayo|urgente|diagn[oó]stico\s+(?:m[eé]dico|cl[ií]nico|personalizado|de mi|del resultado)|contraindicaci[oó]n|malestar\s+importante|mastitis)/.test(
+      /(dolor\s+fuerte|sangrado|fiebre|contracciones?\s+fuertes?|no\s+noto\s+al\s+beb[eé]|p[eé]rdida\s+de\s+l[ií]quido|mareo\s+fuerte|desmayo|urgente|me\s+encuentro\s+muy\s+mal|diagn[oó]stico\s+(?:m[eé]dico|cl[ií]nico|personalizado|de mi|del resultado)|contraindicaci[oó]n|malestar\s+importante|mastitis)/.test(
         text,
       );
     const clinical = clinicalSignal;
@@ -359,6 +439,14 @@ export class LlmIntentClassifier {
         ? "PRUEBA_BOT_CODEX_NO_CLIENTE_REAL"
         : undefined,
     };
+    const serviceQuestionFocus = detectServiceQuestionFocus({
+      text,
+      service,
+      clinical,
+      wantsAvailability,
+      wantsBooking: wantsBookingFocus,
+      wantsPricing: wantsPayment || /\b(?:precio|precios|tarifa|tarifas|cu[aá]nto cuesta|cuanto cuesta|€)\b/.test(text),
+    });
 
     return validateStructuredIntent({
       intent: reset
@@ -392,6 +480,7 @@ export class LlmIntentClassifier {
                               : "unknown",
       slots,
       service_candidate: service?.id,
+      service_question_focus: serviceQuestionFocus,
       location_preference: location,
       venue_preference:
         location && ["up&you", "hydra", "beup"].includes(location) ? location : undefined,

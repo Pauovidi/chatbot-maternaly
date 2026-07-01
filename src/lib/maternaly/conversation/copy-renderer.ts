@@ -9,6 +9,7 @@ import {
   MATERNALY_NORMALIZED_SERVICES,
   type MaternalyNormalizedServiceKey,
 } from "@/lib/maternaly/sheets/normalized-template";
+import type { MaternalyServiceQuestionFocus } from "@/lib/maternaly/llm/interpreter";
 
 export type MaternalyCopyAction =
   | "silent_human"
@@ -26,6 +27,8 @@ export interface MaternalyCopyDecision {
   action: MaternalyCopyAction;
   serviceKey?: MaternalyNormalizedServiceKey;
   service?: KnowledgeService | null;
+  serviceQuestionFocus?: MaternalyServiceQuestionFocus;
+  locationPreference?: string;
   reason?: string;
 }
 
@@ -76,7 +79,20 @@ function fieldLabel(field: string): string {
 }
 
 function warmNextQuestion(question: string): string {
-  return question.endsWith("🌸") ? question : `${question} 🌸`;
+  return /[🌸💛😊🤰✅🫶]$/.test(question) ? question : `${question} 😊`;
+}
+
+function normalizeLocation(value: string | undefined): "bilbao" | "erandio" | undefined {
+  const normalized = value?.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  if (normalized?.includes("bilbao")) {
+    return "bilbao";
+  }
+
+  if (normalized?.includes("erandio")) {
+    return "erandio";
+  }
+
+  return undefined;
 }
 
 export class MaternalyCopyRenderer {
@@ -91,10 +107,10 @@ export class MaternalyCopyRenderer {
       case "silent_human":
         return undefined;
       case "reset":
-        return "Listo, he reiniciado la conversación y empezamos de nuevo con calma. ¿Qué te apetece mirar ahora de Maternaly? 🌸";
+        return "Listo, he reiniciado la conversación y seguimos poquito a poco. ¿Qué te apetece mirar ahora de Maternaly? 💛";
       case "handoff":
         if (input.decision.reason === "clinical_safety_requires_professional") {
-          return "Siento que estés pasando por eso. Para cuidarte bien, lo más seguro es que lo revise una profesional del equipo de Maternaly. No puedo hacer diagnóstico por aquí, pero lo dejo preparado para revisión.";
+          return "Siento que estés pasando por eso. Por seguridad, esto debe revisarlo una profesional cuanto antes. No puedo hacer diagnóstico por WhatsApp, así que te paso con el equipo de Maternaly para que lo miren contigo. Si el sangrado, el dolor o cualquier síntoma importante continúa o te preocupa, no esperes a la respuesta del bot y contacta con tu profesional sanitario o urgencias.";
         }
         if (input.decision.reason === "cancel_or_reschedule_requires_human") {
           return "Para cambios de fecha o cancelaciones, lo revisa directamente el equipo de Maternaly para hacerlo con seguridad. Te paso con una persona.";
@@ -110,9 +126,9 @@ export class MaternalyCopyRenderer {
       case "invoice":
         return "Puedo dejar anotada la solicitud de factura o justificante. El equipo la revisará con el pago validado antes de emitir nada.";
       case "greeting":
-        return "¡Hola! Soy el asistente de Maternaly. Estoy aquí para ayudarte con calma con información o con una solicitud para talleres y charlas. ¿Qué necesitas mirar hoy? 🌸";
+        return "¡Hola! Soy el asistente de Maternaly. Estoy aquí para ayudarte de forma cercana con información o con una solicitud para talleres y charlas. ¿Qué necesitas mirar hoy? 🫶";
       case "service_info":
-        return service ? this.renderServiceInfo(service) : this.renderGeneral();
+        return service ? this.renderServiceInfo(service, input.decision) : this.renderGeneral();
       case "normalized_registration":
         return this.renderNormalizedRegistration(input.toolResult, service);
       case "general":
@@ -126,12 +142,16 @@ export class MaternalyCopyRenderer {
   }
 
   private renderGeneral(): string {
-    return "Estoy aquí para ayudarte con calma. Puedo orientarte sobre charlas de embarazo, taller BLW, Pilates, AIPAP, suelo pélvico, diagnóstico prenatal, lactancia o fisioterapia pediátrica. ¿Qué te apetece mirar primero? 🌸";
+    return "Puedo orientarte sobre charlas de embarazo, taller BLW, Pilates, AIPAP, suelo pélvico, diagnóstico prenatal, lactancia o fisioterapia pediátrica. ¿Qué te apetece mirar primero? 💛";
   }
 
-  private renderServiceInfo(service: KnowledgeService): string {
+  private renderServiceInfo(service: KnowledgeService, decision?: MaternalyCopyDecision): string {
     if (service.id === "pilates") {
-      return this.renderPilatesInfo(service);
+      return this.renderPilatesInfo(
+        service,
+        decision?.serviceQuestionFocus ?? "general",
+        decision?.locationPreference,
+      );
     }
 
     const parts = [
@@ -144,16 +164,52 @@ export class MaternalyCopyRenderer {
     return `${parts} ${warmNextQuestion(service.nextQuestion)}`;
   }
 
-  private renderPilatesInfo(service: KnowledgeService): string {
-    return [
-      "Pilates embarazo en Maternaly se trabaja en grupos reducidos, con atención cercana para cuidarte a ti y a tu bebé durante esta etapa.",
-      "Puedes empezar a partir de la semana 14 de embarazo y continuar hasta el final de la gestación.",
-      "Beneficios: ayuda a mejorar el tono muscular y la forma física, aumenta la fuerza y la resistencia, favorece la circulación de las piernas, cuida la postura y la espalda, trabaja respiración, conciencia corporal y suelo pélvico, y aporta bienestar y relajación.",
-      "Bilbao: lunes 10:00-11:00, lunes 11:00-12:00, lunes 17:00-18:00 y lunes 18:15-19:15; miércoles 10:00-11:00, miércoles 17:00-18:00 y miércoles 18:15-19:15.",
-      "Erandio: martes 17:30-18:30; jueves 10:00-11:00, jueves 11:00-12:00 y jueves 17:30-18:30.",
-      `Precio: ${service.pricing?.join(" / ") ?? "consultar con el equipo"}.`,
-      "¿Te apetece que deje tu interés preparado para que el equipo revise disponibilidad? 🌸",
-    ].join("\n");
+  private renderPilatesInfo(
+    service: KnowledgeService,
+    focus: MaternalyServiceQuestionFocus,
+    locationPreference?: string,
+  ): string {
+    const location = normalizeLocation(locationPreference);
+
+    if (focus === "benefits") {
+      return "Pilates embarazo puede ayudarte a sentirte más fuerte y acompañada en esta etapa: mejora tono muscular, postura, respiración, circulación y suelo pélvico, y aporta bienestar. Se trabaja en grupos reducidos para cuidaros bien a ti y a tu bebé. ¿Te cuento también horarios o precios? 💛";
+    }
+
+    if (focus === "schedule") {
+      if (location === "bilbao") {
+        return "En Maternaly Bilbao, Pilates embarazo está disponible los lunes 10:00-11:00, lunes 11:00-12:00, lunes 17:00-18:00 y lunes 18:15-19:15; y los miércoles 10:00-11:00, miércoles 17:00-18:00 y miércoles 18:15-19:15. ¿Te cuento también precios? 😊";
+      }
+
+      if (location === "erandio") {
+        return "En Maternaly Erandio, Pilates embarazo está disponible los martes 17:30-18:30; y los jueves 10:00-11:00, jueves 11:00-12:00 y jueves 17:30-18:30. ¿Te cuento también precios? 😊";
+      }
+
+      return "Pilates embarazo se realiza en Maternaly Bilbao y Erandio. Bilbao: lunes 10:00-11:00, 11:00-12:00, 17:00-18:00 y 18:15-19:15; miércoles 10:00-11:00, 17:00-18:00 y 18:15-19:15. Erandio: martes 17:30-18:30; jueves 10:00-11:00, 11:00-12:00 y 17:30-18:30. ¿Te apetece que miremos una sede concreta? 😊";
+    }
+
+    if (focus === "start_week") {
+      return "Puedes empezar Pilates embarazo a partir de la semana 14 y continuar hasta el final de la gestación, siempre que no haya una indicación clínica que recomiende otra cosa. Si tienes alguna duda personal, mejor que lo revise el equipo o tu profesional sanitario. 🤰";
+    }
+
+    if (focus === "pricing") {
+      return `Pilates embarazo cuesta ${service.pricing?.[0] ?? "59 €/mes 1 clase/semana"} o ${service.pricing?.[1] ?? "99 €/mes 2 clases/semana"}. ¿Te cuento horarios de Bilbao o Erandio? ✅`;
+    }
+
+    if (focus === "booking") {
+      return "Pilates embarazo todavía no está conectado aquí a una agenda automática de plazas. No te confirmo plaza por WhatsApp, pero puedo dejar tu interés preparado para que el equipo de Maternaly revise disponibilidad y te acompañe con la opción que mejor encaje. ¿Te va bien que lo dejemos para revisión?";
+    }
+
+    if (focus === "locations") {
+      return "Pilates embarazo se puede realizar en Maternaly Bilbao y Maternaly Erandio, en grupos reducidos. Si quieres, lo vemos por sede y horario. 💛";
+    }
+
+    if (focus === "clinical_risk") {
+      return this.render({
+        decision: { action: "handoff", reason: "clinical_safety_requires_professional" },
+      }) ?? this.renderTechnicalFallback();
+    }
+
+    return "Pilates embarazo en Maternaly se trabaja en grupos reducidos desde la semana 14 para cuidar postura, respiración, fuerza y suelo pélvico durante la gestación. Se ofrece en Bilbao y Erandio. ¿Te cuento beneficios, horarios o precios? 🌸";
   }
 
   private renderNormalizedRegistration(

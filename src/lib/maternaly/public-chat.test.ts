@@ -19,7 +19,7 @@ describe("Maternaly public chat", () => {
     expect(reply).toContain("Pilates embarazo");
     expect(reply).toContain("59 €/mes");
     expect(reply).toContain("99 €/mes");
-    expect(reply).toMatch(/te apetece|equipo revise disponibilidad/i);
+    expect(reply).toMatch(/horarios de Bilbao o Erandio/i);
     expect(reply).not.toMatch(forbiddenResponsePattern);
   });
 

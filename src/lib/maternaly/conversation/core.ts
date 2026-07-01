@@ -91,6 +91,8 @@ export interface MaternalyAuthorityTurnTrace {
   intent: {
     intent: StructuredIntent["intent"];
     serviceCandidate?: string;
+    serviceQuestionFocus: StructuredIntent["service_question_focus"];
+    locationPreference?: string;
     shouldHandoff: boolean;
     safetyFlags: string[];
   };
@@ -143,6 +145,8 @@ interface PolicyDecision {
   action: PolicyAction;
   serviceKey?: MaternalyNormalizedServiceKey;
   service?: KnowledgeService | null;
+  serviceQuestionFocus?: StructuredIntent["service_question_focus"];
+  locationPreference?: string;
   reason?: string;
 }
 
@@ -841,7 +845,12 @@ export class MaternalyConversationPolicy {
           : intent.safety_flags.includes("clinical_or_diagnostic_escalation")
             ? "clinical_safety_requires_professional"
             : "user_or_safety_handoff";
-      return { action: "handoff", reason };
+      return {
+        action: "handoff",
+        reason,
+        serviceQuestionFocus: intent.service_question_focus,
+        locationPreference: intent.location_preference,
+      };
     }
 
     if (intent.intent === "privacy_question") {
@@ -863,7 +872,13 @@ export class MaternalyConversationPolicy {
       !hasRegistrationDataSlots(intent.slots) &&
       ["general_info", "service_question"].includes(intent.intent)
     ) {
-      return { action: "service_info", service, reason: "faq_escape_hatch" };
+      return {
+        action: "service_info",
+        service,
+        reason: "faq_escape_hatch",
+        serviceQuestionFocus: intent.service_question_focus,
+        locationPreference: intent.location_preference,
+      };
     }
 
     if (state.serviceKey) {
@@ -883,7 +898,12 @@ export class MaternalyConversationPolicy {
     }
 
     if (service) {
-      return { action: "service_info", service };
+      return {
+        action: "service_info",
+        service,
+        serviceQuestionFocus: intent.service_question_focus,
+        locationPreference: intent.location_preference,
+      };
     }
 
     if (intent.intent === "greeting") {
@@ -1102,6 +1122,8 @@ export class MaternalyCoreAdapter {
           turnId,
           intent: intent.intent,
           serviceCandidate: intent.service_candidate,
+          serviceQuestionFocus: intent.service_question_focus,
+          locationPreference: intent.location_preference,
           slots: definedEntries({
             service_id: intent.slots.service_id,
             normalized_service_key: intent.slots.normalized_service_key,
@@ -1122,6 +1144,8 @@ export class MaternalyCoreAdapter {
           source: "maternaly_core_policy_copy",
           intent: intent.intent,
           serviceCandidate: intent.service_candidate,
+          serviceQuestionFocus: intent.service_question_focus,
+          locationPreference: intent.location_preference,
           needsAvailabilityLookup: intent.needs_availability_lookup,
           shouldHandoff: intent.should_handoff,
           safetyFlags: intent.safety_flags,
@@ -1134,6 +1158,7 @@ export class MaternalyCoreAdapter {
           action: decision.action,
           reason: decision.reason,
           serviceKey: decision.serviceKey ?? state.serviceKey,
+          serviceQuestionFocus: decision.serviceQuestionFocus,
         },
       },
     ];
@@ -1279,12 +1304,28 @@ export class MaternalyCoreAdapter {
     const needsHuman =
       decision.action === "handoff" ||
       (toolResult?.status === "write_result" && Boolean(toolResult.plan?.blocked || !toolResult.writeResult?.ok));
+    const clinicalHandoff =
+      decision.reason === "clinical_safety_requires_professional" ||
+      intent.service_question_focus === "clinical_risk";
     if (needsHuman) {
+      if (clinicalHandoff) {
+        events.push({
+          eventType: "maternaly_clinical_safety_handoff",
+          payload: {
+            reason: decision.reason ?? "clinical_safety_requires_professional",
+            serviceCandidate: intent.service_candidate,
+            safetyFlags: intent.safety_flags,
+            mode: "human",
+            requiresManualReview: true,
+          },
+        });
+      }
       events.push({
         eventType: "maternaly_handoff_required",
         payload: {
           reason: decision.reason ?? toolResult?.writeResult?.blockedReason ?? "manual_review_required",
           serviceKey: decision.serviceKey ?? state.serviceKey,
+          clinical: clinicalHandoff,
           blockedReasons: toolResult?.plan?.blockedReasons,
           readError: safeInternalError(toolResult?.error),
         },
@@ -1294,6 +1335,7 @@ export class MaternalyCoreAdapter {
         payload: {
           matchedFrom: "maternaly_core_policy_copy",
           reason: decision.reason ?? toolResult?.writeResult?.blockedReason,
+          clinical: clinicalHandoff,
         },
       });
     }
@@ -1342,6 +1384,8 @@ export class MaternalyCoreAdapter {
       intent: {
         intent: intent.intent,
         serviceCandidate: intent.service_candidate,
+        serviceQuestionFocus: intent.service_question_focus,
+        locationPreference: intent.location_preference,
         shouldHandoff: intent.should_handoff,
         safetyFlags: intent.safety_flags,
       },
@@ -1401,6 +1445,7 @@ export class MaternalyCoreAdapter {
         maternalyInvoiceStatus:
           decision.action === "invoice" ? "pending" : input.conversation.maternalyInvoiceStatus ?? "none",
         maternalyReviewStatus: needsHuman ? "manual_review_required" : input.conversation.maternalyReviewStatus ?? "ok",
+        priority: clinicalHandoff ? "urgent" : input.conversation.priority,
         mode:
           decision.action === "reset"
             ? "bot"

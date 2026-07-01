@@ -51,7 +51,14 @@ export function buildMaternalyReplyFromIntent(intent: StructuredIntent): string 
   const service = getKnowledgeService(intent.service_candidate);
   if (service) {
     return ensureMaternalySafeReply(
-      renderer.render({ decision: { action: "service_info", service } }),
+      renderer.render({
+        decision: {
+          action: "service_info",
+          service,
+          serviceQuestionFocus: intent.service_question_focus,
+          locationPreference: intent.location_preference,
+        },
+      }),
     );
   }
 

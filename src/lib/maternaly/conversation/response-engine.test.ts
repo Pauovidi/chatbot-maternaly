@@ -53,9 +53,11 @@ describe("Maternaly response engine", () => {
 
     const result = await buildMaternalyWhatsAppReply("qué beneficios tiene pilates embarazo");
 
-    expect(result.reply).toMatch(/cercana|cuidarte|calma|bienestar/i);
+    expect(result.intent.service_question_focus).toBe("benefits");
+    expect(result.reply).toMatch(/acompañada|cuidaros|bienestar/i);
     expect(result.reply).toMatch(/tono muscular|fuerza|resistencia/i);
     expect(result.reply).toMatch(/circulaci[oó]n|postura|suelo p[eé]lvico/i);
+    expect(result.reply).not.toMatch(/lunes 10:00-11:00|59 €\/mes/i);
     expect(result.reply).not.toMatch(forbiddenResponsePattern);
     expect(countEmojis(result.reply)).toBeLessThanOrEqual(2);
   });
@@ -65,11 +67,14 @@ describe("Maternaly response engine", () => {
 
     const result = await buildMaternalyWhatsAppReply("horarios pilates embarazo bilbao");
 
+    expect(result.intent.service_question_focus).toBe("schedule");
+    expect(result.intent.location_preference).toBe("bilbao");
     expect(result.reply).toContain("Bilbao");
     expect(result.reply).toMatch(/lunes 10:00-11:00/i);
     expect(result.reply).toMatch(/lunes 18:15-19:15/i);
     expect(result.reply).toMatch(/mi[eé]rcoles 17:00-18:00/i);
     expect(result.reply).toMatch(/mi[eé]rcoles 18:15-19:15/i);
+    expect(result.reply).not.toContain("Erandio");
     expect(countEmojis(result.reply)).toBeLessThanOrEqual(2);
   });
 
@@ -78,10 +83,24 @@ describe("Maternaly response engine", () => {
 
     const result = await buildMaternalyWhatsAppReply("pilates embarazo erandio");
 
+    expect(result.intent.service_question_focus).toBe("locations");
+    expect(result.reply).toContain("Erandio");
+    expect(result.reply).toMatch(/Bilbao|sede|sedes/i);
+    expect(countEmojis(result.reply)).toBeLessThanOrEqual(2);
+  });
+
+  it("answers Erandio Pilates schedules without Bilbao when schedule focus includes Erandio", async () => {
+    vi.stubEnv("LLM_PROVIDER", "mock");
+
+    const result = await buildMaternalyWhatsAppReply("horarios pilates embarazo erandio");
+
+    expect(result.intent.service_question_focus).toBe("schedule");
+    expect(result.intent.location_preference).toBe("erandio");
     expect(result.reply).toContain("Erandio");
     expect(result.reply).toMatch(/martes 17:30-18:30/i);
     expect(result.reply).toMatch(/jueves 10:00-11:00/i);
     expect(result.reply).toMatch(/jueves 17:30-18:30/i);
+    expect(result.reply).not.toContain("Bilbao");
     expect(countEmojis(result.reply)).toBeLessThanOrEqual(2);
   });
 
@@ -90,8 +109,10 @@ describe("Maternaly response engine", () => {
 
     const result = await buildMaternalyWhatsAppReply("desde qué semana puedo hacer pilates embarazo");
 
+    expect(result.intent.service_question_focus).toBe("start_week");
     expect(result.reply).toMatch(/semana 14/i);
     expect(result.reply).toMatch(/final de la gestaci[oó]n/i);
+    expect(result.reply).not.toMatch(/lunes 10:00-11:00|59 €\/mes|tono muscular/i);
     expect(countEmojis(result.reply)).toBeLessThanOrEqual(2);
   });
 
@@ -100,9 +121,23 @@ describe("Maternaly response engine", () => {
 
     const result = await buildMaternalyWhatsAppReply("precio pilates embarazo");
 
+    expect(result.intent.service_question_focus).toBe("pricing");
     expect(result.reply).toContain("59 €/mes");
     expect(result.reply).toContain("99 €/mes");
     expect(result.reply).toMatch(/1 clase\/semana|2 clases\/semana/i);
+    expect(result.reply).not.toMatch(/lunes 10:00-11:00|martes 17:30-18:30/i);
+    expect(countEmojis(result.reply)).toBeLessThanOrEqual(2);
+  });
+
+  it("answers Pilates booking focus without claiming automatic reservation", async () => {
+    vi.stubEnv("LLM_PROVIDER", "mock");
+
+    const result = await buildMaternalyWhatsAppReply("quiero reservar pilates embarazo");
+
+    expect(result.intent.service_question_focus).toBe("booking");
+    expect(result.reply).toMatch(/agenda autom[aá]tica|no te confirmo plaza/i);
+    expect(result.reply).toMatch(/equipo de Maternaly revise disponibilidad/i);
+    expect(result.reply).not.toMatch(/plaza confirmada|pago confirmado/i);
     expect(countEmojis(result.reply)).toBeLessThanOrEqual(2);
   });
 
@@ -114,9 +149,12 @@ describe("Maternaly response engine", () => {
     );
 
     expect(result.intent.should_handoff).toBe(true);
+    expect(result.intent.service_question_focus).toBe("clinical_risk");
     expect(result.intent.safety_flags).toContain("clinical_or_diagnostic_escalation");
     expect(result.reply).toMatch(/profesional|equipo de Maternaly/i);
     expect(result.reply).toMatch(/No puedo hacer diagn[oó]stico/i);
+    expect(result.reply).toMatch(/urgencias|profesional sanitario/i);
+    expect(result.reply).not.toMatch(/lo dejo preparado/i);
     expect(result.reply).not.toMatch(/beneficios|precio|horarios/i);
     expect(countEmojis(result.reply)).toBe(0);
   });

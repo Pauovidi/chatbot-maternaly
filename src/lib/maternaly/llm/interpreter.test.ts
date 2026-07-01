@@ -25,6 +25,7 @@ describe("Maternaly LLM interpreter", () => {
         JSON.stringify({
           output_text: JSON.stringify({
             intent: "greeting",
+            service_question_focus: "general",
             needs_availability_lookup: false,
             confidence: 0.9,
             missing_fields: [],
@@ -45,7 +46,24 @@ describe("Maternaly LLM interpreter", () => {
 
     expect(system).toContain("Maternaly");
     expect(system).toContain("AIPAP");
+    expect(system).toContain("service_question_focus");
     expect(system).not.toMatch(forbiddenPromptPattern);
+  });
+
+  it.each([
+    ["qué beneficios tiene pilates embarazo", "benefits", undefined],
+    ["Dime los horarios pilates embarazo bilbao", "schedule", "bilbao"],
+    ["desde qué semana puedo hacer pilates", "start_week", undefined],
+    ["precio pilates embarazo", "pricing", undefined],
+    ["quiero reservar pilates embarazo", "booking", undefined],
+  ])("detects service question focus for '%s'", async (message, focus, location) => {
+    const classifier = new LlmIntentClassifier();
+
+    await expect(classifier.classify(message)).resolves.toMatchObject({
+      service_candidate: "pilates",
+      service_question_focus: focus,
+      location_preference: location,
+    });
   });
 
   it("marks cancellations, rescheduling and invoice/payment requests for human handoff", async () => {
@@ -72,6 +90,17 @@ describe("Maternaly LLM interpreter", () => {
       classifier.classify("tengo dolor fuerte y sangrado, puedo hacer pilates embarazo"),
     ).resolves.toMatchObject({
       service_candidate: "pilates",
+      service_question_focus: "clinical_risk",
+      should_handoff: true,
+      safety_flags: expect.arrayContaining(["clinical_or_diagnostic_escalation"]),
+    });
+  });
+
+  it("marks clinical risk without needing a service mention", async () => {
+    const classifier = new LlmIntentClassifier();
+
+    await expect(classifier.classify("tengo dolor fuerte y sangrado")).resolves.toMatchObject({
+      service_question_focus: "clinical_risk",
       should_handoff: true,
       safety_flags: expect.arrayContaining(["clinical_or_diagnostic_escalation"]),
     });

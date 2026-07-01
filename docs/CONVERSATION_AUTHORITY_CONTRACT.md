@@ -18,6 +18,7 @@ Toda respuesta visible automatica de Maternaly debe seguir este orden:
 
 - El NLU/LLM no redacta texto visible final.
 - `StructuredIntent` no puede contener `reply`, `replyText`, `message`, `botReply` ni `visibleText`.
+- `StructuredIntent.service_question_focus` es solo una señal estructurada para adaptar el renderer; no contiene copy visible.
 - El reducer actualiza estado y `pendingFields`; no redacta copy.
 - La policy decide accion y handoff; no redacta copy final.
 - El ToolExecutor solo ejecuta acciones autorizadas por policy.
@@ -25,6 +26,7 @@ Toda respuesta visible automatica de Maternaly debe seguir este orden:
 - `MaternalyCopyRenderer` es la fuente de copy visible del bot.
 - `MaternalyConversationOutbox` solo acepta `MaternalyRenderedMessage` y construye el canal.
 - Human mode no auto-responde salvo comando explicito de reset/volver al bot.
+- Handoff clinico por senales de riesgo debe pasar a modo humano/manual review, emitir evento seguro y avisar desde `MaternalyCopyRenderer`.
 
 ## ToolExecutor
 
@@ -58,6 +60,7 @@ La policy debe manejar antes del flujo activo:
 - `maternaly_authority_timing_completed`
 - `maternaly_authority_turn_completed`
 - `maternaly_outbox_sent` cuando hay respuesta visible enviada al canal
+- `maternaly_clinical_safety_handoff` cuando hay handoff clinico por seguridad
 
 `maternaly_authority_turn_completed` contiene renderer, outbox e invariantes `state_after` para evitar escrituras de eventos excesivas en flujos multi-turn.
 

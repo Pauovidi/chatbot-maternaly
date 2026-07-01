@@ -177,10 +177,13 @@ describe("Maternaly conversation authority", () => {
     expect(result.intent).toMatchObject({
       should_handoff: true,
       service_candidate: "pilates",
+      service_question_focus: "clinical_risk",
     });
     expect(result.intent.safety_flags).toContain("clinical_or_diagnostic_escalation");
     expect(result.reply).toMatch(/profesional|equipo de Maternaly/i);
     expect(result.reply).toMatch(/No puedo hacer diagn[oó]stico/i);
+    expect(result.reply).toMatch(/urgencias|profesional sanitario/i);
+    expect(result.reply).not.toMatch(/lo dejo preparado/i);
     expect(result.renderedMessage).toMatchObject({
       kind: "text",
       source: "copy_renderer",
@@ -190,6 +193,69 @@ describe("Maternaly conversation authority", () => {
     expect(result.authorityTrace.policy).toMatchObject({
       action: "handoff",
       reason: "clinical_safety_requires_professional",
+    });
+    expect(result.authorityTrace.intent.serviceQuestionFocus).toBe("clinical_risk");
+    expect(result.conversationPatch).toMatchObject({
+      mode: "human",
+      humanRequested: true,
+      requiresManualReview: true,
+      maternalyReviewStatus: "manual_review_required",
+      priority: "urgent",
+    });
+    expect(eventTypes(result)).toEqual(
+      expect.arrayContaining([
+        "maternaly_clinical_safety_handoff",
+        "maternaly_handoff_required",
+        "human_requested",
+      ]),
+    );
+  });
+
+  it("suppresses bot replies after clinical handoff until an explicit reset", async () => {
+    const adapter = new MaternalyCoreAdapter();
+    const first = await adapter.handle({
+      conversation: fakeConversation(),
+      inbound: {
+        provider: "twilio_sandbox",
+        from: "whatsapp:+34600111222",
+        text: "tengo dolor fuerte y sangrado",
+      },
+    });
+    const humanConversation = fakeConversation({
+      ...first.conversationPatch,
+      mode: "human",
+      humanRequested: true,
+    });
+
+    const second = await adapter.handle({
+      conversation: humanConversation,
+      inbound: {
+        provider: "twilio_sandbox",
+        from: "whatsapp:+34600111222",
+        text: "precio pilates embarazo",
+      },
+    });
+
+    expect(second.reply).toBeUndefined();
+    expect(second.authorityTrace.policy).toMatchObject({
+      action: "silent_human",
+      reason: "human_mode",
+    });
+
+    const reset = await adapter.handle({
+      conversation: humanConversation,
+      inbound: {
+        provider: "twilio_sandbox",
+        from: "whatsapp:+34600111222",
+        text: "reiniciar",
+      },
+    });
+
+    expect(reset.reply).toMatch(/reiniciado|Maternaly/i);
+    expect(reset.conversationPatch).toMatchObject({
+      mode: "bot",
+      humanRequested: false,
+      requiresManualReview: false,
     });
   });
 });

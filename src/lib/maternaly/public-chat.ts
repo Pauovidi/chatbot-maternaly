@@ -17,7 +17,7 @@ export const MATERNALY_CHAT_QUICK_ACTIONS = [
 ] as const;
 
 export function getMaternalyChatWelcomeMessage(): string {
-  return "Hola, soy el asistente de Maternaly. Estoy aquí para ayudarte con calma con información o con una solicitud para talleres y charlas. ¿Qué necesitas mirar hoy? 🌸";
+  return "Hola, soy el asistente de Maternaly. Estoy aquí para ayudarte de forma cercana con información o con una solicitud para talleres y charlas. ¿Qué necesitas mirar hoy? 🫶";
 }
 
 function buildPublicReplyFromIntent(intent: StructuredIntent): string {
@@ -53,7 +53,16 @@ function buildPublicReplyFromIntent(intent: StructuredIntent): string {
 
   const service = getKnowledgeService(intent.service_candidate);
   if (service) {
-    return renderer.render({ decision: { action: "service_info", service } }) ?? renderer.renderTechnicalFallback();
+    return (
+      renderer.render({
+        decision: {
+          action: "service_info",
+          service,
+          serviceQuestionFocus: intent.service_question_focus,
+          locationPreference: intent.location_preference,
+        },
+      }) ?? renderer.renderTechnicalFallback()
+    );
   }
 
   return renderer.render({ decision: { action: "general" } }) ?? renderer.renderTechnicalFallback();

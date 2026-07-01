@@ -10,6 +10,21 @@ function countEmojis(text: string): number {
   return Array.from(text.matchAll(emojiPattern)).length;
 }
 
+function pilatesService() {
+  return {
+    id: "pilates" as const,
+    name: "Pilates Embarazo",
+    aliases: ["pilates"],
+    category: "informational" as const,
+    summary: "Pilates para embarazo en grupos reducidos.",
+    details: [],
+    requiredData: [],
+    pricing: ["59 €/mes 1 clase/semana", "99 €/mes 2 clases/semana"],
+    safetyNotes: [],
+    nextQuestion: "¿Te apetece que deje tu interés preparado para que el equipo revise disponibilidad?",
+  };
+}
+
 describe("MaternalyCopyRenderer availability guardrails", () => {
   it("renders sessions instead of availability fallback when sessions are present", () => {
     const renderer = new MaternalyCopyRenderer();
@@ -98,32 +113,103 @@ describe("MaternalyCopyRenderer availability guardrails", () => {
     expect(countEmojis(reply)).toBeLessThanOrEqual(2);
   });
 
-  it("renders Pilates with enriched knowledge and soft availability close", () => {
+  it("renders Pilates general info without the full schedule and pricing block", () => {
     const renderer = new MaternalyCopyRenderer();
     const reply = renderer.render({
       decision: {
         action: "service_info",
-        service: {
-          id: "pilates",
-          name: "Pilates Embarazo",
-          aliases: ["pilates"],
-          category: "informational",
-          summary: "Pilates para embarazo en grupos reducidos.",
-          details: [],
-          requiredData: [],
-          pricing: ["59 €/mes 1 clase/semana", "99 €/mes 2 clases/semana"],
-          safetyNotes: [],
-          nextQuestion: "¿Te apetece que deje tu interés preparado para que el equipo revise disponibilidad?",
-        },
+        service: pilatesService(),
+        serviceQuestionFocus: "general",
       },
     }) ?? "";
 
-    expect(reply).toMatch(/grupos reducidos/i);
-    expect(reply).toMatch(/semana 14/i);
+    expect(reply).toMatch(/grupos reducidos|semana 14/i);
+    expect(reply).toMatch(/beneficios|horarios|precios/i);
+    expect(reply).not.toMatch(/lunes 10:00-11:00/i);
+    expect(reply).not.toContain("59 €/mes");
+    expect(countEmojis(reply)).toBeLessThanOrEqual(2);
+  });
+
+  it("renders Pilates benefits without full schedules or prices", () => {
+    const renderer = new MaternalyCopyRenderer();
+    const reply = renderer.render({
+      decision: {
+        action: "service_info",
+        service: pilatesService(),
+        serviceQuestionFocus: "benefits",
+      },
+    }) ?? "";
+
     expect(reply).toMatch(/tono muscular|suelo p[eé]lvico|circulaci[oó]n/i);
+    expect(reply).not.toMatch(/lunes 10:00-11:00|Erandio: martes/i);
+    expect(reply).not.toContain("59 €/mes");
+    expect(countEmojis(reply)).toBeLessThanOrEqual(2);
+  });
+
+  it("renders only Bilbao schedules when focus and location request Bilbao", () => {
+    const renderer = new MaternalyCopyRenderer();
+    const reply = renderer.render({
+      decision: {
+        action: "service_info",
+        service: pilatesService(),
+        serviceQuestionFocus: "schedule",
+        locationPreference: "Bilbao",
+      },
+    }) ?? "";
+
+    expect(reply).toContain("Bilbao");
+    expect(reply).toMatch(/lunes 10:00-11:00/i);
+    expect(reply).toMatch(/mi[eé]rcoles 18:15-19:15/i);
+    expect(reply).not.toContain("Erandio");
+    expect(reply).not.toContain("59 €/mes");
+    expect(countEmojis(reply)).toBeLessThanOrEqual(2);
+  });
+
+  it("renders start week without full Pilates blocks", () => {
+    const renderer = new MaternalyCopyRenderer();
+    const reply = renderer.render({
+      decision: {
+        action: "service_info",
+        service: pilatesService(),
+        serviceQuestionFocus: "start_week",
+      },
+    }) ?? "";
+
+    expect(reply).toMatch(/semana 14/i);
+    expect(reply).toMatch(/final de la gestaci[oó]n/i);
+    expect(reply).not.toMatch(/lunes 10:00-11:00|59 €\/mes|tono muscular/i);
+    expect(countEmojis(reply)).toBeLessThanOrEqual(2);
+  });
+
+  it("renders pricing without full Pilates schedules", () => {
+    const renderer = new MaternalyCopyRenderer();
+    const reply = renderer.render({
+      decision: {
+        action: "service_info",
+        service: pilatesService(),
+        serviceQuestionFocus: "pricing",
+      },
+    }) ?? "";
+
     expect(reply).toContain("59 €/mes");
     expect(reply).toContain("99 €/mes");
-    expect(reply).toMatch(/te apetece/i);
+    expect(reply).not.toMatch(/lunes 10:00-11:00|martes 17:30-18:30/i);
+    expect(countEmojis(reply)).toBeLessThanOrEqual(2);
+  });
+
+  it("renders booking focus without inventing an automatic Pilates place", () => {
+    const renderer = new MaternalyCopyRenderer();
+    const reply = renderer.render({
+      decision: {
+        action: "service_info",
+        service: pilatesService(),
+        serviceQuestionFocus: "booking",
+      },
+    }) ?? "";
+
+    expect(reply).toMatch(/no.*confirmo plaza|agenda autom[aá]tica/i);
+    expect(reply).toMatch(/equipo de Maternaly revise disponibilidad/i);
+    expect(reply).not.toMatch(/plaza confirmada|pago confirmado/i);
     expect(countEmojis(reply)).toBeLessThanOrEqual(2);
   });
 
@@ -135,18 +221,29 @@ describe("MaternalyCopyRenderer availability guardrails", () => {
 
     expect(reply).toMatch(/profesional|equipo de Maternaly/i);
     expect(reply).toMatch(/No puedo hacer diagn[oó]stico/i);
+    expect(reply).toMatch(/urgencias|profesional sanitario/i);
+    expect(reply).not.toMatch(/lo dejo preparado/i);
     expect(countEmojis(reply)).toBe(0);
   });
 
-  it("does not force emojis into every standard message", () => {
+  it("keeps emojis moderate and varied across standard messages", () => {
     const renderer = new MaternalyCopyRenderer();
     const replies = [
       renderer.render({ decision: { action: "greeting" } }) ?? "",
       renderer.render({ decision: { action: "privacy" } }) ?? "",
       renderer.render({ decision: { action: "invoice" } }) ?? "",
+      renderer.render({
+        decision: { action: "service_info", service: pilatesService(), serviceQuestionFocus: "benefits" },
+      }) ?? "",
+      renderer.render({
+        decision: { action: "service_info", service: pilatesService(), serviceQuestionFocus: "pricing" },
+      }) ?? "",
     ];
+    const emojis = replies.flatMap((reply) => Array.from(reply.matchAll(emojiPattern), (match) => match[0]));
 
     expect(replies.some((reply) => countEmojis(reply) === 0)).toBe(true);
     expect(replies.every((reply) => countEmojis(reply) <= 2)).toBe(true);
+    expect(new Set(emojis).size).toBeGreaterThanOrEqual(2);
+    expect(replies.join("\n").match(/con calma/g)?.length ?? 0).toBeLessThanOrEqual(1);
   });
 });
