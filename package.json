@@ -19,6 +19,7 @@
     "smoke:conversation": "tsx scripts/conversation-e2e-smoke.ts",
     "smoke:conversation:sheets-real": "tsx scripts/conversation-sheets-real-smoke.ts",
     "maternaly:health": "tsx scripts/maternaly-health.ts",
+    "maternaly:authority:check": "node scripts/maternaly-authority-check.mjs",
     "maternaly:sheets:audit": "tsx scripts/maternaly-sheets-audit.ts",
     "maternaly:sheets:dry-run-write": "tsx scripts/maternaly-sheets-dry-run-write.ts",
     "maternaly:sheets:live-write-test": "node scripts/maternaly-sheets-live-write-test.mjs",

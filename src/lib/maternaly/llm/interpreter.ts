@@ -83,6 +83,14 @@ const DEFAULT_INTENT: StructuredIntent = {
   safety_flags: [],
 };
 
+export const FORBIDDEN_NLU_VISIBLE_FIELDS = [
+  "reply",
+  "replyText",
+  "message",
+  "botReply",
+  "visibleText",
+] as const;
+
 const ALLOWED_INTENTS: MaternalyIntent[] = [
   "greeting",
   "general_info",
@@ -241,8 +249,11 @@ function validateSlots(value: unknown): MaternalyNluSlots {
 }
 
 export function validateStructuredIntent(value: unknown): StructuredIntent {
-  const raw = value as Partial<StructuredIntent>;
+  const raw = value as Partial<StructuredIntent> & Record<string, unknown>;
   const intent = raw.intent ?? DEFAULT_INTENT.intent;
+  const forbiddenVisibleFields = FORBIDDEN_NLU_VISIBLE_FIELDS.filter((field) =>
+    Object.prototype.hasOwnProperty.call(raw ?? {}, field),
+  );
   const slots = validateSlots(raw.slots);
   const serviceCandidate = compact(raw.service_candidate) ?? slots.service_id ?? slots.normalized_service_key;
   const locationPreference = compact(raw.location_preference) ?? slots.location;
@@ -266,7 +277,12 @@ export function validateStructuredIntent(value: unknown): StructuredIntent {
         : DEFAULT_INTENT.confidence,
     missing_fields: Array.isArray(raw.missing_fields) ? raw.missing_fields.map(String) : [],
     should_handoff: Boolean(raw.should_handoff),
-    safety_flags: Array.isArray(raw.safety_flags) ? raw.safety_flags.map(String) : [],
+    safety_flags: Array.from(
+      new Set([
+        ...(Array.isArray(raw.safety_flags) ? raw.safety_flags.map(String) : []),
+        ...forbiddenVisibleFields.map((field) => `nlu_visible_copy_field_stripped:${field}`),
+      ]),
+    ),
   };
 }
 
@@ -290,11 +306,13 @@ export class LlmIntentClassifier {
     const cancelOrReschedule =
       /(cancel|anular|darme de baja|darse de baja|\bbaja\b|cambiar(?:\s+de|\s+la)?\s+fecha|cambio(?:\s+de|\s+la)?\s+fecha|reagend|mover(?:\s+la)?\s+cita|no puedo ir|cambiar(?:\s+de|\s+la)?\s+sede)/.test(text);
     const paymentOrInvoiceHandoff = /(devolucion|devolución|factura|justificante|\bpago\b|pagar|link de pago|enlace de pago)/.test(text);
+    const stopRequest = /\b(?:stop|parar|no\s+seguir|no\s+me\s+escrib|no\s+quiero\s+mensajes|baja\s+comunicaciones)\b/.test(text);
     const handoff =
       cancelOrReschedule ||
       paymentOrInvoiceHandoff ||
+      stopRequest ||
       /(hablar con|persona humana|humano|humana|llamad|equipo|matrona|profesional)/.test(text);
-    const reset = /(reiniciar|reset|empezar de cero|borrar conversacion|borrar conversación)/.test(text);
+    const reset = /(reiniciar|reset|empezar de cero|borrar conversacion|borrar conversación|volver al bot|modo bot|reanudar bot)/.test(text);
     const privacy = /(privacidad|datos|proteccion de datos|protección de datos|rgpd|consentimiento)/.test(text);
     const selectedSession = /\b(?:opci[oó]n\s*)?([1-9])\b/.test(text) || Boolean(extractDateLike(message));
     const location = detectLocation(text);
@@ -385,6 +403,7 @@ export class LlmIntentClassifier {
       safety_flags: [
         cancelOrReschedule ? "handoff_cancel_or_reschedule" : "",
         paymentOrInvoiceHandoff ? "handoff_payment_or_invoice" : "",
+        stopRequest ? "stop_requested_no_follow_up" : "",
         service?.id === "aipap_agua" ? "pool_access_justification_required" : "",
         service?.clinicalEscalation ? "clinical_or_diagnostic_escalation" : "",
       ].filter(Boolean),

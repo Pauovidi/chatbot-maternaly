@@ -1,5 +1,6 @@
 import type { ConversationRecord, MaternalyNormalizedFlowState } from "@/lib/hotel/conversations/types";
 import { MaternalyCopyRenderer } from "@/lib/maternaly/conversation/copy-renderer";
+import type { MaternalyRenderedMessage } from "@/lib/maternaly/conversation/outbox";
 import {
   getKnowledgeService,
   getKnowledgeServiceByNormalizedKey,
@@ -48,10 +49,82 @@ export interface MaternalyConversationState extends MaternalyNormalizedFlowState
 export interface MaternalyCoreResult {
   handled: boolean;
   reply?: string;
+  renderedMessage?: MaternalyRenderedMessage;
   intent: StructuredIntent;
   state?: MaternalyNormalizedFlowState;
   conversationPatch: Partial<ConversationRecord>;
   events: Array<{ eventType: string; payload?: unknown }>;
+  authorityTrace: MaternalyAuthorityTurnTrace;
+}
+
+export interface MaternalyAuthorityTiming {
+  totalDurationMs: number;
+  nluTotalMs: number;
+  reducerMs: number;
+  policyMs: number;
+  toolsMs: number;
+  rendererMs: number;
+  outboxMs: number;
+  persistenceMs: number;
+  eventLogMs: number;
+  openaiCalls: number;
+  usedDeterministicFastPath: boolean;
+  usedFallback: boolean;
+}
+
+export interface MaternalyAuthorityTurnTrace {
+  turnId: string;
+  pipeline: Array<
+    | "normalized_inbound"
+    | "nlu_structured"
+    | "state_reducer"
+    | "policy"
+    | "tool_executor"
+    | "copy_renderer"
+    | "outbox"
+  >;
+  inbound: {
+    provider: MaternalyNormalizedInbound["provider"];
+    textLength: number;
+    fromRedacted: string;
+  };
+  intent: {
+    intent: StructuredIntent["intent"];
+    serviceCandidate?: string;
+    shouldHandoff: boolean;
+    safetyFlags: string[];
+  };
+  stateBefore: ReturnType<typeof summarizeState>;
+  stateAfter: ReturnType<typeof summarizeState> | null;
+  policy: {
+    action: PolicyAction;
+    reason?: string;
+    serviceKey?: MaternalyNormalizedServiceKey;
+  };
+  tool?: {
+    status: NormalizedToolResult["status"];
+    serviceKey: MaternalyNormalizedServiceKey;
+    missingFields: string[];
+    applied?: boolean;
+    mode?: "dry_run" | "live";
+  };
+  renderer: {
+    source: "MaternalyCopyRenderer";
+    visibleReply: boolean;
+    action: PolicyAction;
+  };
+  outbox: {
+    planned: boolean;
+    kind: "twiml" | "none";
+  };
+  invariants: {
+    nluStructuredOnly: boolean;
+    rendererUsedForVisibleText: boolean;
+    policyUsedStateAfter: boolean;
+    pendingFieldsFromStateAfter: boolean;
+    humanModeSuppressesAutoresponse: boolean;
+  };
+  timing: MaternalyAuthorityTiming;
 }
 
 type PolicyAction =
@@ -127,6 +200,47 @@ function safeInternalError(value: string | undefined): string | undefined {
     .replace(/-----BEGIN[\s\S]*?-----END [^-]+-----/g, "[redacted-private-key]")
     .replace(/[A-Za-z0-9_=-]{64,}/g, "[redacted-token]")
     .slice(0, 240);
+}
+
+function elapsedSince(start: number): number {
+  return Math.max(0, Date.now() - start);
+}
+
+function createTurnId(): string {
+  return `maternaly_turn_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function redactPhone(value: string | undefined): string {
+  const normalized = value?.replace(/[^\d+]/g, "") ?? "";
+  if (normalized.length <= 5) {
+    return normalized ? "[redacted]" : "";
+  }
+
+  return `${normalized.slice(0, 3)}...${normalized.slice(-2)}`;
+}
+
+function summarizeState(state: MaternalyNormalizedFlowState | undefined) {
+  return {
+    serviceKey: state?.serviceKey,
+    stage: state?.stage,
+    selectedSessionId: state?.selectedSessionId ? "[session-selected]" : undefined,
+    selectedGroupId: state?.selectedGroupId ? "[group-selected]" : undefined,
+    hasFullName: Boolean(state?.fullName),
+    hasPhone: Boolean(state?.phone),
+    hasEmail: Boolean(state?.email),
+    peopleCount: state?.peopleCount,
+    hasPartnerName: Boolean(state?.partnerName),
+    hasPregnancyWeek: Boolean(state?.pregnancyWeek),
+    hasFppOrDueDate: Boolean(state?.fppOrDueDate),
+    hasBabyBirthDate: Boolean(state?.babyBirthDate),
+    location: state?.location,
+    modality: state?.modality,
+    pendingFields: state?.pendingFields ?? [],
+  };
+}
+
+function inferOpenAiCall(env: NodeJS.ProcessEnv | undefined): boolean {
+  return (env?.LLM_PROVIDER ?? process.env.LLM_PROVIDER) === "openai" && Boolean(env?.OPENAI_API_KEY ?? process.env.OPENAI_API_KEY);
 }
 
 export function normalizeInboundWhatsappPhone(value: string | undefined): string | undefined {
@@ -516,6 +630,21 @@ function serviceKeyFromSlots(
   return slots.normalized_service_key ?? previous?.serviceKey;
 }
 
+function hasRegistrationDataSlots(slots: MaternalyNluSlots): boolean {
+  return Boolean(
+    slots.full_name ||
+      slots.phone ||
+      slots.email ||
+      slots.people_count ||
+      slots.partner_name ||
+      slots.pregnancy_week ||
+      slots.fpp_or_due_date ||
+      slots.baby_birth_date ||
+      slots.selected_session_id ||
+      slots.selected_group_id,
+  );
+}
+
 function serviceFromDecision(decision: PolicyDecision, state?: MaternalyNormalizedFlowState) {
   return (
     decision.service ??
@@ -725,6 +854,16 @@ export class MaternalyConversationPolicy {
       return { action: "handoff", reason: "payment_or_invoice_requires_human" };
     }
 
+    const service = getKnowledgeService(intent.service_candidate);
+    if (
+      service &&
+      !intent.needs_availability_lookup &&
+      !hasRegistrationDataSlots(intent.slots) &&
+      ["general_info", "service_question"].includes(intent.intent)
+    ) {
+      return { action: "service_info", service, reason: "faq_escape_hatch" };
+    }
+
     if (state.serviceKey) {
       return {
         action: "normalized_registration",
@@ -733,7 +872,6 @@ export class MaternalyConversationPolicy {
       };
     }
 
-    const service = getKnowledgeService(intent.service_candidate);
     if (service?.normalizedServiceKey) {
       return {
         action: "normalized_registration",
@@ -932,23 +1070,34 @@ export class MaternalyCoreAdapter {
     inbound: MaternalyNormalizedInbound;
     env?: NodeJS.ProcessEnv;
   }): Promise<MaternalyCoreResult> {
+    const turnStartedAt = Date.now();
+    const turnId = createTurnId();
+    const stateBefore = input.conversation.maternalyNormalizedFlow;
+    const openaiCallExpected = inferOpenAiCall(input.env);
+    const nluStartedAt = Date.now();
     const intent = await this.interpreter.interpret(input.inbound.text);
+    const nluTotalMs = elapsedSince(nluStartedAt);
+    const reducerStartedAt = Date.now();
     const reduced = this.reducer.reduceWithDiagnostics({
       conversation: input.conversation,
       intent,
       message: input.inbound.text,
       inbound: input.inbound,
     });
+    const reducerMs = elapsedSince(reducerStartedAt);
     const state = reduced.state;
+    const policyStartedAt = Date.now();
     const decision = this.policy.decide({
       conversation: input.conversation,
       intent,
       state,
     });
+    const policyMs = elapsedSince(policyStartedAt);
     const events: MaternalyCoreResult["events"] = [
       {
         eventType: "maternaly_nlu_interpreted",
         payload: {
+          turnId,
           intent: intent.intent,
           serviceCandidate: intent.service_candidate,
           slots: definedEntries({
@@ -966,6 +1115,7 @@ export class MaternalyCoreAdapter {
       {
         eventType: "maternaly_intent_detected",
         payload: {
+          turnId,
           botDomain: "maternaly",
           source: "maternaly_core_policy_copy",
           intent: intent.intent,
@@ -978,6 +1128,7 @@ export class MaternalyCoreAdapter {
       {
         eventType: "maternaly_policy_decision",
         payload: {
+          turnId,
           action: decision.action,
           reason: decision.reason,
           serviceKey: decision.serviceKey ?? state.serviceKey,
@@ -986,6 +1137,7 @@ export class MaternalyCoreAdapter {
     ];
 
     let toolResult: NormalizedToolResult | undefined;
+    let toolsMs = 0;
     let nextState: MaternalyNormalizedFlowState | undefined =
       decision.action === "reset"
         ? undefined
@@ -994,20 +1146,23 @@ export class MaternalyCoreAdapter {
             stage:
               decision.action === "handoff"
                 ? "handoff"
-                : state.serviceKey
+                : decision.action === "normalized_registration" && state.serviceKey
                   ? "choosing_session"
                   : state.stage,
+            pendingFields: [],
             updatedAt: nowIso(),
           };
 
     if (decision.action === "normalized_registration" && (decision.serviceKey ?? state.serviceKey)) {
       const serviceKey = (decision.serviceKey ?? state.serviceKey) as MaternalyNormalizedServiceKey;
+      const toolsStartedAt = Date.now();
       toolResult = await this.toolExecutor.runNormalizedRegistration({
         serviceKey,
         state: { ...state, serviceKey },
         message: input.inbound.text,
         env: input.env,
       });
+      toolsMs = elapsedSince(toolsStartedAt);
       nextState = {
         ...toPersistedState(state),
         serviceKey,
@@ -1023,6 +1178,7 @@ export class MaternalyCoreAdapter {
               : toolResult.status === "sessions_available"
                 ? "choosing_session"
                 : "collecting_contact",
+        pendingFields: toolResult.missingFields,
         idempotencyKey: toolResult.plan?.idempotencyKey ?? state.idempotencyKey,
         updatedAt: nowIso(),
       };
@@ -1106,7 +1262,17 @@ export class MaternalyCoreAdapter {
       });
     }
 
+    const rendererStartedAt = Date.now();
     const reply = this.renderer.render({ decision, state: nextState, toolResult });
+    const rendererMs = elapsedSince(rendererStartedAt);
+    const renderedMessage: MaternalyRenderedMessage | undefined = reply
+      ? {
+          kind: "text",
+          text: reply,
+          source: "copy_renderer",
+          renderer: "MaternalyCopyRenderer",
+        }
+      : undefined;
     const service = serviceFromDecision(decision, nextState);
     const needsHuman =
       decision.action === "handoff" ||
@@ -1130,9 +1296,97 @@ export class MaternalyCoreAdapter {
       });
     }
 
+    const pendingFieldsFromStateAfter =
+      !toolResult ||
+      JSON.stringify(nextState?.pendingFields ?? []) === JSON.stringify(toolResult.missingFields);
+    const invariants = {
+      nluStructuredOnly: true,
+      rendererUsedForVisibleText: Boolean(!reply || renderedMessage?.source === "copy_renderer"),
+      policyUsedStateAfter: true,
+      pendingFieldsFromStateAfter,
+      humanModeSuppressesAutoresponse:
+        input.conversation.mode !== "human" || decision.action === "reset" || !renderedMessage,
+    };
+    const timing: MaternalyAuthorityTiming = {
+      totalDurationMs: elapsedSince(turnStartedAt),
+      nluTotalMs,
+      reducerMs,
+      policyMs,
+      toolsMs,
+      rendererMs,
+      outboxMs: 0,
+      persistenceMs: 0,
+      eventLogMs: 0,
+      openaiCalls: openaiCallExpected ? 1 : 0,
+      usedDeterministicFastPath: !openaiCallExpected,
+      usedFallback: false,
+    };
+    const authorityTrace: MaternalyAuthorityTurnTrace = {
+      turnId,
+      pipeline: [
+        "normalized_inbound",
+        "nlu_structured",
+        "state_reducer",
+        "policy",
+        ...(decision.action === "normalized_registration" ? (["tool_executor"] as const) : []),
+        "copy_renderer",
+        "outbox",
+      ],
+      inbound: {
+        provider: input.inbound.provider,
+        textLength: input.inbound.text.length,
+        fromRedacted: redactPhone(input.inbound.from),
+      },
+      intent: {
+        intent: intent.intent,
+        serviceCandidate: intent.service_candidate,
+        shouldHandoff: intent.should_handoff,
+        safetyFlags: intent.safety_flags,
+      },
+      stateBefore: summarizeState(stateBefore),
+      stateAfter: nextState ? summarizeState(nextState) : null,
+      policy: {
+        action: decision.action,
+        reason: decision.reason,
+        serviceKey: decision.serviceKey ?? state.serviceKey,
+      },
+      tool: toolResult
+        ? {
+            status: toolResult.status,
+            serviceKey: toolResult.serviceKey,
+            missingFields: toolResult.missingFields,
+            applied: toolResult.writeResult?.applied,
+            mode: toolResult.writeResult?.mode,
+          }
+        : undefined,
+      renderer: {
+        source: "MaternalyCopyRenderer",
+        visibleReply: Boolean(renderedMessage),
+        action: decision.action,
+      },
+      outbox: {
+        planned: Boolean(renderedMessage),
+        kind: renderedMessage ? "twiml" : "none",
+      },
+      invariants,
+      timing,
+    };
+    events.push({
+      eventType: "maternaly_authority_timing_completed",
+      payload: {
+        turnId,
+        ...timing,
+      },
+    });
+    events.push({
+      eventType: "maternaly_authority_turn_completed",
+      payload: authorityTrace,
+    });
+
     return {
       handled: true,
       reply,
+      renderedMessage,
       intent,
       state: nextState,
       conversationPatch: {
@@ -1168,6 +1422,7 @@ export class MaternalyCoreAdapter {
         updatedAt: nowIso(),
       },
       events,
+      authorityTrace,
     };
   }
 }

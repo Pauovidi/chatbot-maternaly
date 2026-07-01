@@ -71,6 +71,7 @@ export interface MaternalyNormalizedFlowState {
   location?: string;
   modality?: "presencial" | "online";
   observations?: string;
+  pendingFields?: string[];
   idempotencyKey?: string;
   updatedAt: string;
 }

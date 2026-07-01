@@ -1,13 +1,14 @@
 import { randomUUID } from "node:crypto";
 import { getConversationStore } from "@/lib/hotel/conversations/file-store";
 import type { InboundResult, InboundWhatsAppPayload } from "@/lib/hotel/conversations/service";
-import { buildTwilioMessageResponse, redactConversationSensitiveText } from "@/lib/hotel/conversations/service";
+import { redactConversationSensitiveText } from "@/lib/hotel/conversations/service";
 import type { Conversation, ConversationEvent, ConversationRecord, Message } from "@/lib/hotel/conversations/types";
 import type { ConversationStore } from "@/lib/hotel/conversations/store";
 import {
   MaternalyCoreAdapter,
   MaternalyToolExecutor,
 } from "@/lib/maternaly/conversation/core";
+import { MaternalyConversationOutbox } from "@/lib/maternaly/conversation/outbox";
 import type { NormalizedSheetsClient } from "@/lib/maternaly/sheets/normalized-client";
 import { ensureMaternalySafeReply } from "./response-engine";
 
@@ -134,6 +135,8 @@ export async function handleInboundMaternalyWhatsApp(
 ): Promise<InboundResult> {
   const conversation = await getOrCreateMaternalyConversation(store, payload);
   const safeBody = redactConversationSensitiveText(payload.body);
+  const provider = payload.channel === "ycloud" ? "ycloud" : payload.channel === "twilio" ? "twilio" : "twilio_sandbox";
+  const outbox = new MaternalyConversationOutbox();
 
   if (payload.messageSid) {
     const existing = conversation.messages.find(
@@ -144,7 +147,7 @@ export async function handleInboundMaternalyWhatsApp(
       return {
         conversation,
         inbound: existing,
-        twiml: buildTwilioMessageResponse(),
+        twiml: outbox.buildEmpty({ provider }).twiml,
       };
     }
   }
@@ -164,7 +167,7 @@ export async function handleInboundMaternalyWhatsApp(
   const core = await adapter.handle({
     conversation: latest,
     inbound: {
-      provider: payload.channel === "ycloud" ? "ycloud" : payload.channel === "twilio" ? "twilio" : "twilio_sandbox",
+      provider,
       from: payload.from,
       to: payload.to,
       text: safeBody,
@@ -194,18 +197,29 @@ export async function handleInboundMaternalyWhatsApp(
     return {
       conversation: (await store.getById(latest.id)) ?? patched,
       inbound,
-      twiml: buildTwilioMessageResponse(),
+      twiml: outbox.buildEmpty({ provider }).twiml,
     };
   }
 
-  const reply = ensureMaternalySafeReply(core.reply);
+  if (!core.renderedMessage) {
+    return {
+      conversation: (await store.getById(latest.id)) ?? patched,
+      inbound,
+      twiml: outbox.buildEmpty({ provider }).twiml,
+    };
+  }
+
+  const rendered = {
+    ...core.renderedMessage,
+    text: ensureMaternalySafeReply(core.renderedMessage.text),
+  };
+  const outboxResult = outbox.buildText({
+    conversationId: latest.id,
+    provider,
+    rendered,
+  });
   const botReply = await store.addMessage(
-    createMessage({
-      conversationId: latest.id,
-      direction: "outbound",
-      senderType: "bot",
-      body: reply,
-    }),
+    createMessage(outboxResult.messageDraft),
   );
   await store.addEvent(
     createEvent(latest.id, "bot_reply_sent", {
@@ -214,11 +228,19 @@ export async function handleInboundMaternalyWhatsApp(
       intent: core.intent.intent,
     }),
   );
+  await store.addEvent(
+    createEvent(latest.id, "maternaly_outbox_sent", {
+      provider,
+      mode: outboxResult.mode,
+      renderedSource: outboxResult.renderedSource,
+      messageId: botReply.id,
+    }),
+  );
 
   return {
     conversation: (await store.getById(latest.id)) ?? patched,
     inbound,
     botReply,
-    twiml: buildTwilioMessageResponse(reply),
+    twiml: outboxResult.twiml,
   };
 }
