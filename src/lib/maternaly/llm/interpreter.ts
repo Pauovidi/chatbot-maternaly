@@ -5,16 +5,31 @@ import type { MaternalyNormalizedServiceKey } from "@/lib/maternaly/sheets/norma
 export const MATERNALY_OPENAI_SYSTEM_PROMPT = [
   "Eres el clasificador NLU estructurado del asistente de Maternaly para WhatsApp.",
   "Identidad del asistente: Maternaly. Tono esperado por la capa de copy: cálido, claro, breve, profesional y cercano.",
-  "Servicios de dominio: charla embarazo 1-20, taller BLW, Pilates, AIPAP Agua, AIPAP Terra, Yoga Prenatal, Método 5P, Diagnóstico Prenatal, Lactancia, Suelo Pélvico y Fisioterapia Pediátrica.",
+  "Servicios activos con inscripción conectada: charla embarazo 1-20 y taller BLW.",
+  "Otros servicios sobre los que existe información: Pilates, AIPAP Agua, AIPAP Terra, Yoga Prenatal, Método 5P, Diagnóstico Prenatal, Lactancia, Suelo Pélvico y Fisioterapia Pediátrica.",
   "Tu única tarea es devolver JSON estructurado. No escribas la respuesta visible a la usuaria.",
-  "Mantén contexto multi-turno si aparece en el input, interpreta slots útiles y no inventes disponibilidad, plazas, pagos ni facturas.",
+  "El input de usuario es un JSON con current_message y conversation_context. Usa ese contexto para resolver continuaciones como 'y el precio', 'qué incluye', 'la otra', 'en Bilbao' o 'cuéntame más', sin arrastrar un servicio a un cambio claro de tema.",
+  "Interpreta slots útiles y no inventes disponibilidad, plazas, pagos ni facturas.",
   "Diferencia información general, interés, inscripción, selección de sesión, datos de inscripción, confirmación, pago, factura, humano, privacidad y reset.",
-  "Incluye service_question_focus estructurado cuando aplique: benefits, schedule, pricing, start_week, locations, booking, general, clinical_risk o unknown.",
+  "Incluye service_question_focus estructurado cuando aplique: benefits, contents, duration, eligibility, schedule, pricing, start_week, locations, booking, general, clinical_risk o unknown.",
   "Si falta un dato, márcalo en missing_fields; no te bloquees ni inventes datos.",
   "Dudas clínicas o diagnósticas deben marcar should_handoff=true.",
   "Cancelaciones, cambios de fecha o sede, reagendamientos, devoluciones, pagos, facturas y justificantes deben marcar should_handoff=true.",
   "JSON schema: { intent, slots, service_question_focus, needs_availability_lookup, confidence, missing_fields, should_handoff, safety_flags }.",
 ].join(" ");
+
+export interface MaternalyInterpretationContext {
+  active_service_id?: MaternalyServiceId;
+  active_service_name?: string;
+  active_normalized_service_key?: MaternalyNormalizedServiceKey;
+  active_stage?: string;
+  location?: string;
+  modality?: "presencial" | "online";
+  recent_messages?: Array<{
+    role: "user" | "assistant";
+    text: string;
+  }>;
+}
 
 export type MaternalyIntent =
   | "greeting"
@@ -77,6 +92,9 @@ export interface StructuredIntent {
 
 export type MaternalyServiceQuestionFocus =
   | "benefits"
+  | "contents"
+  | "duration"
+  | "eligibility"
   | "schedule"
   | "pricing"
   | "start_week"
@@ -124,6 +142,9 @@ const ALLOWED_INTENTS: MaternalyIntent[] = [
 
 const ALLOWED_SERVICE_QUESTION_FOCUS: MaternalyServiceQuestionFocus[] = [
   "benefits",
+  "contents",
+  "duration",
+  "eligibility",
   "schedule",
   "pricing",
   "start_week",
@@ -177,19 +198,51 @@ function detectServiceQuestionFocus(input: {
     return "clinical_risk";
   }
 
+  if (/\b(?:cu[aá]nto dura|duraci[oó]n|cu[aá]ntas horas|de qu[eé] hora a qu[eé] hora)\b/.test(text)) {
+    return "duration";
+  }
+
+  if (
+    /\b(?:qu[eé] incluye|qu[eé] se ve|qu[eé] se trata|de qu[eé] va|de qu[eé] habl[aá]is|contenidos?|temas?|qu[eé] aprender|qu[eé] ense[nñ][aá]is)\b/.test(
+      text,
+    )
+  ) {
+    return "contents";
+  }
+
+  if (
+    /\b(?:para qui[eé]n|es para m[ií]|es para nosotr[oa]s?|puedo ir|puedo hacerlo|requisitos?|edad del beb[eé]|beb[eé]s?\s+de\s+\d+\s+meses|meses tiene|mi beb[eé] tiene|puede venir mi pareja|acompa[nñ]ante)\b/.test(
+      text,
+    )
+  ) {
+    return "eligibility";
+  }
+
   if (/\b(?:desde\s+qu[eé]\s+semana|semana\s+14|cu[aá]ndo\s+puedo\s+empezar|hasta\s+el\s+final)\b/.test(text)) {
     return "start_week";
   }
 
-  if (wantsPricing || /\b(?:precio|precios|tarifa|tarifas|cu[aá]nto cuesta|cuanto cuesta)\b|€/.test(text)) {
+  if (
+    wantsPricing ||
+    /\b(?:precio|precios|tarifa|tarifas|cu[aá]nto cuesta|cuanto cuesta|qu[eé] vale|cu[aá]nto sale|coste)\b|€/.test(
+      text,
+    )
+  ) {
     return "pricing";
   }
 
-  if (wantsAvailability || /\b(?:horario|horarios|d[ií]as|clases|turnos)\b/.test(text)) {
+  if (
+    wantsAvailability ||
+    /\b(?:horario|horarios|d[ií]as|clases|turnos|cu[aá]ndo es|pr[oó]xima|pr[oó]ximo)\b/.test(text)
+  ) {
     return "schedule";
   }
 
-  if (/\b(?:beneficios?|para qu[eé] sirve|qu[eé]\s+trabaja|ayuda|mejora)\b/.test(text)) {
+  if (
+    /\b(?:beneficios?|para qu[eé] sirve|qu[eé]\s+trabaja|qu[eé] me aporta|me aporta|ayuda|mejora)\b/.test(
+      text,
+    )
+  ) {
     return "benefits";
   }
 
@@ -203,6 +256,72 @@ function detectServiceQuestionFocus(input: {
 
   return service ? "general" : "unknown";
 }
+
+function isContextualContinuation(text: string): boolean {
+  return (
+    /^(?:s[ií]|vale|ok|perfecto|genial|bien)?[,\s]*(?:cu[eé]ntame|dime|expl[ií]came)(?:\s+m[aá]s)?[.!?]*$/.test(
+      text.trim(),
+    ) ||
+    /^(?:y|pero)?\s*(?:el|la|los|las)?\s*(?:precio|coste|horario|duraci[oó]n|contenido|requisitos?|beneficios?|ubicaci[oó]n|sede)[?!.\s]*$/.test(
+      text.trim(),
+    ) ||
+    /^(?:y\s+)?(?:en\s+)?(?:bilbao|erandio|online)[?!.\s]*$/.test(text.trim())
+  );
+}
+
+function alternateActiveService(
+  activeServiceId: MaternalyServiceId | undefined,
+): ReturnType<typeof getKnowledgeService> {
+  if (activeServiceId === "taller_blw") {
+    return getKnowledgeService("charla_embarazo_1_20");
+  }
+
+  if (activeServiceId === "charla_embarazo_1_20") {
+    return getKnowledgeService("taller_blw");
+  }
+
+  return null;
+}
+
+const MATERNALY_STRUCTURED_OUTPUT_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    intent: { type: "string", enum: ALLOWED_INTENTS },
+    slots: {
+      type: "object",
+      additionalProperties: true,
+    },
+    service_candidate: { type: ["string", "null"] },
+    service_question_focus: { type: "string", enum: ALLOWED_SERVICE_QUESTION_FOCUS },
+    location_preference: { type: ["string", "null"] },
+    venue_preference: { type: ["string", "null"] },
+    time_preference: { type: ["string", "null"] },
+    pregnancy_week: { type: ["number", "null"] },
+    people_count: { type: ["number", "null"] },
+    needs_availability_lookup: { type: "boolean" },
+    confidence: { type: "number", minimum: 0, maximum: 1 },
+    missing_fields: { type: "array", items: { type: "string" } },
+    should_handoff: { type: "boolean" },
+    safety_flags: { type: "array", items: { type: "string" } },
+  },
+  required: [
+    "intent",
+    "slots",
+    "service_candidate",
+    "service_question_focus",
+    "location_preference",
+    "venue_preference",
+    "time_preference",
+    "pregnancy_week",
+    "people_count",
+    "needs_availability_lookup",
+    "confidence",
+    "missing_fields",
+    "should_handoff",
+    "safety_flags",
+  ],
+} as const;
 
 function detectNormalizedServiceKey(serviceId?: string): MaternalyNormalizedServiceKey | undefined {
   if (serviceId === "charla_embarazo_1_20" || serviceId === "taller_blw") {
@@ -366,21 +485,48 @@ export function validateStructuredIntent(value: unknown): StructuredIntent {
 }
 
 export class LlmIntentClassifier {
-  async classify(message: string): Promise<StructuredIntent> {
-    if (process.env.LLM_PROVIDER === "openai" && process.env.OPENAI_API_KEY) {
-      return this.classifyWithOpenAi(message);
+  async classify(
+    message: string,
+    context: MaternalyInterpretationContext = {},
+    env: NodeJS.ProcessEnv = process.env,
+  ): Promise<StructuredIntent> {
+    if (env.LLM_PROVIDER === "openai" && env.OPENAI_API_KEY) {
+      return this.classifyWithOpenAi(message, context, env);
     }
 
-    return this.classifyWithMock(message);
+    return this.classifyWithMock(message, context);
   }
 
-  classifyWithMock(message: string): StructuredIntent {
+  classifyWithMock(
+    message: string,
+    context: MaternalyInterpretationContext = {},
+  ): StructuredIntent {
     const text = normalize(message);
-    const service = findKnowledgeService(text);
+    const explicitService = findKnowledgeService(text);
+    const asksForOtherActiveService = /\b(?:la|el)\s+otr[ao]\b/.test(text);
+    const contextualService =
+      asksForOtherActiveService
+        ? alternateActiveService(context.active_service_id)
+        : isContextualContinuation(text) ||
+            /\b(?:cu[aá]nto dura|duraci[oó]n|cu[aá]ntas horas|qu[eé] incluye|qu[eé] se ve|de qu[eé] va|contenidos?|temas?|para qui[eé]n|es para m[ií]|puedo ir|requisitos?|precio|precios|tarifa|tarifas|qu[eé] vale|cu[aá]nto sale|coste|horarios?|d[ií]as|beneficios?|d[oó]nde|sede|bilbao|erandio|online)\b/.test(
+              text,
+            )
+          ? getKnowledgeService(context.active_service_id)
+          : null;
+    const service = explicitService ?? contextualService;
     const serviceKey = detectNormalizedServiceKey(service?.id);
-    const wantsAvailability = /(horarios?|plazas?|disponibilidad|hay hueco|hueco|fechas?)/.test(text);
-    const wantsRegistration = /(reserv|apunt|inscrib|preinscrib|plaza|me interesa|quiero)/.test(text);
-    const wantsBookingFocus = /(reserv|apunt|inscrib|preinscrib|plaza)/.test(text);
+    const wantsAvailability =
+      /(horarios?|plazas?|disponibilidad|hay hueco|hueco|fechas?|qu[eé] d[ií]as|cu[aá]ndo es|pr[oó]xima|pr[oó]ximo|siguiente)/.test(
+        text,
+      );
+    const wantsRegistration =
+      /(reserv|apunt|inscrib|preinscrib|plaza|me interesa|quiero ir|quiero asistir|me gustar[ií]a asistir|gu[aá]rdame)/.test(
+        text,
+      );
+    const wantsBookingFocus =
+      /(reserv|apunt|inscrib|preinscrib|plaza|quiero ir|quiero asistir|me gustar[ií]a asistir|gu[aá]rdame)/.test(
+        text,
+      );
     const wantsPayment = /\b(pago|pagar|link|enlace)\b/.test(text);
     const wantsInvoice = /(factura|justificante)/.test(text);
     const cancelOrReschedule =
@@ -396,22 +542,47 @@ export class LlmIntentClassifier {
     const privacy = /(privacidad|datos|proteccion de datos|protección de datos|rgpd|consentimiento)/.test(text);
     const selectedSession = /\b(?:opci[oó]n\s*)?([1-9])\b/.test(text) || Boolean(extractDateLike(message));
     const location = detectLocation(text);
-    const peopleCount = inferPeopleCount(text);
+    const asksAboutCompanionEligibility =
+      /\b(?:puedo ir con|puede venir|puedo acudir con|admit[ií]s|acept[aá]is)\b.*\b(?:pareja|acompa[nñ]ante)\b/.test(
+        text,
+      );
+    const peopleCount = asksAboutCompanionEligibility ? undefined : inferPeopleCount(text);
     const pregnancyWeek = extractNumber(text, /\b(\d{1,2})\s*(semanas|semana)\b/);
     const fullName = extractFullName(message);
     const phone = extractPhone(message);
     const email = extractEmail(message);
-    const hasContactData = Boolean(fullName || phone || email || peopleCount);
+    const hasExplicitContactData = Boolean(fullName || phone || email);
     const clinicalSignal =
       /(dolor\s+fuerte|sangrado|fiebre|contracciones?\s+fuertes?|no\s+noto\s+al\s+beb[eé]|p[eé]rdida\s+de\s+l[ií]quido|mareo\s+fuerte|desmayo|urgente|me\s+encuentro\s+muy\s+mal|diagn[oó]stico\s+(?:m[eé]dico|cl[ií]nico|personalizado|de mi|del resultado)|contraindicaci[oó]n|malestar\s+importante|mastitis)/.test(
         text,
       );
     const clinical = clinicalSignal;
-    const explicitGeneralInfo = /\b(que es|qué es|info|informaci[oó]n|precio|cu[aá]nto cuesta|cuanto cuesta)\b/.test(text);
+    const serviceQuestionFocus = detectServiceQuestionFocus({
+      text,
+      service,
+      clinical,
+      wantsAvailability,
+      wantsBooking: wantsBookingFocus,
+      wantsPricing:
+        wantsPayment ||
+        /\b(?:precio|precios|tarifa|tarifas|cu[aá]nto cuesta|cuanto cuesta|qu[eé] vale|cu[aá]nto sale|coste|€)\b/.test(
+          text,
+        ),
+    });
+    const hasContactData = Boolean(
+      hasExplicitContactData ||
+        (peopleCount && ["general", "booking", "unknown"].includes(serviceQuestionFocus)),
+    );
+    const explicitGeneralInfo =
+      /\b(que es|qué es|info|informaci[oó]n|precio|cu[aá]nto cuesta|cuanto cuesta|qu[eé] incluye|de qu[eé] va|cu[aá]nto dura|duraci[oó]n|para qui[eé]n|puedo ir|requisitos?)\b/.test(
+        text,
+      );
     const serviceOnlyReservationRequest = Boolean(
-      serviceKey &&
+      explicitService &&
+        serviceKey &&
         service?.category === "reservable" &&
         !explicitGeneralInfo &&
+        ["general", "unknown"].includes(serviceQuestionFocus) &&
         text.trim().length <= 80,
     );
 
@@ -439,15 +610,6 @@ export class LlmIntentClassifier {
         ? "PRUEBA_BOT_CODEX_NO_CLIENTE_REAL"
         : undefined,
     };
-    const serviceQuestionFocus = detectServiceQuestionFocus({
-      text,
-      service,
-      clinical,
-      wantsAvailability,
-      wantsBooking: wantsBookingFocus,
-      wantsPricing: wantsPayment || /\b(?:precio|precios|tarifa|tarifas|cu[aá]nto cuesta|cuanto cuesta|€)\b/.test(text),
-    });
-
     return validateStructuredIntent({
       intent: reset
         ? "reset"
@@ -503,34 +665,66 @@ export class LlmIntentClassifier {
     });
   }
 
-  private async classifyWithOpenAi(message: string): Promise<StructuredIntent> {
+  private async classifyWithOpenAi(
+    message: string,
+    context: MaternalyInterpretationContext,
+    env: NodeJS.ProcessEnv,
+  ): Promise<StructuredIntent> {
     const response = await fetch("https://api.openai.com/v1/responses", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+        Authorization: `Bearer ${env.OPENAI_API_KEY}`,
       },
       body: JSON.stringify({
-        model: process.env.LLM_MODEL || "gpt-4.1-mini",
+        model: env.LLM_MODEL || "gpt-4.1-mini",
         input: [
           {
             role: "system",
             content: MATERNALY_OPENAI_SYSTEM_PROMPT,
           },
-          { role: "user", content: message },
+          {
+            role: "user",
+            content: JSON.stringify({
+              current_message: message,
+              conversation_context: context,
+            }),
+          },
         ],
+        text: {
+          format: {
+            type: "json_schema",
+            name: "maternaly_structured_intent",
+            strict: false,
+            schema: MATERNALY_STRUCTURED_OUTPUT_SCHEMA,
+          },
+        },
       }),
     });
 
     if (!response.ok) {
-      return this.classifyWithMock(message);
+      return this.classifyWithMock(message, context);
     }
 
-    const payload = (await response.json()) as { output_text?: string };
+    const payload = (await response.json()) as {
+      output_text?: string;
+      output?: Array<{
+        content?: Array<{
+          type?: string;
+          text?: string;
+        }>;
+      }>;
+    };
+    const outputText =
+      payload.output_text ??
+      payload.output
+        ?.flatMap((item) => item.content ?? [])
+        .find((item) => item.type === "output_text" && typeof item.text === "string")
+        ?.text;
     try {
-      return validateStructuredIntent(JSON.parse(payload.output_text ?? "{}"));
+      return validateStructuredIntent(JSON.parse(outputText ?? "{}"));
     } catch {
-      return this.classifyWithMock(message);
+      return this.classifyWithMock(message, context);
     }
   }
 }
@@ -538,8 +732,12 @@ export class LlmIntentClassifier {
 export class MaternalyConversationInterpreter {
   constructor(private readonly classifier = new LlmIntentClassifier()) {}
 
-  async interpret(message: string): Promise<StructuredIntent> {
-    return this.classifier.classify(message);
+  async interpret(
+    message: string,
+    context: MaternalyInterpretationContext = {},
+    env: NodeJS.ProcessEnv = process.env,
+  ): Promise<StructuredIntent> {
+    return this.classifier.classify(message, context, env);
   }
 }
 

@@ -3,6 +3,7 @@ import {
   MaternalyCopyRenderer,
   type MaternalyCopyToolResult,
 } from "@/lib/maternaly/conversation/copy-renderer";
+import { getKnowledgeService } from "@/lib/maternaly/knowledge/catalog";
 
 const emojiPattern = /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu;
 const clinicalClosing =
@@ -212,6 +213,46 @@ describe("MaternalyCopyRenderer availability guardrails", () => {
     expect(reply).toMatch(/no.*confirmo plaza|agenda autom[aá]tica/i);
     expect(reply).toMatch(/equipo de Maternaly revise disponibilidad/i);
     expect(reply).not.toMatch(/plaza confirmada|pago confirmado/i);
+    expect(countEmojis(reply)).toBeLessThanOrEqual(2);
+  });
+
+  it.each([
+    ["contents" as const, /cambios del cuerpo|alimentaci[oó]n|medicaci[oó]n segura/i],
+    ["eligibility" as const, /semana 1 y la 20|pareja o acompa[nñ]ante/i],
+    ["pricing" as const, /gratuita/i],
+    ["duration" as const, /no fija una duraci[oó]n [uú]nica/i],
+  ])("answers charla focus %s without dumping unrelated blocks", (focus, expected) => {
+    const renderer = new MaternalyCopyRenderer();
+    const reply =
+      renderer.render({
+        decision: {
+          action: "service_info",
+          service: getKnowledgeService("charla_embarazo_1_20"),
+          serviceQuestionFocus: focus,
+        },
+      }) ?? "";
+
+    expect(reply).toMatch(expected);
+    expect(countEmojis(reply)).toBeLessThanOrEqual(2);
+  });
+
+  it.each([
+    ["contents" as const, /autorregulaci[oó]n|alergias alimentarias|alimentaci[oó]n saludable/i],
+    ["duration" as const, /3 horas|17:00 a 20:00/i],
+    ["eligibility" as const, /comenzar la alimentaci[oó]n complementaria|requisitos de inicio/i],
+    ["pricing" as const, /45 €\/persona|75 €\/pareja/i],
+  ])("answers BLW focus %s with source-backed detail", (focus, expected) => {
+    const renderer = new MaternalyCopyRenderer();
+    const reply =
+      renderer.render({
+        decision: {
+          action: "service_info",
+          service: getKnowledgeService("taller_blw"),
+          serviceQuestionFocus: focus,
+        },
+      }) ?? "";
+
+    expect(reply).toMatch(expected);
     expect(countEmojis(reply)).toBeLessThanOrEqual(2);
   });
 

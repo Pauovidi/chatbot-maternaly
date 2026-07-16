@@ -271,6 +271,111 @@ describe("Maternaly conversation authority", () => {
   });
 
   it.each([
+    [
+      "qué incluye el taller BLW",
+      "¿y cuánto dura?",
+      "taller_blw",
+      "duration",
+      /3 horas|17:00 a 20:00/i,
+    ],
+    [
+      "qué incluye la charla informativa",
+      "¿y puedo ir con mi pareja?",
+      "charla_embarazo_1_20",
+      "eligibility",
+      /pareja o acompa[nñ]ante/i,
+    ],
+    [
+      "qué beneficios tiene pilates embarazo",
+      "¿y en Bilbao?",
+      "pilates",
+      "locations",
+      /Bilbao/i,
+    ],
+  ])(
+    "keeps service context across '%s' followed by '%s'",
+    async (firstMessage, followUp, serviceId, focus, replyPattern) => {
+      const adapter = new MaternalyCoreAdapter();
+      const first = await adapter.handle({
+        conversation: fakeConversation(),
+        inbound: {
+          provider: "twilio_sandbox",
+          from: "whatsapp:+34600111222",
+          text: firstMessage,
+        },
+      });
+      const second = await adapter.handle({
+        conversation: fakeConversation({
+          ...first.conversationPatch,
+          messages: [
+            {
+              id: "msg_user_context",
+              conversationId: "conv_authority",
+              direction: "inbound",
+              senderType: "user",
+              transport: "whatsapp",
+              body: firstMessage,
+              createdAt: "2026-07-16T10:00:00.000Z",
+            },
+            {
+              id: "msg_bot_context",
+              conversationId: "conv_authority",
+              direction: "outbound",
+              senderType: "bot",
+              transport: "whatsapp",
+              body: first.reply ?? "",
+              createdAt: "2026-07-16T10:00:01.000Z",
+            },
+          ],
+          events: [],
+        }),
+        inbound: {
+          provider: "twilio_sandbox",
+          from: "whatsapp:+34600111222",
+          text: followUp,
+        },
+      });
+
+      expect(second.intent).toMatchObject({
+        service_candidate: serviceId,
+        service_question_focus: focus,
+      });
+      expect(second.reply).toMatch(replyPattern);
+      expect(second.authorityTrace.policy.action).toBe("service_info");
+    },
+  );
+
+  it("understands 'the other one' between the two active services", async () => {
+    const adapter = new MaternalyCoreAdapter();
+    const first = await adapter.handle({
+      conversation: fakeConversation(),
+      inbound: {
+        provider: "twilio_sandbox",
+        from: "whatsapp:+34600111222",
+        text: "qué incluye el taller BLW",
+      },
+    });
+    const second = await adapter.handle({
+      conversation: fakeConversation({
+        ...first.conversationPatch,
+        messages: [],
+        events: [],
+      }),
+      inbound: {
+        provider: "twilio_sandbox",
+        from: "whatsapp:+34600111222",
+        text: "¿y la otra?",
+      },
+    });
+
+    expect(second.intent).toMatchObject({
+      service_candidate: "charla_embarazo_1_20",
+      service_question_focus: "general",
+    });
+    expect(second.reply).toMatch(/charla informativa gratuita|semana 1 y la 20/i);
+  });
+
+  it.each([
     ["taller_blw" as const, "sesion_blw_bilbao_20260925", "grupo_blw_bilbao", /45 €\/persona|75 €\/pareja/i],
     ["charla_embarazo_1_20" as const, "sesion_charla_bilbao_20261006", "grupo_charla_bilbao", /charla|gratuita/i],
   ])("keeps %s choosing_session state when pricing is asked as an FAQ", async (

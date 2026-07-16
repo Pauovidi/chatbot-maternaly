@@ -28,7 +28,7 @@ export interface KnowledgeService {
   nextQuestion: string;
 }
 
-export const MATERNALY_KNOWLEDGE_VERSION = "maternaly_kb_demo_2026_07_01_warm_pilates_v1";
+export const MATERNALY_KNOWLEDGE_VERSION = "maternaly_kb_2026_07_16_conversational_audit_v1";
 
 export const MATERNALY_KNOWLEDGE_SERVICES: KnowledgeService[] = [
   {
@@ -49,6 +49,7 @@ export const MATERNALY_KNOWLEDGE_SERVICES: KnowledgeService[] = [
       "Charla gratuita para embarazadas entre la semana 1 y la 20, disponible en Erandio, Bilbao y online.",
     details: [
       "Trata cambios corporales, cuidados, alimentación, actividad física, exámenes, medicación segura, sexualidad y cambios emocionales.",
+      "La charla la imparten matronas y se puede acudir sola o con pareja o acompañante.",
       "Las plazas deben comprobarse en el Sheet normalizado si está disponible.",
     ],
     requiredData: [
@@ -82,11 +83,26 @@ export const MATERNALY_KNOWLEDGE_SERVICES: KnowledgeService[] = [
     id: "taller_blw",
     normalizedServiceKey: "taller_blw",
     name: "Taller BLW",
-    aliases: ["blw", "taller blw", "baby led weaning", "alimentación complementaria", "alimentacion complementaria"],
+    aliases: [
+      "blw",
+      "taller blw",
+      "baby led weaning",
+      "alimentación complementaria",
+      "alimentacion complementaria",
+      "alimentación del bebé",
+      "alimentacion del bebe",
+      "empezar con sólidos",
+      "empezar con solidos",
+    ],
     category: "reservable",
     summary:
       "Taller presencial de Baby-Led Weaning / Alimentación Complementaria Autorregulada, de 17:00 a 20:00.",
-    details: ["Plazas máximas: 14 personas.", "Es una preinscripción si no hay pago o validación real."],
+    details: [
+      "Se trabajan el concepto de autorregulación, los requisitos para empezar y la introducción segura de alimentos.",
+      "Incluye qué alimentos ofrecer, alergias alimentarias en la infancia y alimentación saludable.",
+      "Plazas máximas: 14 personas.",
+      "Es una preinscripción si no hay pago o validación real.",
+    ],
     requiredData: [
       "nombre y apellidos",
       "teléfono",

@@ -146,6 +146,20 @@ export class MaternalyCopyRenderer {
   }
 
   private renderServiceInfo(service: KnowledgeService, decision?: MaternalyCopyDecision): string {
+    if (service.id === "charla_embarazo_1_20") {
+      return this.renderCharlaInfo(
+        decision?.serviceQuestionFocus ?? "general",
+        decision?.locationPreference,
+      );
+    }
+
+    if (service.id === "taller_blw") {
+      return this.renderBlwInfo(
+        decision?.serviceQuestionFocus ?? "general",
+        decision?.locationPreference,
+      );
+    }
+
     if (service.id === "pilates") {
       return this.renderPilatesInfo(
         service,
@@ -162,6 +176,90 @@ export class MaternalyCopyRenderer {
       .filter(Boolean)
       .join(" ");
     return `${parts} ${warmNextQuestion(service.nextQuestion)}`;
+  }
+
+  private renderCharlaInfo(
+    focus: MaternalyServiceQuestionFocus,
+    locationPreference?: string,
+  ): string {
+    const location = normalizeLocation(locationPreference);
+
+    if (focus === "contents") {
+      return "En la charla se explican los cambios del cuerpo durante el embarazo, autocuidados, alimentación, actividad física, pruebas y revisiones, medicación segura, sexualidad y cambios emocionales. La idea es que puedas resolver dudas con las matronas desde el principio. ¿Quieres que miremos una fecha presencial u online? 💛";
+    }
+
+    if (focus === "eligibility" || focus === "start_week") {
+      return "La charla está pensada para embarazadas entre la semana 1 y la 20. Puedes acudir sola o con tu pareja o acompañante. ¿Te viene mejor Bilbao, Erandio u online? 😊";
+    }
+
+    if (focus === "pricing") {
+      return "La charla informativa de embarazo es gratuita. Se ofrece de forma presencial en Bilbao y Erandio, y también online según la edición. ¿Quieres que comprobemos las próximas opciones?";
+    }
+
+    if (focus === "duration") {
+      return "La ficha disponible indica la hora de inicio de cada edición, pero no fija una duración única. Antes de reservar puedo mostrarte la fecha, modalidad y hora exactas para que elijas con toda la información.";
+    }
+
+    if (focus === "locations") {
+      return "La charla puede hacerse presencialmente en Maternaly Bilbao o Maternaly Erandio, y también hay ediciones online en directo. ¿Qué modalidad te encaja mejor? 💛";
+    }
+
+    if (focus === "schedule") {
+      const preference = location ? ` en ${location === "bilbao" ? "Bilbao" : "Erandio"}` : "";
+      return `Hay ediciones presenciales${preference || " en Bilbao y Erandio"} y ediciones online. Las fechas cambian por convocatoria, así que puedo consultar las próximas opciones reales antes de que elijas.`;
+    }
+
+    if (focus === "benefits") {
+      return "La charla te ayuda a entender qué cambios puedes esperar en las primeras 20 semanas y a resolver con matronas dudas sobre cuidados, alimentación, ejercicio, revisiones, medicación, sexualidad y emociones. Es un espacio informativo y gratuito para empezar el embarazo con más claridad. 🌸";
+    }
+
+    if (focus === "booking") {
+      return "Puedo comprobar las próximas ediciones y preparar tu solicitud de plaza. Necesitaremos tus datos básicos, si vienes sola o acompañada y tu fecha probable de parto; la plaza solo se dará por registrada cuando el proceso real lo valide.";
+    }
+
+    return "La charla informativa gratuita está dirigida a embarazadas entre la semana 1 y la 20. Las matronas abordan cambios físicos y emocionales, cuidados, alimentación, ejercicio, revisiones, medicación segura y sexualidad. Puedes asistir sola o acompañada, en Bilbao, Erandio u online según convocatoria. ¿Qué te gustaría saber: contenido, fechas o inscripción? 💛";
+  }
+
+  private renderBlwInfo(
+    focus: MaternalyServiceQuestionFocus,
+    locationPreference?: string,
+  ): string {
+    const location = normalizeLocation(locationPreference);
+
+    if (focus === "contents") {
+      return "En el taller BLW se trabajan el concepto de autorregulación, los requisitos para empezar, cómo introducir alimentos de forma segura, qué alimentos ofrecer, alergias alimentarias en la infancia y bases de alimentación saludable. ¿Quieres que te cuente también duración o precios? 🥕";
+    }
+
+    if (focus === "eligibility" || focus === "start_week") {
+      return "Está pensado para familias cuyo bebé va a comenzar la alimentación complementaria y quieren saber cuándo y cómo empezar con seguridad. En el taller se revisan precisamente los requisitos de inicio; puedes venir sola o en pareja.";
+    }
+
+    if (focus === "duration") {
+      return "El taller BLW dura 3 horas, de 17:00 a 20:00. Es presencial y se organiza en Bilbao o Erandio según la convocatoria. ¿Quieres que miremos próximas fechas? 😊";
+    }
+
+    if (focus === "pricing") {
+      return "El taller BLW cuesta 45 €/persona o 75 €/pareja. La plaza queda confirmada únicamente después de la reserva y el pago validados. ¿Te interesa Bilbao o Erandio?";
+    }
+
+    if (focus === "locations") {
+      return "El taller BLW es presencial y se organiza en Maternaly Bilbao y Maternaly Erandio. Si me dices qué sede prefieres, puedo consultar las próximas opciones. 💛";
+    }
+
+    if (focus === "schedule") {
+      const preference = location ? ` de ${location === "bilbao" ? "Bilbao" : "Erandio"}` : "";
+      return `Los talleres BLW son de 17:00 a 20:00 y las fechas dependen de la convocatoria${preference}. Puedo consultar las próximas sesiones reales y sus plazas antes de que elijas.`;
+    }
+
+    if (focus === "benefits") {
+      return "El taller busca que la familia empiece la alimentación complementaria con más seguridad y criterio: se revisan requisitos, cortes e introducción de alimentos, autorregulación, alergias y alimentación saludable. 🥦";
+    }
+
+    if (focus === "booking") {
+      return "Puedo comprobar próximas sesiones y preparar una preinscripción. Necesitaremos tus datos, si vienes sola o en pareja y la fecha de nacimiento del bebé; la plaza solo se confirma tras la reserva y el pago reales.";
+    }
+
+    return "El taller presencial BLW ayuda a empezar la alimentación complementaria autorregulada con seguridad. Incluye requisitos de inicio, introducción de alimentos, alergias y alimentación saludable; dura de 17:00 a 20:00 y cuesta 45 € por persona o 75 € por pareja. ¿Te cuento contenido, fechas o inscripción? 🥕";
   }
 
   private renderPilatesInfo(

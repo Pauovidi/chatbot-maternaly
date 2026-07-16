@@ -9,6 +9,7 @@ import {
 } from "@/lib/maternaly/knowledge/catalog";
 import {
   MaternalyConversationInterpreter,
+  type MaternalyInterpretationContext,
   type MaternalyNluSlots,
   type StructuredIntent,
 } from "@/lib/maternaly/llm/interpreter";
@@ -666,23 +667,69 @@ function serviceFromConversationContext(conversation: ConversationRecord): Knowl
   );
 }
 
-function shouldUsePreviousServiceForPricing(intent: StructuredIntent): boolean {
+function redactConversationContextText(value: string): string {
+  return value
+    .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, "[email]")
+    .replace(/(?:\+?\d[\d\s().-]{6,}\d)/g, "[telefono]")
+    .slice(0, 500);
+}
+
+function buildInterpretationContext(
+  conversation: ConversationRecord,
+): MaternalyInterpretationContext {
+  const service = serviceFromConversationContext(conversation);
+  const state = conversation.maternalyNormalizedFlow;
+
+  return {
+    active_service_id: service?.id,
+    active_service_name: service?.name,
+    active_normalized_service_key: service?.normalizedServiceKey ?? state?.serviceKey,
+    active_stage: state?.stage,
+    location: state?.location,
+    modality: state?.modality,
+    recent_messages: conversation.messages
+      .filter((message) => message.senderType !== "system" && message.body.trim())
+      .slice(-6)
+      .map((message) => ({
+        role: message.senderType === "user" ? ("user" as const) : ("assistant" as const),
+        text: redactConversationContextText(message.body),
+      })),
+  };
+}
+
+function isContextualServiceFollowUp(message: string): boolean {
+  const normalized = normalize(message).trim();
+  return (
+    /^(?:si|vale|ok|perfecto|genial|bien)?[,\s]*(?:cuentame|dime|explicame)(?:\s+mas)?[.!?]*$/.test(
+      normalized,
+    ) ||
+    /\b(?:precio|precios|tarifa|tarifas|que vale|cuanto sale|coste|horarios?|dias|cuando es|proxima|proximo|cuanto dura|duracion|cuantas horas|que incluye|que se ve|de que va|contenidos?|temas?|para quien|es para mi|puedo ir|requisitos?|beneficios?|donde|sede|bilbao|erandio|online)\b/.test(
+      normalized,
+    )
+  );
+}
+
+function shouldUsePreviousServiceForContextualQuestion(
+  intent: StructuredIntent,
+  message: string,
+): boolean {
   return Boolean(
-    intent.service_question_focus === "pricing" &&
-      !intent.service_candidate &&
+    !intent.service_candidate &&
       !intent.slots.service_id &&
       !intent.slots.normalized_service_key &&
       !intent.needs_availability_lookup &&
       !hasRegistrationDataSlots(intent.slots) &&
-      ["general_info", "service_question"].includes(intent.intent),
+      ["general_info", "service_question"].includes(intent.intent) &&
+      (intent.service_question_focus !== "unknown" || isContextualServiceFollowUp(message)),
   );
 }
 
 function enrichIntentWithConversationServiceContext(
   intent: StructuredIntent,
   conversation: ConversationRecord,
+  message: string,
 ): StructuredIntent {
-  if (!shouldUsePreviousServiceForPricing(intent)) {
+  if (!shouldUsePreviousServiceForContextualQuestion(intent, message)) {
     return intent;
   }
 
@@ -912,10 +959,12 @@ export class MaternalyConversationPolicy {
     }
 
     const service = getKnowledgeService(intent.service_candidate);
+    const isInformationalServiceQuestion =
+      intent.intent === "service_question" && intent.service_question_focus !== "booking";
     if (
       service &&
       !intent.needs_availability_lookup &&
-      !hasRegistrationDataSlots(intent.slots) &&
+      (!hasRegistrationDataSlots(intent.slots) || isInformationalServiceQuestion) &&
       ["general_info", "service_question"].includes(intent.intent)
     ) {
       return {
@@ -1143,8 +1192,16 @@ export class MaternalyCoreAdapter {
     const stateBefore = input.conversation.maternalyNormalizedFlow;
     const openaiCallExpected = inferOpenAiCall(input.env);
     const nluStartedAt = Date.now();
-    const interpretedIntent = await this.interpreter.interpret(input.inbound.text);
-    const intent = enrichIntentWithConversationServiceContext(interpretedIntent, input.conversation);
+    const interpretedIntent = await this.interpreter.interpret(
+      input.inbound.text,
+      buildInterpretationContext(input.conversation),
+      input.env ?? process.env,
+    );
+    const intent = enrichIntentWithConversationServiceContext(
+      interpretedIntent,
+      input.conversation,
+      input.inbound.text,
+    );
     const nluTotalMs = elapsedSince(nluStartedAt);
     const reducerStartedAt = Date.now();
     const reduced = this.reducer.reduceWithDiagnostics({
