@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createMaternalyWhatsAppProvider,
   MockWhatsAppProvider,
@@ -8,6 +8,10 @@ import {
 } from "./provider";
 
 describe("WhatsApp providers", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it("normalizes Spanish phones", () => {
     expect(normalizePhone("600 000 123")).toBe("+34600000123");
   });
@@ -26,6 +30,36 @@ describe("WhatsApp providers", () => {
   it("does not send through YCloud without api key", async () => {
     const result = await new YCloudProvider("").sendText({ to: "+34600000123", text: "Hola" });
     expect(result.ok).toBe(false);
+  });
+
+  it("sends an image through YCloud with the first-response caption", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ id: "ycloud_image_1" }), { status: 200 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await new YCloudProvider("api-key").sendMedia({
+      from: "+34940000123",
+      to: "+34600000123",
+      mediaUrl: "https://maternaly.example.test/maternaly/services/taller-blw.jpeg",
+      mediaType: "image",
+      text: "Aquí tienes la información del taller BLW.",
+    });
+
+    expect(result).toMatchObject({ ok: true, provider: "ycloud", sid: "ycloud_image_1" });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.ycloud.com/v2/whatsapp/messages/sendDirectly",
+      expect.objectContaining({ method: "POST" }),
+    );
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1].body))).toMatchObject({
+      from: "+34940000123",
+      to: "+34600000123",
+      type: "image",
+      image: {
+        link: "https://maternaly.example.test/maternaly/services/taller-blw.jpeg",
+        caption: "Aquí tienes la información del taller BLW.",
+      },
+    });
   });
 
   it("normalizes Twilio Sandbox inbound messages", () => {

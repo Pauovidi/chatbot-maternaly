@@ -15,6 +15,10 @@ function extractMessage(twiml: string): string {
   return twiml.match(/<Message>([\s\S]*?)<\/Message>/)?.[1] ?? "";
 }
 
+function extractMedia(twiml: string): string[] {
+  return Array.from(twiml.matchAll(/<Media>([\s\S]*?)<\/Media>/g)).map((match) => match[1]);
+}
+
 async function postTwilio(input: {
   body: string;
   sid: string;
@@ -52,6 +56,7 @@ beforeEach(async () => {
   vi.stubEnv("LLM_PROVIDER", "mock");
   vi.stubEnv("OPENAI_API_KEY", "");
   vi.stubEnv("TWILIO_WEBHOOK_AUTH_TOKEN", "");
+  vi.stubEnv("APP_BASE_URL", "https://maternaly.example.test");
   vi.stubEnv("MATERNALY_DEMO_PAYMENT_LINK", "https://app.uelzpay.com/checkout/cml6qypoi00g0qy01fkfdapmh");
   resetConversationStoreForTests();
 });
@@ -132,5 +137,29 @@ describe("Maternaly Twilio WhatsApp route", () => {
 
     expect(reset.message).toContain("reiniciado");
     expect(reset.message).not.toContain("Disculpa, estoy revisando");
+  });
+
+  it("attaches each service poster only with its first answer", async () => {
+    const first = await postTwilio({ body: "Quiero información del taller BLW", sid: "SM_MEDIA_BLW_1" });
+    const second = await postTwilio({ body: "¿Cuánto cuesta el taller BLW?", sid: "SM_MEDIA_BLW_2" });
+
+    expect(extractMedia(first.text)).toEqual([
+      "https://maternaly.example.test/maternaly/services/taller-blw.jpeg",
+    ]);
+    expect(extractMedia(second.text)).toEqual([]);
+  });
+
+  it("lists the two active services and attaches both posters on a services question", async () => {
+    const result = await postTwilio({
+      body: "¿Qué servicios ofrecéis ahora?",
+      sid: "SM_MEDIA_SERVICES_1",
+      from: "whatsapp:+34600000999",
+    });
+
+    expect(result.message).toMatch(/charla informativa gratuita|taller presencial BLW/i);
+    expect(extractMedia(result.text)).toEqual([
+      "https://maternaly.example.test/maternaly/services/charla-informativa-embarazo.jpeg",
+      "https://maternaly.example.test/maternaly/services/taller-blw.jpeg",
+    ]);
   });
 });

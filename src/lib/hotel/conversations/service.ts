@@ -52,6 +52,12 @@ export interface InboundResult {
   conversation: ConversationRecord;
   inbound: Message;
   botReply?: Message;
+  outboundMedia?: Array<{
+    type: "image";
+    url: string;
+    alt: string;
+    serviceId?: string;
+  }>;
   twiml?: string;
 }
 

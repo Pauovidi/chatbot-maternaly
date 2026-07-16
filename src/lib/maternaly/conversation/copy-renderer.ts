@@ -142,7 +142,7 @@ export class MaternalyCopyRenderer {
   }
 
   private renderGeneral(): string {
-    return "Puedo orientarte sobre charlas de embarazo, taller BLW, Pilates, AIPAP, suelo pélvico, diagnóstico prenatal, lactancia o fisioterapia pediátrica. ¿Qué te apetece mirar primero? 💛";
+    return "Ahora mismo puedes consultar dos servicios de Maternaly: la charla informativa gratuita para embarazo de la semana 1 a la 20, y el taller presencial BLW de alimentación complementaria autorregulada. ¿Sobre cuál te gustaría saber más? 💛";
   }
 
   private renderServiceInfo(service: KnowledgeService, decision?: MaternalyCopyDecision): string {

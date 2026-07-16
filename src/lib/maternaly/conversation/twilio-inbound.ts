@@ -8,7 +8,9 @@ import {
   MaternalyCoreAdapter,
   MaternalyToolExecutor,
 } from "@/lib/maternaly/conversation/core";
-import { MaternalyConversationOutbox } from "@/lib/maternaly/conversation/outbox";
+import { MaternalyConversationOutbox, type MaternalyOutboundMedia } from "@/lib/maternaly/conversation/outbox";
+import { readMaternalyRuntimeConfig } from "@/lib/maternaly/config/env";
+import { resolveMaternalyServiceMedia } from "@/lib/maternaly/conversation/service-media";
 import type { NormalizedSheetsClient } from "@/lib/maternaly/sheets/normalized-client";
 import { ensureMaternalySafeReply } from "./response-engine";
 
@@ -213,10 +215,18 @@ export async function handleInboundMaternalyWhatsApp(
     ...core.renderedMessage,
     text: ensureMaternalySafeReply(core.renderedMessage.text),
   };
+  const media: MaternalyOutboundMedia[] = resolveMaternalyServiceMedia({
+    conversation: latest,
+    inboundText: safeBody,
+    intent: core.intent,
+    state: core.state,
+    appBaseUrl: readMaternalyRuntimeConfig(options.normalizedEnv).appBaseUrl,
+  });
   const outboxResult = outbox.buildText({
     conversationId: latest.id,
     provider,
     rendered,
+    media,
   });
   const botReply = await store.addMessage(
     createMessage(outboxResult.messageDraft),
@@ -234,13 +244,23 @@ export async function handleInboundMaternalyWhatsApp(
       mode: outboxResult.mode,
       renderedSource: outboxResult.renderedSource,
       messageId: botReply.id,
+      mediaServiceIds: media.map((item) => item.serviceId),
     }),
   );
+  for (const item of media) {
+    await store.addEvent(
+      createEvent(latest.id, "maternaly_service_media_dispatched", {
+        serviceId: item.serviceId,
+        source: "maternaly_service_media",
+      }),
+    );
+  }
 
   return {
     conversation: (await store.getById(latest.id)) ?? patched,
     inbound,
     botReply,
+    outboundMedia: media.map((item) => ({ ...item, type: "image" })),
     twiml: outboxResult.twiml,
   };
 }

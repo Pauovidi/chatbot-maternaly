@@ -53,10 +53,37 @@ export async function POST(request: Request) {
     }),
   });
 
+  const media = result.outboundMedia ?? [];
+  const mediaResults = [];
+  let textDeliveredWithMedia = false;
+  for (const [index, item] of media.entries()) {
+    const delivery = await provider.sendMedia({
+      from: inbound.to,
+      to: inbound.from,
+      mediaUrl: item.url,
+      mediaType: item.type,
+      text: index === 0 ? result.botReply?.body : undefined,
+    });
+    mediaResults.push(delivery);
+    textDeliveredWithMedia ||= index === 0 && delivery.ok;
+  }
+
+  const textResult = result.botReply && !textDeliveredWithMedia
+    ? await provider.sendText({ to: inbound.from, text: result.botReply.body })
+    : undefined;
+
   return NextResponse.json({
     ok: true,
     idempotencyKey: inbound.id,
     provider: inbound.provider,
     conversationId: result.conversation.id,
+    outbound: result.botReply
+      ? {
+          textDeliveredWithMedia,
+          mediaAttempted: media.length,
+          mediaDelivered: mediaResults.filter((delivery) => delivery.ok).length,
+          textDelivered: textResult?.ok ?? textDeliveredWithMedia,
+        }
+      : undefined,
   });
 }

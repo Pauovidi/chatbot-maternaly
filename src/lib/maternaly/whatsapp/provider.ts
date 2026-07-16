@@ -7,6 +7,7 @@ import type { InternalMessage } from "@/lib/maternaly/domain/types";
 
 export interface WhatsAppSendInput {
   to: string;
+  from?: string;
   text?: string;
   mediaUrl?: string;
   mediaType?: "image" | "document";
@@ -120,6 +121,15 @@ export class YCloudProvider implements WhatsAppProvider {
   }
 
   async sendMedia(input: WhatsAppSendInput): Promise<WhatsAppSendResult> {
+    if (!this.apiKey) {
+      return {
+        ok: false,
+        provider: "ycloud",
+        mode: "mock",
+        error: "YCLOUD_API_KEY is not configured.",
+      };
+    }
+
     if (!input.mediaUrl && !input.linkUrl) {
       return {
         ok: false,
@@ -129,10 +139,49 @@ export class YCloudProvider implements WhatsAppProvider {
       };
     }
 
-    return this.sendText({
-      to: input.to,
-      text: input.text ?? input.linkUrl ?? input.mediaUrl,
+    if (!input.from) {
+      return {
+        ok: false,
+        provider: "ycloud",
+        mode: "mock",
+        error: "YCLOUD sender phone is required for media messages.",
+      };
+    }
+
+    const response = await fetch("https://api.ycloud.com/v2/whatsapp/messages/sendDirectly", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-API-Key": this.apiKey,
+      },
+      body: JSON.stringify({
+        from: normalizePhone(input.from),
+        to: normalizePhone(input.to),
+        type: input.mediaType ?? "image",
+        image: {
+          link: input.mediaUrl ?? input.linkUrl,
+          ...(input.text ? { caption: input.text } : {}),
+        },
+      }),
     });
+
+    if (!response.ok) {
+      return {
+        ok: false,
+        provider: "ycloud",
+        mode: "real",
+        error: `YCloud media send failed with ${response.status}`,
+      };
+    }
+
+    const body = (await response.json()) as { id?: string; messageId?: string };
+    return {
+      ok: true,
+      provider: "ycloud",
+      mode: "real",
+      messageId: body.id ?? body.messageId,
+      sid: body.id ?? body.messageId,
+    };
   }
 
   normalizeInbound(payload: unknown): InternalMessage {
