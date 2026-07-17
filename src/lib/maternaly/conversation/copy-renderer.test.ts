@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  ensureDistinctMaternalyReply,
   MaternalyCopyRenderer,
   type MaternalyCopyToolResult,
 } from "@/lib/maternaly/conversation/copy-renderer";
@@ -76,6 +77,103 @@ describe("MaternalyCopyRenderer availability guardrails", () => {
     expect(reply).toContain("Maternaly");
     expect(reply).not.toMatch(/robot|cl[ií]nica fría/i);
     expect(countEmojis(reply)).toBeLessThanOrEqual(2);
+  });
+
+  it("keeps reset copy technical even when the same acknowledgement was already sent", () => {
+    const reply = "Listo, conversación reiniciada. Empezamos desde cero. ¿En qué puedo ayudarte?";
+    const distinct = ensureDistinctMaternalyReply({
+      reply,
+      recentAssistantReplies: [reply],
+      action: "reset",
+    });
+
+    expect(distinct).toEqual({ reply, changed: false, duplicateCount: 1 });
+    expect(distinct.reply).not.toMatch(/repetitiva|otra manera|otro [aá]ngulo/i);
+  });
+
+  it("never hides a word-for-word duplicate behind a new opening", () => {
+    const reply = "El taller BLW es presencial y dura tres horas.";
+    const distinct = ensureDistinctMaternalyReply({
+      reply,
+      recentAssistantReplies: [reply],
+      action: "service_info",
+    });
+
+    expect(distinct.changed).toBe(true);
+    expect(distinct.reply).not.toContain(reply);
+    expect(distinct.reply).not.toMatch(/repetitiva|otra manera|misma respuesta/i);
+  });
+
+  it("keeps the concrete answer when it reformulates a repeated price reply", () => {
+    const renderer = new MaternalyCopyRenderer();
+    const renderInput = {
+      decision: {
+        action: "service_info" as const,
+        service: getKnowledgeService("taller_blw"),
+        serviceQuestionFocus: "pricing" as const,
+      },
+    };
+    const reply = renderer.render(renderInput) ?? "";
+    const distinct = ensureDistinctMaternalyReply({
+      reply,
+      recentAssistantReplies: [reply],
+      action: "service_info",
+      preferredAlternatives: renderer.renderAlternatives(renderInput),
+    });
+
+    expect(distinct.reply).not.toContain(reply);
+    expect(distinct.reply).toMatch(/45\s*€[\s\S]*75\s*€/);
+    expect(distinct.reply).toMatch(/precio|cuesta/i);
+    expect(distinct.reply).toMatch(/reserva y el pago han sido validados/i);
+    expect(distinct.reply).not.toMatch(/se han la reserva/i);
+  });
+
+  it("uses a natural full redaction for repeated general BLW information", () => {
+    const renderer = new MaternalyCopyRenderer();
+    const renderInput = {
+      decision: {
+        action: "service_info" as const,
+        service: getKnowledgeService("taller_blw"),
+        serviceQuestionFocus: "general" as const,
+      },
+      message: "¿qué me puedes contar del taller?",
+    };
+    const reply = renderer.render(renderInput) ?? "";
+    const distinct = ensureDistinctMaternalyReply({
+      reply,
+      recentAssistantReplies: [reply],
+      action: "service_info",
+      preferredAlternatives: renderer.renderAlternatives(renderInput),
+    });
+
+    expect(distinct.reply).not.toContain(reply);
+    expect(distinct.reply).toMatch(/seguridad|cortes|alergias/i);
+    expect(distinct.reply).toMatch(/45\s*€[\s\S]*75\s*€/);
+    expect(distinct.reply).not.toMatch(/^Puntos clave|En concreto,/i);
+  });
+
+  it("answers a catalog-wide online workshop question without centering BLW", () => {
+    const renderer = new MaternalyCopyRenderer();
+    const reply = renderer.render({
+      decision: { action: "catalog_info", modalityPreference: "online" },
+      message: "¿tenéis algún taller online?",
+    }) ?? "";
+
+    expect(reply).toMatch(/taller online.*ninguno confirmado|opci[oó]n online/i);
+    expect(reply).toMatch(/charla informativa gratuita/i);
+    expect(reply).not.toMatch(/^El taller BLW|te cuento c[oó]mo es el BLW/i);
+  });
+
+  it("answers a catalog-wide presencial question with confirmed presencial options", () => {
+    const renderer = new MaternalyCopyRenderer();
+    const reply = renderer.render({
+      decision: { action: "catalog_info", modalityPreference: "presencial" },
+      message: "¿qué actividades presenciales tenéis?",
+    }) ?? "";
+
+    expect(reply).toMatch(/opciones presenciales/i);
+    expect(reply).toMatch(/Charla[\s\S]*Taller BLW[\s\S]*Pilates/i);
+    expect(reply).not.toMatch(/opci[oó]n online/i);
   });
 
   it("asks for missing fields with careful wording", () => {

@@ -1,4 +1,5 @@
 import { findKnowledgeService, getKnowledgeService } from "@/lib/maternaly/knowledge/catalog";
+import type { KnowledgeService } from "@/lib/maternaly/knowledge/catalog";
 import type { MaternalyServiceId } from "@/lib/maternaly/domain/types";
 import type { MaternalyNormalizedServiceKey } from "@/lib/maternaly/sheets/normalized-template";
 
@@ -10,6 +11,8 @@ export const MATERNALY_OPENAI_SYSTEM_PROMPT = [
   "Tu única tarea es devolver JSON estructurado. No escribas la respuesta visible a la usuaria.",
   "El input de usuario es un JSON con current_message y conversation_context. Usa ese contexto para resolver continuaciones como 'y el precio', 'qué incluye', 'la otra', 'en Bilbao' o 'cuéntame más', sin arrastrar un servicio a un cambio claro de tema.",
   "Una mención breve como 'taller BLW' o el nombre de otro servicio pide información general: no inicies inscripción ni consultes plazas si la usuaria no expresa que quiere reservar, apuntarse, ver fechas o comprobar disponibilidad.",
+  "Distingue el alcance con service_scope: explicit si la usuaria nombra un servicio, contextual si usa una referencia singular al servicio activo y catalog si pregunta qué opciones ofrece Maternaly entre todos sus servicios.",
+  "Preguntas como '¿tenéis algún taller online?', '¿qué servicios tenéis online?' o '¿hay actividades presenciales?' son búsquedas de catálogo: usa intent=service_discovery, service_scope=catalog y no heredes el servicio activo. En cambio, '¿el BLW es online?', '¿este taller es online?' o '¿y online?' sí pueden referirse al servicio activo.",
   "Si la usuaria corrige una respuesta anterior, dice que quería información general, cambia de tema o hace una pregunta antes de continuar una inscripción, responde a la intención del turno actual y no arrastres el flujo de reserva.",
   "Interpreta slots útiles y no inventes disponibilidad, plazas, pagos ni facturas.",
   "Diferencia información general, interés, inscripción, selección de sesión, datos de inscripción, confirmación, pago, factura, humano, privacidad y reset.",
@@ -36,6 +39,7 @@ export interface MaternalyInterpretationContext {
 export type MaternalyIntent =
   | "greeting"
   | "general_info"
+  | "service_discovery"
   | "service_question"
   | "availability_request"
   | "registration_start"
@@ -48,6 +52,8 @@ export type MaternalyIntent =
   | "privacy_question"
   | "reset"
   | "unknown";
+
+export type MaternalyServiceScope = "explicit" | "contextual" | "catalog" | "unknown";
 
 export interface MaternalyNluSlots {
   service_id?: MaternalyServiceId;
@@ -78,6 +84,7 @@ export interface MaternalyNluSlots {
 export interface StructuredIntent {
   intent: MaternalyIntent;
   slots: MaternalyNluSlots;
+  service_scope: MaternalyServiceScope;
   service_candidate?: string;
   service_question_focus: MaternalyServiceQuestionFocus;
   location_preference?: string;
@@ -109,6 +116,7 @@ export type MaternalyServiceQuestionFocus =
 const DEFAULT_INTENT: StructuredIntent = {
   intent: "unknown",
   slots: {},
+  service_scope: "unknown",
   service_question_focus: "unknown",
   needs_availability_lookup: false,
   confidence: 0.35,
@@ -128,6 +136,7 @@ export const FORBIDDEN_NLU_VISIBLE_FIELDS = [
 const ALLOWED_INTENTS: MaternalyIntent[] = [
   "greeting",
   "general_info",
+  "service_discovery",
   "service_question",
   "availability_request",
   "registration_start",
@@ -165,6 +174,122 @@ function asksForGeneralOverview(text: string): boolean {
   return /\b(?:info|informacion|informacion general|vision general|que me puedes contar|cuentame sobre|hablame de|de que va en general)\b/.test(
     text,
   );
+}
+
+function asksForCatalogModality(text: string, alternativeToExplicitService = false): boolean {
+  if (!/\b(?:online|presencial(?:es)?)\b/.test(text)) {
+    return false;
+  }
+
+  const serviceKind = /\b(?:taller(?:es)?|actividad(?:es)?|servicio(?:s)?|curso(?:s)?|charla(?:s)?|clase(?:s)?|opcion(?:es)?)\b/;
+  const pluralKind = /\b(?:talleres|actividades|servicios|cursos|charlas|clases|opciones)\b/;
+  const providerVerb = /\b(?:teneis|hay|ofreceis|impartis|haceis|contais\s+con)\b/;
+  const globalMarker = /\b(?:algun(?:a|os|as)?|algo|que|cual(?:es)?|aparte|ademas|otr[ao]s?)\b/;
+  const singularAnaphora =
+    /\b(?:este|esta|ese|esa|aquel|aquella|el|la)\s+(?:taller|actividad|servicio|curso|charla|clase)\b/;
+
+  if (singularAnaphora.test(text) && !alternativeToExplicitService) {
+    return false;
+  }
+
+  return (
+    (globalMarker.test(text) && (serviceKind.test(text) || providerVerb.test(text))) ||
+    pluralKind.test(text) ||
+    (providerVerb.test(text) && serviceKind.test(text))
+  );
+}
+
+function asksForCatalogOverview(text: string, alternativeToExplicitService = false): boolean {
+  const trimmed = text.replace(/[¡!¿?.,;:]/g, " ").replace(/\s+/g, " ").trim();
+  const pluralKind = /\b(?:talleres|actividades|servicios|cursos|charlas|clases|opciones)\b/;
+  if (pluralKind.test(trimmed) && trimmed.split(" ").length <= 2) {
+    return true;
+  }
+
+  const providerVerb = /\b(?:teneis|hay|ofreceis|impartis|haceis|contais\s+con)\b/;
+  const globalMarker = /\b(?:que|cual(?:es)?|algun(?:a|os|as)?|lista|ver|mostrar|aparte|ademas|otr[ao]s?)\b/;
+  const singularAnaphora =
+    /\b(?:este|esta|ese|esa|aquel|aquella|el|la)\s+(?:taller|actividad|servicio|curso|charla|clase)\b/;
+  if (singularAnaphora.test(text) && !alternativeToExplicitService) {
+    return false;
+  }
+
+  return pluralKind.test(text) && (providerVerb.test(text) || globalMarker.test(text));
+}
+
+function asksForAlternativeCatalog(
+  text: string,
+  explicitService: KnowledgeService | null,
+): boolean {
+  if (!explicitService) {
+    return false;
+  }
+
+  return explicitService.aliases.some((alias) => {
+    const normalizedAlias = normalize(alias);
+    let aliasIndex = text.indexOf(normalizedAlias);
+
+    while (aliasIndex >= 0) {
+      const before = text.slice(Math.max(0, aliasIndex - 100), aliasIndex);
+      const after = text.slice(aliasIndex + normalizedAlias.length, aliasIndex + normalizedAlias.length + 30);
+      const serviceKind = "(?:taller|actividad|servicio|curso|charla|clase)";
+      const article = "(?:l|\\s+(?:la|los|las))?";
+      const excludesBefore = new RegExp(
+        `(?:\\b(?:ademas|aparte|fuera)\\s+de${article}|\\b(?:excepto|salvo)\\s+|\\bsin\\s+contar(?:\\s+con)?(?:\\s+(?:a|al|el|la))?\\s+|\\b(?:distint[ao]s?|diferente(?:s)?)\\s+de${article}|\\bno\\s+me\\s+refiero\\s+(?:a|al)|\\b(?:que|pero)\\s+no\\s+sea(?:n)?)\\s*(?:${serviceKind}\\s+)?$`,
+      ).test(before);
+      const alternativeBefore = new RegExp(
+        `\\balternativ[ao]s?\\b[^.;!?]{0,60}\\b(?:a|al)\\s+(?:${serviceKind}\\s+)?$`,
+      ).test(before);
+      const excludesAfter = /^\s*(?:aparte|no|descartad[oa]s?)\b/.test(after);
+
+      if (excludesBefore || alternativeBefore || excludesAfter) {
+        return true;
+      }
+
+      aliasIndex = text.indexOf(normalizedAlias, aliasIndex + normalizedAlias.length);
+    }
+
+    return false;
+  });
+}
+
+function isPureGreeting(text: string): boolean {
+  const normalized = text
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!/\b(?:hola|kaixo|hello|buen dia|buenos dias|buenas tardes|buenas noches|buenas)\b/.test(normalized)) {
+    return false;
+  }
+
+  return normalized
+    .replace(
+      /\b(?:muchas gracias|gracias|muy|de nuevo|a tod[oa]s?|hola|kaixo|hello|buen dia|buenos dias|buenas tardes|buenas noches|buenas|que tal|como estas|como va|todo bien)\b/g,
+      " ",
+    )
+    .replace(/\s+/g, " ")
+    .trim() === "";
+}
+
+export function isMaternalyResetRequest(text: string): boolean {
+  const compact = normalize(text)
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const command =
+    "(?:reiniciar|reinicia|reset|resetear|empezar de cero|borrar (?:la )?conversacion|volver al bot|modo bot|reanudar (?:el )?bot)";
+  const mentionsWithoutRequest = new RegExp(
+    `\\b(?:no\\s+(?:(?:quiero|necesito|deseo|pretendo|vamos a|hace falta)\\s+)?|sin\\s+|como\\s+|saber\\s+como\\s+|que\\s+pasa\\s+si\\s+)${command}\\b`,
+  );
+  if (mentionsWithoutRequest.test(compact)) {
+    return false;
+  }
+
+  const directCommand = new RegExp(`^(?:por favor\\s+)?${command}(?:\\s+por favor)?$`);
+  const explicitRequest = new RegExp(
+    `\\b(?:quiero|necesito|puedes|podrias|haz|vamos a)\\b(?:\\s+\\w+){0,4}\\s+${command}\\b`,
+  );
+  return directCommand.test(compact) || explicitRequest.test(compact);
 }
 
 function correctsAnAvailabilityAnswer(text: string): boolean {
@@ -330,6 +455,10 @@ const MATERNALY_STRUCTURED_OUTPUT_SCHEMA = {
       additionalProperties: true,
     },
     service_candidate: { type: ["string", "null"] },
+    service_scope: {
+      type: "string",
+      enum: ["explicit", "contextual", "catalog", "unknown"],
+    },
     service_question_focus: { type: "string", enum: ALLOWED_SERVICE_QUESTION_FOCUS },
     location_preference: { type: ["string", "null"] },
     venue_preference: { type: ["string", "null"] },
@@ -345,6 +474,7 @@ const MATERNALY_STRUCTURED_OUTPUT_SCHEMA = {
   required: [
     "intent",
     "slots",
+    "service_scope",
     "service_candidate",
     "service_question_focus",
     "location_preference",
@@ -387,7 +517,7 @@ function detectModality(text: string): "presencial" | "online" | undefined {
     return "online";
   }
 
-  if (/\bpresencial\b/.test(text) || /\bbilbao\b|\berandio\b/.test(text)) {
+  if (/\bpresencial(?:es)?\b/.test(text) || /\bbilbao\b|\berandio\b/.test(text)) {
     return "presencial";
   }
 
@@ -485,6 +615,13 @@ export function validateStructuredIntent(value: unknown): StructuredIntent {
   );
   const slots = validateSlots(raw.slots);
   const serviceCandidate = compact(raw.service_candidate) ?? slots.service_id ?? slots.normalized_service_key;
+  const serviceScope: MaternalyServiceScope =
+    raw.service_scope === "explicit" ||
+    raw.service_scope === "contextual" ||
+    raw.service_scope === "catalog" ||
+    raw.service_scope === "unknown"
+      ? raw.service_scope
+      : "unknown";
   const locationPreference = compact(raw.location_preference) ?? slots.location;
   const peopleCount = validPeopleCount(raw.people_count) ?? slots.people_count;
   const pregnancyWeek = validPregnancyWeek(raw.pregnancy_week) ?? slots.pregnancy_week;
@@ -503,6 +640,7 @@ export function validateStructuredIntent(value: unknown): StructuredIntent {
     ...DEFAULT_INTENT,
     intent: ALLOWED_INTENTS.includes(intent) ? intent : "unknown",
     slots,
+    service_scope: serviceScope,
     service_candidate: serviceCandidate,
     service_question_focus: serviceQuestionFocus,
     location_preference: locationPreference,
@@ -540,19 +678,38 @@ export class LlmIntentClassifier {
   ): StructuredIntent {
     const text = normalize(message);
     const explicitService = findKnowledgeService(text);
+    const alternativeCatalogQuery = asksForAlternativeCatalog(text, explicitService);
+    const catalogFilterContinuation =
+      context.active_stage === "collecting_service" &&
+      /^[¿¡]?(?:y\s+)?(?:en\s+)?(?:online|presencial(?:es)?)[?!.,;:\s]*$/.test(text.trim());
+    const catalogModalityQuery =
+      (catalogFilterContinuation ||
+        asksForCatalogModality(text, alternativeCatalogQuery) ||
+        asksForCatalogOverview(text, alternativeCatalogQuery)) &&
+      (!explicitService || alternativeCatalogQuery);
+    const pureGreeting = isPureGreeting(text);
     const asksForOtherActiveService = /\b(?:la|el)\s+otr[ao]\b/.test(text);
     const contextualService =
-      asksForOtherActiveService
+      catalogModalityQuery || pureGreeting
+        ? null
+        : asksForOtherActiveService
         ? alternateActiveService(context.active_service_id)
         : isContextualContinuation(text) ||
             asksForGeneralOverview(text) ||
             correctsAnAvailabilityAnswer(text) ||
-            /\b(?:cu[aá]nto dura|duraci[oó]n|cu[aá]ntas horas|qu[eé] incluye|qu[eé] se ve|de qu[eé] va|contenidos?|temas?|para qui[eé]n|es para m[ií]|puedo ir|requisitos?|precio|precios|tarifa|tarifas|qu[eé] vale|cu[aá]nto sale|coste|horarios?|d[ií]as|beneficios?|d[oó]nde|sede|bilbao|erandio|online)\b/.test(
+            /\b(?:cu[aá]nto dura|duraci[oó]n|cu[aá]ntas horas|qu[eé] incluye|qu[eé] se ve|de qu[eé] va|contenidos?|temas?|para qui[eé]n|es para m[ií]|puedo ir|requisitos?|precio|precios|tarifa|tarifas|qu[eé] vale|cu[aá]nto sale|coste|horarios?|d[ií]as|pr[oó]xim[ao]s?|ediciones?|beneficios?|d[oó]nde|sede|bilbao|erandio|online)\b/.test(
               text,
             )
           ? getKnowledgeService(context.active_service_id)
           : null;
-    const service = explicitService ?? contextualService;
+    const service = catalogModalityQuery ? null : explicitService ?? contextualService;
+    const serviceScope: MaternalyServiceScope = catalogModalityQuery
+      ? "catalog"
+      : explicitService
+        ? "explicit"
+        : contextualService
+          ? "contextual"
+          : "unknown";
     const serviceKey = detectNormalizedServiceKey(service?.id);
     const wantsAvailability =
       /(horarios?|plazas?|disponibilidad|hay hueco|hueco|fechas?|qu[eé] d[ií]as|cu[aá]ndo es|pr[oó]xima|pr[oó]ximo|siguiente)/.test(
@@ -577,7 +734,7 @@ export class LlmIntentClassifier {
       paymentOrInvoiceHandoff ||
       stopRequest ||
       /(hablar con|persona humana|humano|humana|llamad|equipo|matrona|profesional)/.test(text);
-    const reset = /(reiniciar|reset|empezar de cero|borrar conversacion|borrar conversación|volver al bot|modo bot|reanudar bot)/.test(text);
+    const reset = isMaternalyResetRequest(text);
     const privacy = /(privacidad|datos|proteccion de datos|protección de datos|rgpd|consentimiento)/.test(text);
     const selectedSession = /\b(?:opci[oó]n\s*)?([1-9])\b/.test(text) || Boolean(extractDateLike(message));
     const location = detectLocation(text);
@@ -622,15 +779,18 @@ export class LlmIntentClassifier {
         !shouldAnswerWithServiceInformation &&
         (wantsAvailability || wantsRegistration),
     );
-    const stabilizedQuestionFocus =
-      correctionTurn || explicitOverview ? "general" : serviceQuestionFocus;
+    const stabilizedQuestionFocus = catalogModalityQuery
+      ? "locations"
+      : correctionTurn || explicitOverview
+        ? "general"
+        : serviceQuestionFocus;
 
     const slots: MaternalyNluSlots = {
       service_id: service?.id,
       service_name: service?.name,
       normalized_service_key: serviceKey,
       location,
-      modality: detectModality(text),
+      modality: detectModality(text) ?? (contextualService ? context.modality : undefined),
       preferred_date: extractDateLike(message),
       preferred_time: text.includes("mañana") || text.includes("manana")
         ? "morning"
@@ -668,18 +828,21 @@ export class LlmIntentClassifier {
                   ? "registration_slot_selected"
                   : hasContactData
                     ? "registration_data_provided"
+                    : catalogModalityQuery
+                      ? "service_discovery"
                     : shouldStartRegistration
                       ? "registration_start"
                       : wantsAvailability && !shouldAnswerWithServiceInformation
                         ? "availability_request"
                         : service
                           ? "service_question"
-                          : /^(hola|buenos dias|buenos días|buenas|buenas noches|kaixo|hello)\b/.test(text)
+                          : pureGreeting
                             ? "greeting"
                             : text.trim()
                               ? "general_info"
                               : "unknown",
       slots,
+      service_scope: serviceScope,
       service_candidate: service?.id,
       service_question_focus: stabilizedQuestionFocus,
       location_preference: location,
@@ -693,7 +856,13 @@ export class LlmIntentClassifier {
           !shouldAnswerWithServiceInformation &&
           (wantsAvailability || wantsRegistration || selectedSession),
       ),
-      confidence: service || reset || privacy || handoff ? 0.82 : hasContactData ? 0.65 : 0.45,
+      confidence: catalogModalityQuery
+        ? 0.92
+        : service || reset || privacy || handoff
+          ? 0.82
+          : hasContactData
+            ? 0.65
+            : 0.45,
       missing_fields: [],
       should_handoff: handoff || clinical === true,
       safety_flags: [
@@ -768,6 +937,10 @@ export class LlmIntentClassifier {
       const normalizedMessage = normalize(message);
       const deterministicService = getKnowledgeService(deterministic.service_candidate);
       const mustHonorCurrentTurn =
+        deterministic.intent === "reset" ||
+        deterministic.intent === "greeting" ||
+        deterministic.intent === "service_discovery" ||
+        deterministic.service_scope === "catalog" ||
         correctsAnAvailabilityAnswer(normalizedMessage) ||
         asksForGeneralOverview(normalizedMessage) ||
         isBareServiceMention(normalizedMessage, deterministicService) ||

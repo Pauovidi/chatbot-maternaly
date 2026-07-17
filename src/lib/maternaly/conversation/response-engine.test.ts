@@ -36,7 +36,7 @@ describe("Maternaly response engine", () => {
 
     const result = await buildMaternalyWhatsAppReply(message);
 
-    expect(result.reply).toMatch(/Maternaly|Pilates|AIPAP|factura|justificante|BLW|reiniciado/i);
+    expect(result.reply).toMatch(/Maternaly|Pilates|AIPAP|factura|justificante|BLW|reiniciad[ao]|hola|buenos|buenas|ayudarte/i);
     expect(result.reply).not.toContain("Disculpa, estoy revisando");
     expect(result.reply).not.toMatch(forbiddenResponsePattern);
   });

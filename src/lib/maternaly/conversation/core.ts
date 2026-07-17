@@ -8,9 +8,11 @@ import {
   findKnowledgeService,
   getKnowledgeService,
   getKnowledgeServiceByNormalizedKey,
+  getKnowledgeServicesByModality,
   type KnowledgeService,
 } from "@/lib/maternaly/knowledge/catalog";
 import {
+  isMaternalyResetRequest,
   MaternalyConversationInterpreter,
   type MaternalyInterpretationContext,
   type MaternalyNluSlots,
@@ -95,6 +97,7 @@ export interface MaternalyAuthorityTurnTrace {
   };
   intent: {
     intent: StructuredIntent["intent"];
+    serviceScope: StructuredIntent["service_scope"];
     serviceCandidate?: string;
     serviceQuestionFocus: StructuredIntent["service_question_focus"];
     locationPreference?: string;
@@ -142,6 +145,7 @@ type PolicyAction =
   | "payment"
   | "invoice"
   | "normalized_registration"
+  | "catalog_info"
   | "service_info"
   | "greeting"
   | "general";
@@ -683,6 +687,7 @@ function buildInterpretationContext(
 ): MaternalyInterpretationContext {
   const service = serviceFromConversationContext(conversation);
   const state = conversation.maternalyNormalizedFlow;
+  const contextualMessages = messagesAfterLatestReset(conversation);
 
   return {
     active_service_id: service?.id,
@@ -691,7 +696,7 @@ function buildInterpretationContext(
     active_stage: state?.stage,
     location: state?.location,
     modality: state?.modality,
-    recent_messages: conversation.messages
+    recent_messages: contextualMessages
       .filter((message) => message.senderType !== "system" && message.body.trim())
       .slice(-6)
       .map((message) => ({
@@ -699,6 +704,14 @@ function buildInterpretationContext(
         text: redactConversationContextText(message.body),
       })),
   };
+}
+
+function messagesAfterLatestReset(conversation: ConversationRecord): ConversationRecord["messages"] {
+  const resetIndex = conversation.messages.findLastIndex(
+    (message) =>
+      message.senderType === "user" && isMaternalyResetRequest(message.body),
+  );
+  return resetIndex >= 0 ? conversation.messages.slice(resetIndex + 1) : conversation.messages;
 }
 
 function isContextualServiceFollowUp(message: string): boolean {
@@ -718,6 +731,8 @@ function shouldUsePreviousServiceForContextualQuestion(
   message: string,
 ): boolean {
   return Boolean(
+    intent.intent !== "service_discovery" &&
+      intent.service_scope !== "catalog" &&
     !intent.service_candidate &&
       !intent.slots.service_id &&
       !intent.slots.normalized_service_key &&
@@ -744,6 +759,7 @@ function enrichIntentWithConversationServiceContext(
 
   return {
     ...intent,
+    service_scope: "contextual",
     service_candidate: service.id,
     slots: {
       ...intent.slots,
@@ -892,27 +908,34 @@ export class MaternalyStateReducer {
       contextual.slots.observations,
     );
 
-    const state = {
-      ...(previous ?? { updatedAt: nowIso() }),
-      ...definedEntries({
-        serviceKey,
-        fullName: registrationSlots.full_name ?? contextual.slots.fullName ?? previous?.fullName,
-        phone: contextual.slots.phone ?? registrationSlots.phone ?? previous?.phone,
-        email: registrationSlots.email ?? contextual.slots.email ?? previous?.email,
-        peopleCount: contextual.slots.peopleCount ?? registrationSlots.people_count ?? previous?.peopleCount,
-        partnerName: registrationSlots.partner_name ?? contextual.slots.partnerName ?? previous?.partnerName,
-        pregnancyWeek: registrationSlots.pregnancy_week ?? previous?.pregnancyWeek,
-        fppOrDueDate: registrationSlots.fpp_or_due_date ?? contextual.slots.fppOrDueDate ?? previous?.fppOrDueDate,
-        babyBirthDate: registrationSlots.baby_birth_date ?? contextual.slots.babyBirthDate ?? previous?.babyBirthDate,
-        selectedSessionId: registrationSlots.selected_session_id ?? previous?.selectedSessionId,
-        selectedGroupId: registrationSlots.selected_group_id ?? previous?.selectedGroupId,
-        location: registrationSlots.location ?? previous?.location,
-        modality: registrationSlots.modality ?? previous?.modality,
-        observations,
-      }),
-      mode: input.conversation.mode,
-      updatedAt: nowIso(),
-    };
+    const state =
+      input.intent.intent === "service_discovery" || input.intent.service_scope === "catalog"
+        ? {
+            ...(previous ?? { updatedAt: nowIso() }),
+            mode: input.conversation.mode,
+            updatedAt: nowIso(),
+          }
+        : {
+            ...(previous ?? { updatedAt: nowIso() }),
+            ...definedEntries({
+              serviceKey,
+              fullName: registrationSlots.full_name ?? contextual.slots.fullName ?? previous?.fullName,
+              phone: contextual.slots.phone ?? registrationSlots.phone ?? previous?.phone,
+              email: registrationSlots.email ?? contextual.slots.email ?? previous?.email,
+              peopleCount: contextual.slots.peopleCount ?? registrationSlots.people_count ?? previous?.peopleCount,
+              partnerName: registrationSlots.partner_name ?? contextual.slots.partnerName ?? previous?.partnerName,
+              pregnancyWeek: registrationSlots.pregnancy_week ?? previous?.pregnancyWeek,
+              fppOrDueDate: registrationSlots.fpp_or_due_date ?? contextual.slots.fppOrDueDate ?? previous?.fppOrDueDate,
+              babyBirthDate: registrationSlots.baby_birth_date ?? contextual.slots.babyBirthDate ?? previous?.babyBirthDate,
+              selectedSessionId: registrationSlots.selected_session_id ?? previous?.selectedSessionId,
+              selectedGroupId: registrationSlots.selected_group_id ?? previous?.selectedGroupId,
+              location: registrationSlots.location ?? previous?.location,
+              modality: registrationSlots.modality ?? previous?.modality,
+              observations,
+            }),
+            mode: input.conversation.mode,
+            updatedAt: nowIso(),
+          };
 
     return { state, diagnostics: contextual.diagnostics };
   }
@@ -962,7 +985,31 @@ export class MaternalyConversationPolicy {
       return { action: "handoff", reason: "payment_or_invoice_requires_human" };
     }
 
+    if (intent.intent === "greeting") {
+      return { action: "greeting" };
+    }
+
+    if (intent.intent === "service_discovery" || intent.service_scope === "catalog") {
+      const catalogMatches = getKnowledgeServicesByModality(intent.slots.modality);
+      return {
+        action: "catalog_info",
+        reason: "catalog_scope",
+        service: catalogMatches.length === 1 ? catalogMatches[0] : null,
+        modalityPreference: intent.slots.modality,
+      };
+    }
+
     const service = getKnowledgeService(intent.service_candidate);
+    const continuesRegistration =
+      intent.needs_availability_lookup ||
+      hasRegistrationDataSlots(intent.slots) ||
+      [
+        "availability_request",
+        "registration_start",
+        "registration_slot_selected",
+        "registration_data_provided",
+        "registration_confirm",
+      ].includes(intent.intent);
     const isInformationalServiceQuestion =
       ["general_info", "service_question"].includes(intent.intent) &&
       intent.service_question_focus !== "booking";
@@ -982,7 +1029,10 @@ export class MaternalyConversationPolicy {
       };
     }
 
-    if (state.serviceKey) {
+    if (
+      state.serviceKey &&
+      (state.stage !== "collecting_service" || continuesRegistration)
+    ) {
       return {
         action: "normalized_registration",
         serviceKey: state.serviceKey,
@@ -1006,10 +1056,6 @@ export class MaternalyConversationPolicy {
         locationPreference: intent.location_preference,
         modalityPreference: intent.slots.modality,
       };
-    }
-
-    if (intent.intent === "greeting") {
-      return { action: "greeting" };
     }
 
     return { action: "general" };
@@ -1232,6 +1278,7 @@ export class MaternalyCoreAdapter {
         payload: {
           turnId,
           intent: intent.intent,
+          serviceScope: intent.service_scope,
           serviceCandidate: intent.service_candidate,
           serviceQuestionFocus: intent.service_question_focus,
           locationPreference: intent.location_preference,
@@ -1254,6 +1301,7 @@ export class MaternalyCoreAdapter {
           botDomain: "maternaly",
           source: "maternaly_core_policy_copy",
           intent: intent.intent,
+          serviceScope: intent.service_scope,
           serviceCandidate: intent.service_candidate,
           serviceQuestionFocus: intent.service_question_focus,
           locationPreference: intent.location_preference,
@@ -1279,6 +1327,15 @@ export class MaternalyCoreAdapter {
     let nextState: MaternalyNormalizedFlowState | undefined =
       decision.action === "reset"
         ? undefined
+        : decision.action === "catalog_info"
+          ? decision.service?.normalizedServiceKey
+            ? {
+                serviceKey: decision.service.normalizedServiceKey,
+                stage: "collecting_service",
+                modality: decision.modalityPreference,
+                updatedAt: nowIso(),
+              }
+            : undefined
         : {
             ...toPersistedState(state),
             stage:
@@ -1410,11 +1467,17 @@ export class MaternalyCoreAdapter {
     const distinctReply = baseReply
       ? ensureDistinctMaternalyReply({
           reply: baseReply,
-          recentAssistantReplies: input.conversation.messages
+          recentAssistantReplies: messagesAfterLatestReset(input.conversation)
             .filter((message) => message.senderType === "bot" && message.body.trim())
             .slice(-20)
             .map((message) => message.body),
           action: decision.action,
+          preferredAlternatives: this.renderer.renderAlternatives({
+            decision,
+            state: nextState,
+            toolResult,
+            message: input.inbound.text,
+          }),
         })
       : undefined;
     const reply = distinctReply?.reply;
@@ -1441,6 +1504,9 @@ export class MaternalyCoreAdapter {
     const needsHuman =
       decision.action === "handoff" ||
       (toolResult?.status === "write_result" && Boolean(toolResult.plan?.blocked || !toolResult.writeResult?.ok));
+    const resetPreservesManualReview =
+      decision.action === "reset" &&
+      (input.conversation.clientStatus === "blocked" || input.conversation.clientStatus === "ambiguous");
     const clinicalHandoff =
       decision.reason === "clinical_safety_requires_professional" ||
       intent.service_question_focus === "clinical_risk";
@@ -1520,6 +1586,7 @@ export class MaternalyCoreAdapter {
       },
       intent: {
         intent: intent.intent,
+        serviceScope: intent.service_scope,
         serviceCandidate: intent.service_candidate,
         serviceQuestionFocus: intent.service_question_focus,
         locationPreference: intent.location_preference,
@@ -1566,6 +1633,16 @@ export class MaternalyCoreAdapter {
       payload: authorityTrace,
     });
 
+    const hasConfirmedServiceMilestone =
+      input.conversation.maternalyReservationStatus === "confirmed" ||
+      input.conversation.maternalyPaymentStatus === "confirmed" ||
+      input.conversation.maternalyInvoiceStatus === "sent";
+    const hasTrackedServiceMilestone =
+      hasConfirmedServiceMilestone ||
+      input.conversation.maternalyPaymentStatus === "pending" ||
+      input.conversation.maternalyInvoiceStatus === "pending" ||
+      input.conversation.maternalyInvoiceStatus === "failed";
+
     return {
       handled: true,
       reply,
@@ -1574,24 +1651,75 @@ export class MaternalyCoreAdapter {
       state: nextState,
       conversationPatch: {
         maternalyNormalizedFlow: nextState,
-        serviceDetected: service?.name ?? input.conversation.serviceDetected,
+        serviceDetected:
+          decision.action === "reset"
+            ? hasConfirmedServiceMilestone
+              ? input.conversation.serviceDetected
+              : undefined
+            : decision.action === "catalog_info"
+              ? hasTrackedServiceMilestone
+                ? input.conversation.serviceDetected
+                : service?.name
+              : service?.name ?? input.conversation.serviceDetected,
         maternalyReservationStatus:
-          decision.action === "normalized_registration" ? "pending" : input.conversation.maternalyReservationStatus ?? "none",
+          decision.action === "reset" || decision.action === "catalog_info"
+            ? input.conversation.maternalyReservationStatus === "pending"
+              ? "none"
+              : input.conversation.maternalyReservationStatus ?? "none"
+            : decision.action === "normalized_registration"
+              ? "pending"
+              : input.conversation.maternalyReservationStatus ?? "none",
         maternalyPaymentStatus:
-          decision.action === "payment" ? "pending" : input.conversation.maternalyPaymentStatus ?? "none",
+          decision.action === "reset"
+            ? input.conversation.maternalyPaymentStatus === "pending"
+              ? "none"
+              : input.conversation.maternalyPaymentStatus ?? "none"
+            : decision.action === "payment"
+              ? "pending"
+              : input.conversation.maternalyPaymentStatus ?? "none",
         maternalyInvoiceStatus:
-          decision.action === "invoice" ? "pending" : input.conversation.maternalyInvoiceStatus ?? "none",
-        maternalyReviewStatus: needsHuman ? "manual_review_required" : input.conversation.maternalyReviewStatus ?? "ok",
-        priority: clinicalHandoff ? "urgent" : input.conversation.priority,
+          decision.action === "reset"
+            ? input.conversation.maternalyInvoiceStatus === "pending"
+              ? "none"
+              : input.conversation.maternalyInvoiceStatus ?? "none"
+            : decision.action === "invoice"
+              ? "pending"
+              : input.conversation.maternalyInvoiceStatus ?? "none",
+        maternalyReviewStatus:
+          decision.action === "reset"
+            ? resetPreservesManualReview
+              ? input.conversation.maternalyReviewStatus ?? "manual_review_required"
+              : "ok"
+            : needsHuman
+              ? "manual_review_required"
+              : input.conversation.maternalyReviewStatus ?? "ok",
+        priority:
+          decision.action === "reset"
+            ? resetPreservesManualReview
+              ? input.conversation.priority
+              : "normal"
+            : clinicalHandoff
+              ? "urgent"
+              : input.conversation.priority,
         mode:
           decision.action === "reset"
-            ? "bot"
+            ? resetPreservesManualReview
+              ? "human"
+              : "bot"
             : needsHuman
               ? "human"
               : input.conversation.mode,
-        humanRequested: needsHuman ? true : decision.action === "reset" ? false : input.conversation.humanRequested,
+        humanRequested: needsHuman
+          ? true
+          : decision.action === "reset"
+            ? resetPreservesManualReview
+            : input.conversation.humanRequested,
         requiresManualReview:
-          needsHuman ? true : decision.action === "reset" ? false : input.conversation.requiresManualReview,
+          needsHuman
+            ? true
+            : decision.action === "reset"
+              ? resetPreservesManualReview
+              : input.conversation.requiresManualReview,
         sheetSource: toolResult?.snapshot ? "normalized_google_sheets" : input.conversation.sheetSource,
         sheetRange:
           toolResult?.writeResult?.updatedRanges.join(", ") || input.conversation.sheetRange,

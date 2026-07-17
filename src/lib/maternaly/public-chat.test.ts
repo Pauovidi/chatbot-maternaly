@@ -13,6 +13,13 @@ describe("Maternaly public chat", () => {
     expect(reply).not.toMatch(forbiddenResponsePattern);
   });
 
+  it("answers global online discovery from the same catalog as WhatsApp", () => {
+    const reply = resolveMaternalyChatReply("¿qué tenéis online?").text;
+
+    expect(reply).toMatch(/opci[oó]n online.*charla informativa|charla informativa.*online/i);
+    expect(reply).not.toMatch(/^El taller BLW no tiene/i);
+  });
+
   it("answers Pilates questions with the enriched warm knowledge", () => {
     const reply = resolveMaternalyChatReply("precio pilates embarazo").text;
 

@@ -1,6 +1,7 @@
 import {
   getKnowledgeService,
   getKnowledgeServiceByNormalizedKey,
+  MATERNALY_KNOWLEDGE_SERVICES,
   type KnowledgeService,
 } from "@/lib/maternaly/knowledge/catalog";
 import type { MaternalyNormalizedFlowState } from "@/lib/hotel/conversations/types";
@@ -19,6 +20,7 @@ export type MaternalyCopyAction =
   | "payment"
   | "invoice"
   | "normalized_registration"
+  | "catalog_info"
   | "service_info"
   | "greeting"
   | "general";
@@ -53,6 +55,13 @@ export interface MaternalyCopyToolResult {
     mode: "dry_run" | "live";
     applied: boolean;
   };
+}
+
+interface MaternalyCopyRenderInput {
+  decision: MaternalyCopyDecision;
+  state?: MaternalyNormalizedFlowState;
+  toolResult?: MaternalyCopyToolResult;
+  message?: string;
 }
 
 function serviceFromDecision(
@@ -97,7 +106,12 @@ function normalizeLocation(value: string | undefined): "bilbao" | "erandio" | un
 }
 
 function normalizeCopy(value: string): string {
-  return value.replace(/\s+/g, " ").trim().toLocaleLowerCase("es");
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLocaleLowerCase("es");
 }
 
 function isCorrectionTurn(message: string | undefined): boolean {
@@ -119,10 +133,81 @@ function isCorrectionTurn(message: string | undefined): boolean {
   );
 }
 
+function capitalizeFirst(value: string): string {
+  return value ? `${value.charAt(0).toLocaleUpperCase("es")}${value.slice(1)}` : value;
+}
+
+function rephraseRepeatedSentence(sentence: string, index: number): string {
+  const rewritten = sentence
+    .replace(/^El taller BLW cuesta\s+/i, "Para el taller BLW, el precio es de ")
+    .replace(/^El taller BLW dura\s+/i, "La duración del taller BLW es de ")
+    .replace(/^El taller BLW es presencial/i, "El taller BLW se realiza de forma presencial")
+    .replace(/^Los talleres BLW son de\s+/i, "El horario de los talleres BLW es de ")
+    .replace(/^En el taller BLW se trabajan\s+/i, "El contenido del taller BLW incluye ")
+    .replace(
+      /^La charla informativa de embarazo es gratuita/i,
+      "La charla informativa de embarazo no tiene coste",
+    )
+    .replace(/^La charla está pensada para\s+/i, "Esta charla va dirigida a ")
+    .replace(
+      /^La plaza queda confirmada únicamente después de la reserva y el pago validados/i,
+      "La plaza solo se confirma cuando la reserva y el pago han sido validados",
+    )
+    .replace(
+      /^Ahora mismo no veo sesiones disponibles/i,
+      "En este momento no aparecen sesiones disponibles",
+    )
+    .replace(/^Claro[,.]?\s*/i, "")
+    .replace(/^Perfecto[,.]?\s*/i, "");
+
+  if (rewritten !== sentence) {
+    return capitalizeFirst(rewritten);
+  }
+
+  if (/^¿.*\?(?:\s*[^\p{L}\p{N}\s]+)?$/u.test(sentence.trim())) {
+    const question = sentence
+      .replace(/^¿Quieres\s+/i, "Dime si quieres ")
+      .replace(/^¿Te interesa\s+/i, "Cuéntame si te interesa ")
+      .replace(/^¿Te apetece\s+/i, "Dime si te apetece ")
+      .replace(/\?(\s*[^\p{L}\p{N}\s]+)?$/u, ".$1");
+    if (question !== sentence) {
+      return question;
+    }
+  }
+
+  const connectors = [
+    "En concreto,",
+    "Además,",
+    "También conviene saber que",
+    "Por otro lado,",
+    "Para terminar,",
+  ];
+  const connector = connectors[index % connectors.length];
+  return `${connector} ${sentence.charAt(0).toLocaleLowerCase("es")}${sentence.slice(1)}`;
+}
+
+function contentPreservingAlternatives(reply: string): string[] {
+  const sentences = reply
+    .split(/(?<=[.!?])\s+(?=[A-ZÁÉÍÓÚÜÑ¿¡])/u)
+    .map((item) => item.trim())
+    .filter(Boolean);
+  const reframed = (sentences.length > 0 ? sentences : [reply]).map(rephraseRepeatedSentence);
+  const questions = reframed.filter((item) => /\?$/.test(item));
+  const facts = reframed.filter((item) => !/\?$/.test(item));
+  const ordered = [...facts, ...questions];
+
+  return [
+    `Puntos clave:\n\n${ordered.map((item) => `• ${item}`).join("\n")}`,
+    `${questions.join(" ")}${questions.length ? "\n\n" : ""}${[...facts].reverse().join(" ")}`,
+    `Datos concretos:\n\n${ordered.map((item, index) => `${index + 1}. ${item}`).join("\n")}`,
+  ].filter((item) => item.trim());
+}
+
 export function ensureDistinctMaternalyReply(input: {
   reply: string;
   recentAssistantReplies: string[];
   action: MaternalyCopyAction;
+  preferredAlternatives?: string[];
 }): { reply: string; changed: boolean; duplicateCount: number } {
   const previous = new Set(input.recentAssistantReplies.map(normalizeCopy));
   const normalizedReply = normalizeCopy(input.reply);
@@ -130,44 +215,57 @@ export function ensureDistinctMaternalyReply(input: {
     (item) => normalizeCopy(item) === normalizedReply,
   ).length;
 
-  if (!previous.has(normalizedReply) || ["handoff", "silent_human"].includes(input.action)) {
+  const repeatableTechnicalActions: MaternalyCopyAction[] = [
+    "reset",
+    "handoff",
+    "silent_human",
+    "privacy",
+    "payment",
+    "invoice",
+  ];
+  if (!previous.has(normalizedReply) || repeatableTechnicalActions.includes(input.action)) {
     return { reply: input.reply, changed: false, duplicateCount };
   }
 
-  const openings = [
-    "Te lo cuento de otra manera, para no sonar repetitiva:",
-    "Voy a enfocarlo desde otro ángulo y con un poco más de contexto:",
-    "Claro; esta vez voy a explicártelo de una forma distinta:",
-    "Retomo la idea, pero sin soltarte exactamente la misma respuesta:",
-    "Vamos a mirarlo con otro enfoque, que creo que te va a resultar más útil:",
-    "Te amplío la respuesta y cambio el punto de partida:",
-  ];
+  if (input.action === "greeting") {
+    const greetingVariants = [
+      "¡Hola de nuevo! 😊 Encantada de leerte. Cuéntame, ¿qué necesitas hoy?",
+      "¡Aquí estoy! Dime qué te gustaría consultar y lo vemos juntas. 💛",
+      "¡Buenas! 😊 ¿En qué puedo echarte una mano ahora?",
+    ];
+    const candidate = greetingVariants.find((item) => !previous.has(normalizeCopy(item)));
+    if (candidate) {
+      return { reply: candidate, changed: true, duplicateCount };
+    }
+  }
 
-  for (const opening of openings) {
-    const candidate = `${opening}\n\n${input.reply}`;
+  for (const candidate of input.preferredAlternatives ?? []) {
     if (!previous.has(normalizeCopy(candidate))) {
       return { reply: candidate, changed: true, duplicateCount };
     }
   }
 
-  const candidate = `${input.reply}\n\nSi me dices qué parte te interesa más, adapto la explicación a eso y seguimos desde ahí.`;
+  for (const candidate of contentPreservingAlternatives(input.reply)) {
+    if (!previous.has(normalizeCopy(candidate))) {
+      return { reply: candidate, changed: true, duplicateCount };
+    }
+  }
+
+  const focusOptions = ["el contenido", "la duración", "el precio", "la modalidad", "las sedes", "las fechas"];
+  const focus = focusOptions[duplicateCount % focusOptions.length];
+  const candidate = `Dime qué necesitas resolver ahora y voy directa a ello. Si te ayuda, podemos empezar por ${focus} y después vemos el resto con calma.`;
   return { reply: candidate, changed: true, duplicateCount };
 }
 
 export class MaternalyCopyRenderer {
-  render(input: {
-    decision: MaternalyCopyDecision;
-    state?: MaternalyNormalizedFlowState;
-    toolResult?: MaternalyCopyToolResult;
-    message?: string;
-  }): string | undefined {
+  render(input: MaternalyCopyRenderInput): string | undefined {
     const service = serviceFromDecision(input.decision, input.state);
 
     switch (input.decision.action) {
       case "silent_human":
         return undefined;
       case "reset":
-        return "Listo, he reiniciado la conversación y seguimos poquito a poco. ¿Qué te apetece mirar ahora de Maternaly? 💛";
+        return "Listo, conversación reiniciada. Empezamos desde cero. ¿En qué puedo ayudarte?";
       case "handoff":
         if (input.decision.reason === "clinical_safety_requires_professional") {
           return "Siento que estés pasando por eso. Por seguridad, esto debe revisarlo una profesional cuanto antes. No puedo hacer diagnóstico por WhatsApp, así que te paso con el equipo de Maternaly para que lo miren contigo. Si el sangrado, el dolor o cualquier síntoma importante empeora, mi recomendación es que contactes lo antes posible con tu médico o acudas a urgencias.";
@@ -186,7 +284,9 @@ export class MaternalyCopyRenderer {
       case "invoice":
         return "Puedo dejar anotada la solicitud de factura o justificante. El equipo la revisará con el pago validado antes de emitir nada.";
       case "greeting":
-        return "¡Hola! Soy el asistente de Maternaly. Estoy aquí para ayudarte de forma cercana con información o con una solicitud para talleres y charlas. ¿Qué necesitas mirar hoy? 🫶";
+        return this.renderGreeting(input.message);
+      case "catalog_info":
+        return this.renderCatalogInfo(input.decision.modalityPreference, input.message);
       case "service_info":
         return service
           ? this.renderServiceInfo(service, input.decision, input.message)
@@ -199,12 +299,142 @@ export class MaternalyCopyRenderer {
     }
   }
 
+  renderAlternatives(input: MaternalyCopyRenderInput): string[] {
+    const service = serviceFromDecision(input.decision, input.state);
+    if (input.decision.action === "catalog_info") {
+      if (input.decision.modalityPreference === "online") {
+        return [
+          "La alternativa online confirmada en Maternaly es la charla informativa gratuita para las primeras 20 semanas de embarazo. La imparten matronas y aborda cuidados, alimentación, ejercicio, revisiones, medicación segura y dudas habituales. Si buscabas un taller práctico online de otra temática, dime cuál y compruebo contigo qué formato tiene. 💛",
+          "Online, la convocatoria que consta ahora mismo es la charla gratuita de embarazo de la semana 1 a la 20. Puedes asistir desde casa y resolver en directo con matronas dudas físicas, emocionales y de autocuidado. Cuéntame si quieres ver su contenido o sus próximas fechas.",
+        ];
+      }
+
+      if (input.decision.modalityPreference === "presencial") {
+        return [
+          "De forma presencial tengo confirmadas la charla informativa de embarazo, el taller BLW y los grupos de Pilates embarazo. Hay opciones en Bilbao y Erandio, con sedes y horarios distintos. Dime qué tema te interesa y qué ubicación te viene mejor, y te las comparo una por una. 😊",
+        ];
+      }
+    }
+
+    if (input.decision.action !== "service_info" || !service) {
+      return [];
+    }
+
+    const focus = input.decision.serviceQuestionFocus ?? "general";
+    if (service.id === "taller_blw") {
+      if (focus === "pricing") {
+        return [
+          "Para acudir una persona, el taller BLW tiene un precio de 45 €; si venís en pareja, son 75 € en total. La plaza solo se considera confirmada cuando la reserva y el pago han sido validados. ¿Qué sede os vendría mejor, Bilbao o Erandio?",
+          "El precio depende de si vienes sola o acompañada: 45 € por persona o 75 € por pareja. Antes de dar la plaza por cerrada, Maternaly valida tanto la reserva como el pago. Si quieres, después miramos la convocatoria que mejor os encaje.",
+        ];
+      }
+
+      if (focus === "duration" || focus === "schedule") {
+        return [
+          "Cada taller BLW ocupa tres horas, de 17:00 a 20:00, y se realiza presencialmente. Las convocatorias van alternando entre Bilbao y Erandio, así que puedo enseñarte las próximas cuando quieras. 😊",
+        ];
+      }
+
+      if (focus === "locations") {
+        return [
+          "El BLW se trabaja de manera presencial en las sedes de Maternaly Bilbao y Maternaly Erandio; no consta una edición online. Si buscas algo a distancia, la charla informativa de embarazo sí tiene convocatorias online. 💛",
+        ];
+      }
+
+      if (focus === "contents" || focus === "benefits") {
+        return [
+          "El taller está pensado para empezar la alimentación complementaria con seguridad y sin forzar al bebé. Se revisan las señales para saber si está preparado, los cortes y alimentos adecuados, la autorregulación, las alergias y cómo construir hábitos familiares saludables. 🥕",
+        ];
+      }
+
+      return [
+        "El BLW es una forma de iniciar la alimentación complementaria dejando que el bebé participe y marque el ritmo, siempre dentro de unas pautas claras de seguridad. En el taller aprenderéis a reconocer si ya está preparado, ofrecer alimentos y cortes adecuados, acompañar sin forzar y manejar dudas sobre alergias y alimentación familiar. Es presencial, dura de 17:00 a 20:00 y cuesta 45 € para una persona o 75 € por pareja. Podemos profundizar en seguridad, contenidos, edad recomendada o próximas convocatorias, como prefieras. 🥕",
+        "La idea central del Baby-Led Weaning no es simplemente «dar comida en trozos», sino acompañar al bebé para que explore y se autorregule de forma segura. Durante tres horas se ven requisitos de inicio, alimentos, cortes, alergias y hábitos saludables; el taller se hace en Bilbao o Erandio y podéis venir una persona por 45 € o en pareja por 75 €. ¿Qué parte te genera más dudas?",
+      ];
+    }
+
+    if (service.id === "charla_embarazo_1_20") {
+      return [
+        "Esta charla gratuita acompaña las primeras 20 semanas del embarazo con información práctica de matronas: cambios físicos y emocionales, cuidados, alimentación, actividad, revisiones, medicación segura y sexualidad. Puedes conectarte online o acudir a Bilbao o Erandio, sola o con acompañante. Dime qué aspecto quieres mirar con más detalle. 💛",
+      ];
+    }
+
+    if (service.id === "pilates") {
+      return [
+        `Pilates embarazo se realiza en grupos reducidos desde la semana 14 y trabaja fuerza, postura, respiración y suelo pélvico. Se ofrece en Bilbao y Erandio; las tarifas son ${service.pricing?.join(" o ") ?? "las indicadas por el equipo"}. Si me dices sede y franja horaria, te oriento mejor. 😊`,
+      ];
+    }
+
+    return [
+      `${service.name} puede encajarte si buscas esto: ${service.summary} ${service.details.slice(0, 2).join(" ")} ${service.pricing?.length ? `Las tarifas disponibles son ${service.pricing.join(" / ")}.` : ""} ${warmNextQuestion(service.nextQuestion)}`,
+    ];
+  }
+
   renderTechnicalFallback(): string {
     return "Ahora mismo no he podido procesarlo con seguridad. Puedo orientarte sobre Maternaly o dejar tu consulta para que el equipo la revise con cuidado. ¿Me cuentas qué necesitas?";
   }
 
   private renderGeneral(): string {
-    return "Ahora mismo puedes consultar dos servicios de Maternaly: la charla informativa gratuita para embarazo de la semana 1 a la 20, y el taller presencial BLW de alimentación complementaria autorregulada. ¿Sobre cuál te gustaría saber más? 💛";
+    return "Puedo orientarte sobre las charlas y talleres de Maternaly, Pilates para el embarazo, AIPAP en tierra o en agua, Yoga Prenatal, Método 5P, diagnóstico prenatal, fisioterapia y suelo pélvico, lactancia y fisioterapia pediátrica. Cuéntame qué estás buscando o en qué etapa te encuentras y te ayudo a encontrar la opción que mejor encaja. 💛";
+  }
+
+  private renderGreeting(message?: string): string {
+    const normalized = normalizeCopy(message ?? "");
+    if (normalized.includes("buenos dias")) {
+      return "¡Buenos días! 😊 Soy el asistente de Maternaly. Encantada de leerte. Cuéntame, ¿qué te gustaría saber o qué necesitas hoy?";
+    }
+
+    if (normalized.includes("buenas noches")) {
+      return "¡Buenas noches! 😊 Soy el asistente de Maternaly y estoy aquí para ayudarte. Cuéntame, ¿qué necesitas?";
+    }
+
+    if (normalized.includes("buenas tardes")) {
+      return "¡Buenas tardes! 😊 Soy el asistente de Maternaly. Encantada de leerte; cuéntame, ¿qué necesitas hoy?";
+    }
+
+    return "¡Hola! 😊 Soy el asistente de Maternaly y estoy aquí para ayudarte con información o con lo que necesites. Cuéntame, ¿qué necesitas hoy?";
+  }
+
+  private renderCatalogInfo(
+    modalityPreference?: "presencial" | "online",
+    message?: string,
+  ): string {
+    if (modalityPreference === "presencial") {
+      const presencialNames = MATERNALY_KNOWLEDGE_SERVICES.filter((service) =>
+        service.sessions?.some((session) => session.modality === "presencial"),
+      ).map((service) => service.name);
+      const lastName = presencialNames.at(-1);
+      const formattedNames =
+        presencialNames.length > 1
+          ? `${presencialNames.slice(0, -1).join(", ")} y ${lastName}`
+          : lastName ?? "ninguna opción";
+      return `Sí. Las opciones presenciales que tengo confirmadas son ${formattedNames}. La charla tiene ediciones en Bilbao y Erandio; el taller BLW se imparte en ambas sedes según convocatoria; y Pilates tiene grupos presenciales con varios horarios. Si me dices qué temática buscas o qué sede te viene mejor, te ayudo a compararlas con detalle. 💛`;
+    }
+
+    if (modalityPreference !== "online") {
+      return this.renderGeneral();
+    }
+
+    const onlineServices = MATERNALY_KNOWLEDGE_SERVICES.filter((service) =>
+      service.sessions?.some((session) => session.modality === "online"),
+    );
+    const asksForWorkshop = /\btaller(?:es)?\b/.test(normalizeCopy(message ?? ""));
+    const onlineWorkshops = onlineServices.filter((service) =>
+      [service.name, ...service.aliases].some((value) => /\btaller(?:es)?\b/.test(normalizeCopy(value))),
+    );
+
+    if (onlineServices.length === 0) {
+      return "Ahora mismo no tengo ninguna modalidad online confirmada en la información disponible. Si me dices qué tipo de ayuda buscas, puedo orientarte entre los servicios de Maternaly o dejar la consulta preparada para el equipo.";
+    }
+
+    const onlineNames = onlineServices
+      .map((service) => service.name.replace(/^./, (letter) => letter.toLocaleLowerCase("es")))
+      .join(" y ");
+    if (asksForWorkshop && onlineWorkshops.length === 0) {
+      return `Como taller online, ahora mismo no tengo ninguno confirmado. La opción online que sí tengo confirmada es la ${onlineNames}: la imparten matronas y está pensada para resolver dudas de las primeras 20 semanas del embarazo. Si buscabas otra temática, como Pilates, AIPAP o Yoga Prenatal, dime cuál y te confirmo su formato. 💛`;
+    }
+
+    return `Sí: la opción online que tengo confirmada ahora mismo es la ${onlineNames}. La imparten matronas y trata cambios del embarazo, autocuidados, alimentación, actividad física, revisiones, medicación segura y dudas frecuentes. Si quieres, te cuento en qué consiste o miro las próximas ediciones online. 💛`;
   }
 
   private renderServiceInfo(

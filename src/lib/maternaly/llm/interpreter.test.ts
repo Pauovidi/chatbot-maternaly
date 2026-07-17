@@ -238,6 +238,29 @@ describe("Maternaly LLM interpreter", () => {
     });
   });
 
+  it.each(["reiniciar", "reset", "por favor, empezar de cero", "quiero volver al bot"])(
+    "treats '%s' as an explicit technical reset command",
+    async (message) => {
+      await expect(new LlmIntentClassifier().classify(message)).resolves.toMatchObject({
+        intent: "reset",
+      });
+    },
+  );
+
+  it.each([
+    "No quiero reiniciar, solo saber qué talleres hay",
+    "Quiero saber cómo reiniciar",
+    "¿Qué pasa si resetear la conversación?",
+    "Sigamos sin empezar de cero",
+  ])("does not execute a reset when '%s' only mentions or rejects it", async (message) => {
+    const result = await new LlmIntentClassifier().classify(message, {
+      active_service_id: "taller_blw",
+      active_stage: "collecting_contact",
+    });
+
+    expect(result.intent).not.toBe("reset");
+  });
+
   it("honors a correction asking for general information instead of repeating availability", async () => {
     const classifier = new LlmIntentClassifier();
 
@@ -254,21 +277,158 @@ describe("Maternaly LLM interpreter", () => {
     });
   });
 
-  it("lets an online-modality question interrupt an active registration flow", async () => {
+  it("treats an existential online question as catalog discovery, not as BLW context", async () => {
     const classifier = new LlmIntentClassifier();
 
-    await expect(
-      classifier.classify("oye, pero antes de esto ¿tenéis algún taller online?", {
+    const result = await classifier.classify("oye, pero antes de esto ¿tenéis algún taller online?", {
         active_service_id: "taller_blw",
         active_stage: "collecting_contact",
-      }),
-    ).resolves.toMatchObject({
-      intent: "service_question",
-      service_candidate: "taller_blw",
+      });
+
+    expect(result).toMatchObject({
+      intent: "service_discovery",
+      service_scope: "catalog",
       service_question_focus: "locations",
       needs_availability_lookup: false,
       slots: expect.objectContaining({ modality: "online" }),
     });
+    expect(result.service_candidate).toBeUndefined();
+    expect(result.slots.normalized_service_key).toBeUndefined();
+  });
+
+  it.each([
+    "¿algún taller online?",
+    "¿qué tenéis online?",
+    "¿y online qué tenéis?",
+    "¿qué talleres son online?",
+    "¿hay actividades online?",
+    "Además del BLW, ¿tenéis algo online?",
+    "Aparte del taller BLW, ¿qué opciones online hay?",
+    "¿Hay otro taller online distinto del BLW?",
+    "Fuera del BLW, ¿tenéis algún taller online?",
+    "¿Tenéis algún taller online que no sea BLW?",
+    "No me refiero al BLW, ¿qué tenéis online?",
+    "¿Hay alguna alternativa online al BLW?",
+    "BLW aparte, ¿qué más tenéis online?",
+    "El taller BLW no; ¿tenéis algún otro online?",
+    "¿Qué hay online excepto BLW?",
+    "Sin contar el BLW, ¿qué tenéis online?",
+    "¿Qué online hay salvo BLW?",
+  ])("treats catalog paraphrase '%s' as portfolio discovery", async (message) => {
+    const result = await new LlmIntentClassifier().classify(message, {
+      active_service_id: "taller_blw",
+      active_stage: "collecting_contact",
+    });
+
+    expect(result).toMatchObject({
+      intent: "service_discovery",
+      service_scope: "catalog",
+      slots: expect.objectContaining({ modality: "online" }),
+      needs_availability_lookup: false,
+    });
+    expect(result.service_candidate).toBeUndefined();
+  });
+
+  it.each(["¿qué servicios ofrecéis?", "¿qué talleres hay?", "servicios"])(
+    "treats general portfolio query '%s' as catalog discovery",
+    async (message) => {
+      const result = await new LlmIntentClassifier().classify(message, {
+        active_service_id: "taller_blw",
+        active_stage: "collecting_contact",
+      });
+
+      expect(result).toMatchObject({
+        intent: "service_discovery",
+        service_scope: "catalog",
+        needs_availability_lookup: false,
+      });
+      expect(result.service_candidate).toBeUndefined();
+    },
+  );
+
+  it.each(["¿y presencial?", "¿y presenciales?"])(
+    "changes the global catalog filter with '%s'",
+    async (message) => {
+      const result = await new LlmIntentClassifier().classify(message, {
+        active_service_id: "charla_embarazo_1_20",
+        active_stage: "collecting_service",
+        modality: "online",
+      });
+
+      expect(result).toMatchObject({
+        intent: "service_discovery",
+        service_scope: "catalog",
+        slots: expect.objectContaining({ modality: "presencial" }),
+      });
+      expect(result.service_candidate).toBeUndefined();
+    },
+  );
+
+  it("keeps explicit and short anaphoric modality questions scoped to BLW", async () => {
+    const classifier = new LlmIntentClassifier();
+
+    await expect(
+      classifier.classify("¿el taller BLW es online?", { active_service_id: "taller_blw" }),
+    ).resolves.toMatchObject({
+      intent: "service_question",
+      service_scope: "explicit",
+      service_candidate: "taller_blw",
+      slots: expect.objectContaining({ modality: "online" }),
+    });
+
+    await expect(
+      classifier.classify("¿y online?", { active_service_id: "taller_blw" }),
+    ).resolves.toMatchObject({
+      intent: "service_question",
+      service_scope: "contextual",
+      service_candidate: "taller_blw",
+      slots: expect.objectContaining({ modality: "online" }),
+    });
+
+    await expect(
+      classifier.classify("¿BLW tiene otra opción online?", {
+        active_service_id: "taller_blw",
+      }),
+    ).resolves.toMatchObject({
+      intent: "service_question",
+      service_scope: "explicit",
+      service_candidate: "taller_blw",
+    });
+
+    await expect(
+      classifier.classify("Aparte de si el taller BLW es online, ¿cuánto dura?", {
+        active_service_id: "taller_blw",
+      }),
+    ).resolves.toMatchObject({
+      intent: "service_question",
+      service_scope: "explicit",
+      service_candidate: "taller_blw",
+      service_question_focus: "duration",
+    });
+  });
+
+  it.each([
+    "hola, buenos días",
+    "buenos días, ¿qué tal?",
+    "buenas tardes",
+    "hola, ¿cómo estás?",
+    "Buenos días 😊",
+    "Muy buenos días",
+    "Buenos días, gracias",
+    "Hola de nuevo",
+    "Buenos días a todas",
+  ])("keeps natural greeting '%s' independent from stale BLW context", async (message) => {
+    const result = await new LlmIntentClassifier().classify(message, {
+      active_service_id: "taller_blw",
+      active_stage: "choosing_session",
+    });
+
+    expect(result).toMatchObject({
+      intent: "greeting",
+      service_scope: "unknown",
+      needs_availability_lookup: false,
+    });
+    expect(result.service_candidate).toBeUndefined();
   });
 
   it("stabilizes an OpenAI booking misclassification for a bare service mention", async () => {
@@ -299,6 +459,78 @@ describe("Maternaly LLM interpreter", () => {
       intent: "service_question",
       service_candidate: "taller_blw",
       service_question_focus: "general",
+      needs_availability_lookup: false,
+    });
+  });
+
+  it("stabilizes an OpenAI BLW misclassification for a global online search", async () => {
+    vi.stubEnv("LLM_PROVIDER", "openai");
+    process.env.OPENAI_API_KEY = "test-openai-key";
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          output_text: JSON.stringify({
+            intent: "service_question",
+            service_scope: "contextual",
+            service_candidate: "taller_blw",
+            slots: { service_id: "taller_blw", modality: "online" },
+            service_question_focus: "locations",
+            needs_availability_lookup: false,
+            confidence: 0.98,
+            missing_fields: [],
+            should_handoff: false,
+            safety_flags: [],
+          }),
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    const result = await new LlmIntentClassifier().classify(
+      "¿y tenéis algún taller online?",
+      { active_service_id: "taller_blw", active_stage: "collecting_contact" },
+    );
+
+    expect(result).toMatchObject({
+      intent: "service_discovery",
+      service_scope: "catalog",
+      slots: expect.objectContaining({ modality: "online" }),
+    });
+    expect(result.service_candidate).toBeUndefined();
+  });
+
+  it("stabilizes a pure greeting even if OpenAI drags the previous BLW context", async () => {
+    vi.stubEnv("LLM_PROVIDER", "openai");
+    process.env.OPENAI_API_KEY = "test-openai-key";
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          output_text: JSON.stringify({
+            intent: "service_question",
+            service_scope: "contextual",
+            service_candidate: "taller_blw",
+            slots: { service_id: "taller_blw" },
+            service_question_focus: "schedule",
+            needs_availability_lookup: false,
+            confidence: 0.97,
+            missing_fields: [],
+            should_handoff: false,
+            safety_flags: [],
+          }),
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    await expect(
+      new LlmIntentClassifier().classify("buenos días", {
+        active_service_id: "taller_blw",
+        active_stage: "choosing_session",
+      }),
+    ).resolves.toMatchObject({
+      intent: "greeting",
+      service_scope: "unknown",
+      service_candidate: undefined,
       needs_availability_lookup: false,
     });
   });

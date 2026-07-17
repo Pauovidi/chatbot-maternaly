@@ -113,14 +113,14 @@ export const MATERNALY_KNOWLEDGE_SERVICES: KnowledgeService[] = [
     ],
     pricing: ["45 €/persona", "75 €/pareja"],
     sessions: [
-      { location: "Erandio", date: "2026-09-02", weekday: "miércoles", startTime: "17:00", endTime: "20:00" },
-      { location: "Erandio", date: "2026-10-07", weekday: "miércoles", startTime: "17:00", endTime: "20:00" },
-      { location: "Erandio", date: "2026-11-04", weekday: "miércoles", startTime: "17:00", endTime: "20:00" },
-      { location: "Erandio", date: "2026-12-02", weekday: "miércoles", startTime: "17:00", endTime: "20:00" },
-      { location: "Bilbao", date: "2026-09-25", weekday: "viernes", startTime: "17:00", endTime: "20:00" },
-      { location: "Bilbao", date: "2026-10-23", weekday: "viernes", startTime: "17:00", endTime: "20:00" },
-      { location: "Bilbao", date: "2026-11-27", weekday: "viernes", startTime: "17:00", endTime: "20:00" },
-      { location: "Bilbao", date: "2026-12-18", weekday: "viernes", startTime: "17:00", endTime: "20:00" },
+      { location: "Erandio", modality: "presencial", date: "2026-09-02", weekday: "miércoles", startTime: "17:00", endTime: "20:00" },
+      { location: "Erandio", modality: "presencial", date: "2026-10-07", weekday: "miércoles", startTime: "17:00", endTime: "20:00" },
+      { location: "Erandio", modality: "presencial", date: "2026-11-04", weekday: "miércoles", startTime: "17:00", endTime: "20:00" },
+      { location: "Erandio", modality: "presencial", date: "2026-12-02", weekday: "miércoles", startTime: "17:00", endTime: "20:00" },
+      { location: "Bilbao", modality: "presencial", date: "2026-09-25", weekday: "viernes", startTime: "17:00", endTime: "20:00" },
+      { location: "Bilbao", modality: "presencial", date: "2026-10-23", weekday: "viernes", startTime: "17:00", endTime: "20:00" },
+      { location: "Bilbao", modality: "presencial", date: "2026-11-27", weekday: "viernes", startTime: "17:00", endTime: "20:00" },
+      { location: "Bilbao", modality: "presencial", date: "2026-12-18", weekday: "viernes", startTime: "17:00", endTime: "20:00" },
     ],
     safetyNotes: [
       "No decir plaza confirmada sin pago validado.",
@@ -321,4 +321,16 @@ export function getKnowledgeServiceByNormalizedKey(
   }
 
   return MATERNALY_KNOWLEDGE_SERVICES.find((service) => service.normalizedServiceKey === key) ?? null;
+}
+
+export function getKnowledgeServicesByModality(
+  modality: KnowledgeSession["modality"] | undefined,
+): KnowledgeService[] {
+  if (!modality) {
+    return [];
+  }
+
+  return MATERNALY_KNOWLEDGE_SERVICES.filter((service) =>
+    service.sessions?.some((session) => session.modality === modality),
+  );
 }

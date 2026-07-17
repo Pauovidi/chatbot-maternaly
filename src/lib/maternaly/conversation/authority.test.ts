@@ -161,10 +161,13 @@ describe("Maternaly conversation authority", () => {
     expect(eventTypes(result)).not.toContain("maternaly_availability_checked");
   });
 
-  it("answers an online question before resuming a pending BLW registration", async () => {
+  it("answers a global online search from the catalog without resuming or contaminating BLW", async () => {
     const result = await new MaternalyCoreAdapter().handle({
       conversation: fakeConversation({
         serviceDetected: "Taller BLW",
+        maternalyReservationStatus: "pending",
+        maternalyPaymentStatus: "confirmed",
+        maternalyInvoiceStatus: "sent",
         maternalyNormalizedFlow: {
           serviceKey: "taller_blw",
           stage: "collecting_contact",
@@ -181,13 +184,84 @@ describe("Maternaly conversation authority", () => {
       },
     });
 
-    expect(result.authorityTrace.policy.action).toBe("service_info");
-    expect(result.reply).toMatch(/no tiene modalidad online|presencial/i);
+    expect(result.intent).toMatchObject({
+      intent: "service_discovery",
+      service_scope: "catalog",
+      service_candidate: undefined,
+      slots: expect.objectContaining({ modality: "online" }),
+    });
+    expect(result.authorityTrace.policy).toMatchObject({
+      action: "catalog_info",
+      reason: "catalog_scope",
+    });
+    expect(result.reply).toMatch(/opci[oó]n online.*charla informativa|charla informativa.*online/i);
+    expect(result.reply).not.toMatch(/^El taller BLW no tiene|te cuento c[oó]mo es el BLW/i);
     expect(result.reply).not.toMatch(/me faltan|email|fecha de nacimiento del beb[eé]/i);
     expect(result.state).toMatchObject({
-      serviceKey: "taller_blw",
-      selectedSessionId: "sesion_blw_erandio_20261007",
+      serviceKey: "charla_embarazo_1_20",
+      stage: "collecting_service",
+      modality: "online",
     });
+    expect(result.conversationPatch.serviceDetected).toBe("Taller BLW");
+    expect(result.conversationPatch).toMatchObject({
+      maternalyReservationStatus: "none",
+      maternalyPaymentStatus: "confirmed",
+      maternalyInvoiceStatus: "sent",
+    });
+    expect(eventTypes(result)).not.toContain("maternaly_availability_checked");
+
+    const followUp = await new MaternalyCoreAdapter().handle({
+      conversation: fakeConversation({ ...result.conversationPatch }),
+      inbound: {
+        provider: "twilio_sandbox",
+        from: "whatsapp:+34600111222",
+        text: "gracias",
+      },
+    });
+
+    expect(followUp.authorityTrace.policy.action).not.toBe("normalized_registration");
+    expect(followUp.reply).not.toMatch(/Taller BLW|17:00|plazas disponibles/i);
+
+    const editions = await new MaternalyCoreAdapter().handle({
+      conversation: fakeConversation({ ...result.conversationPatch }),
+      inbound: {
+        provider: "twilio_sandbox",
+        from: "whatsapp:+34600111222",
+        text: "Sí, mira las próximas",
+      },
+    });
+
+    expect(editions.intent).toMatchObject({
+      service_candidate: "charla_embarazo_1_20",
+      service_scope: "contextual",
+      slots: expect.objectContaining({ modality: "online" }),
+    });
+    expect(editions.authorityTrace.policy.action).toBe("normalized_registration");
+    expect(editions.reply).not.toMatch(/Pilates|AIPAP|Yoga Prenatal/i);
+  });
+
+  it("routes a pure greeting before any stale registration context", async () => {
+    const result = await new MaternalyCoreAdapter().handle({
+      conversation: fakeConversation({
+        serviceDetected: "Taller BLW",
+        maternalyNormalizedFlow: {
+          serviceKey: "taller_blw",
+          stage: "choosing_session",
+          updatedAt: "2026-07-17T10:21:00.000Z",
+        },
+      }),
+      inbound: {
+        provider: "twilio_sandbox",
+        from: "whatsapp:+34600111222",
+        text: "buenos días",
+      },
+    });
+
+    expect(result.intent.intent).toBe("greeting");
+    expect(result.authorityTrace.policy.action).toBe("greeting");
+    expect(result.reply).toMatch(/Buenos d[ií]as|Encantada de leerte/i);
+    expect(result.reply).not.toMatch(/BLW|17:00|plazas|fechas/i);
+    expect(eventTypes(result)).not.toContain("maternaly_availability_checked");
   });
 
   it("never emits an identical non-safety reply twice in the recent conversation", async () => {
@@ -223,8 +297,122 @@ describe("Maternaly conversation authority", () => {
     });
 
     expect(second.reply).not.toBe(first.reply);
-    expect(second.reply).toContain(first.reply);
+    expect(second.reply).not.toMatch(/repetitiva|otra manera|otro [aá]ngulo|misma respuesta/i);
     expect(eventTypes(second)).toContain("maternaly_copy_repetition_avoided");
+  });
+
+  it("keeps reset technical and clears every service-level context", async () => {
+    const resetCopy = "Listo, conversación reiniciada. Empezamos desde cero. ¿En qué puedo ayudarte?";
+    const result = await new MaternalyCoreAdapter().handle({
+      conversation: fakeConversation({
+        serviceDetected: "Taller BLW",
+        maternalyReservationStatus: "pending",
+        maternalyPaymentStatus: "pending",
+        maternalyInvoiceStatus: "pending",
+        maternalyReviewStatus: "manual_review_required",
+        priority: "urgent",
+        maternalyNormalizedFlow: {
+          serviceKey: "taller_blw",
+          stage: "collecting_contact",
+          modality: "presencial",
+          updatedAt: "2026-07-17T10:21:00.000Z",
+        },
+        messages: [
+          {
+            id: "msg_previous_reset",
+            conversationId: "conv_authority",
+            direction: "outbound",
+            senderType: "bot",
+            transport: "whatsapp",
+            body: resetCopy,
+            createdAt: "2026-07-17T10:22:00.000Z",
+          },
+        ],
+      }),
+      inbound: {
+        provider: "twilio_sandbox",
+        from: "whatsapp:+34600111222",
+        text: "reiniciar",
+      },
+    });
+
+    expect(result.reply).toBe(resetCopy);
+    expect(result.reply).not.toMatch(/repetitiva|otra manera|otro [aá]ngulo/i);
+    expect(result.state).toBeUndefined();
+    expect(result.conversationPatch).toMatchObject({
+      serviceDetected: undefined,
+      maternalyNormalizedFlow: undefined,
+      maternalyReservationStatus: "none",
+      maternalyPaymentStatus: "none",
+      maternalyInvoiceStatus: "none",
+      maternalyReviewStatus: "ok",
+      priority: "normal",
+    });
+    expect(eventTypes(result)).not.toContain("maternaly_copy_repetition_avoided");
+  });
+
+  it("does not let reset remove a blocked client's mandatory review", async () => {
+    const result = await new MaternalyCoreAdapter().handle({
+      conversation: fakeConversation({
+        clientStatus: "blocked",
+        mode: "human",
+        humanRequested: true,
+        requiresManualReview: true,
+        maternalyReviewStatus: "manual_review_required",
+        priority: "urgent",
+        serviceDetected: "Taller BLW",
+        maternalyNormalizedFlow: {
+          serviceKey: "taller_blw",
+          stage: "collecting_contact",
+          updatedAt: "2026-07-17T10:21:00.000Z",
+        },
+      }),
+      inbound: {
+        provider: "twilio_sandbox",
+        from: "whatsapp:+34600111222",
+        text: "reiniciar",
+      },
+    });
+
+    expect(result.state).toBeUndefined();
+    expect(result.conversationPatch).toMatchObject({
+      serviceDetected: undefined,
+      maternalyNormalizedFlow: undefined,
+      mode: "human",
+      humanRequested: true,
+      requiresManualReview: true,
+      maternalyReviewStatus: "manual_review_required",
+      priority: "urgent",
+    });
+  });
+
+  it("resets the chat without erasing confirmed business milestones", async () => {
+    const result = await new MaternalyCoreAdapter().handle({
+      conversation: fakeConversation({
+        serviceDetected: "Taller BLW",
+        maternalyReservationStatus: "confirmed",
+        maternalyPaymentStatus: "confirmed",
+        maternalyInvoiceStatus: "sent",
+        maternalyNormalizedFlow: {
+          serviceKey: "taller_blw",
+          stage: "collecting_contact",
+          updatedAt: "2026-07-17T10:21:00.000Z",
+        },
+      }),
+      inbound: {
+        provider: "twilio_sandbox",
+        from: "whatsapp:+34600111222",
+        text: "reiniciar",
+      },
+    });
+
+    expect(result.state).toBeUndefined();
+    expect(result.conversationPatch).toMatchObject({
+      serviceDetected: "Taller BLW",
+      maternalyReservationStatus: "confirmed",
+      maternalyPaymentStatus: "confirmed",
+      maternalyInvoiceStatus: "sent",
+    });
   });
 
   it("persists outbound text through the Maternaly outbox", async () => {
@@ -555,7 +743,7 @@ describe("Maternaly conversation authority", () => {
       },
     });
 
-    expect(reset.reply).toMatch(/reiniciado|Maternaly/i);
+    expect(reset.reply).toMatch(/reiniciad[ao]|Maternaly/i);
     expect(reset.conversationPatch).toMatchObject({
       mode: "bot",
       humanRequested: false,

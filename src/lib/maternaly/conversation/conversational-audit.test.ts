@@ -76,6 +76,6 @@ describe("Maternaly conversational audit matrix", () => {
     const result = await buildMaternalyWhatsAppReply("¿y cuánto dura?");
 
     expect(result.intent.service_candidate).toBeUndefined();
-    expect(result.reply).toMatch(/dos servicios|charla informativa|taller presencial BLW/i);
+    expect(result.reply).toMatch(/Pilates|AIPAP|suelo p[eé]lvico|lactancia/i);
   });
 });

@@ -2,8 +2,12 @@ import type { ConversationRecord, MaternalyNormalizedFlowState } from "@/lib/hot
 import {
   findKnowledgeService,
   getKnowledgeService,
+  getKnowledgeServicesByModality,
 } from "@/lib/maternaly/knowledge/catalog";
-import type { StructuredIntent } from "@/lib/maternaly/llm/interpreter";
+import {
+  isMaternalyResetRequest,
+  type StructuredIntent,
+} from "@/lib/maternaly/llm/interpreter";
 
 export type MaternalyActiveServiceId = "charla_embarazo_1_20" | "taller_blw";
 
@@ -59,9 +63,18 @@ function mediaAlreadySent(
   serviceId: MaternalyActiveServiceId,
   triggerKind: MaternalyServiceMedia["triggerKind"],
 ): boolean {
+  const latestResetAt = conversation.messages
+    .filter(
+      (message) =>
+        message.senderType === "user" && isMaternalyResetRequest(message.body),
+    )
+    .map((message) => message.createdAt)
+    .sort()
+    .at(-1);
   const matchingEvents = conversation.events.filter(
     (event) =>
       event.eventType === "maternaly_service_media_dispatched" &&
+      (!latestResetAt || event.createdAt > latestResetAt) &&
       typeof event.payload === "object" &&
       event.payload !== null &&
       (event.payload as { serviceId?: unknown }).serviceId === serviceId,
@@ -90,6 +103,10 @@ function serviceForTurn(input: {
   intent: StructuredIntent;
   state?: MaternalyNormalizedFlowState;
 }): Pick<MaternalyServiceMedia, "serviceId" | "triggerKind"> | undefined {
+  if (input.intent.intent === "service_discovery" || input.intent.service_scope === "catalog") {
+    return undefined;
+  }
+
   const explicitService = findKnowledgeService(input.inboundText);
   if (isActiveServiceId(explicitService?.id)) {
     return { serviceId: explicitService.id, triggerKind: "explicit_service" };
@@ -137,12 +154,18 @@ export function resolveMaternalyServiceMedia(input: {
     return [];
   }
 
+  const isCatalogTurn =
+    input.intent.intent === "service_discovery" ||
+    input.intent.service_scope === "catalog" ||
+    isServicesCatalogQuestion(input.inboundText);
+  const catalogServiceIds = input.intent.slots.modality
+    ? getKnowledgeServicesByModality(input.intent.slots.modality)
+        .map((service) => service.id)
+        .filter(isActiveServiceId)
+    : ACTIVE_SERVICE_MEDIA.map((media) => media.serviceId);
   const serviceTriggers: Array<Pick<MaternalyServiceMedia, "serviceId" | "triggerKind">> =
-    isServicesCatalogQuestion(input.inboundText)
-      ? ACTIVE_SERVICE_MEDIA.map((media) => ({
-          serviceId: media.serviceId,
-          triggerKind: "catalog" as const,
-        }))
+    isCatalogTurn
+      ? catalogServiceIds.map((serviceId) => ({ serviceId, triggerKind: "catalog" as const }))
       : [serviceForTurn({ ...input, inboundText: input.inboundText })].filter(
           (value): value is Pick<MaternalyServiceMedia, "serviceId" | "triggerKind"> =>
             Boolean(value),

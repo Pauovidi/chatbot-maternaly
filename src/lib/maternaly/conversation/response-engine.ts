@@ -48,6 +48,14 @@ export function buildMaternalyReplyFromIntent(intent: StructuredIntent): string 
     return ensureMaternalySafeReply(renderer.render({ decision: { action: "reset" } }));
   }
 
+  if (intent.intent === "service_discovery" || intent.service_scope === "catalog") {
+    return ensureMaternalySafeReply(
+      renderer.render({
+        decision: { action: "catalog_info", modalityPreference: intent.slots.modality },
+      }),
+    );
+  }
+
   const service = getKnowledgeService(intent.service_candidate);
   if (service) {
     return ensureMaternalySafeReply(

@@ -135,8 +135,41 @@ describe("Maternaly Twilio WhatsApp route", () => {
     await postTwilio({ body: "Quiero hablar con una persona", sid: "SM_RESET_1" });
     const reset = await postTwilio({ body: "reiniciar", sid: "SM_RESET_2" });
 
-    expect(reset.message).toContain("reiniciado");
+    expect(reset.message).toMatch(/reiniciad[ao]/i);
     expect(reset.message).not.toContain("Disculpa, estoy revisando");
+  });
+
+  it("reproduces reset, greeting, BLW information and global online discovery correctly", async () => {
+    await postTwilio({ body: "taller blw", sid: "SM_REGRESSION_BLW_1" });
+    const firstReset = await postTwilio({ body: "reiniciar", sid: "SM_REGRESSION_RESET_1" });
+    const secondReset = await postTwilio({ body: "reiniciar", sid: "SM_REGRESSION_RESET_2" });
+    const greeting = await postTwilio({ body: "buenos días", sid: "SM_REGRESSION_GREETING" });
+
+    for (const reset of [firstReset, secondReset]) {
+      expect(reset.message).toMatch(/conversaci[oó]n reiniciada|empezamos desde cero/i);
+      expect(reset.message).not.toMatch(/repetitiva|otra manera|otro [aá]ngulo|misma respuesta/i);
+    }
+    expect(greeting.message).toMatch(/Buenos d[ií]as|Encantada de leerte/i);
+    expect(greeting.message).not.toMatch(/BLW|17:00|plazas|fechas/i);
+
+    const secondBlw = await postTwilio({ body: "taller blw", sid: "SM_REGRESSION_BLW_2" });
+    expect(extractMedia(secondBlw.text)).toEqual([
+      "https://maternaly.example.test/maternaly/services/taller-blw.jpeg",
+    ]);
+    const online = await postTwilio({
+      body: "¿y tenéis algún taller online?",
+      sid: "SM_REGRESSION_ONLINE",
+    });
+
+    expect(online.message).toMatch(/opci[oó]n online.*charla informativa|charla informativa.*online/i);
+    expect(online.message).not.toMatch(/^El taller BLW no tiene|te cuento c[oó]mo es el BLW/i);
+    expect(online.message).not.toMatch(/me faltan|email|fecha de nacimiento del beb[eé]/i);
+    expect(extractMedia(online.text)).toEqual([
+      "https://maternaly.example.test/maternaly/services/charla-informativa-embarazo.jpeg",
+    ]);
+
+    const thanks = await postTwilio({ body: "gracias", sid: "SM_REGRESSION_THANKS" });
+    expect(thanks.message).not.toMatch(/Taller BLW|17:00|plazas disponibles/i);
   });
 
   it("attaches each service poster only with its first answer", async () => {
@@ -149,14 +182,14 @@ describe("Maternaly Twilio WhatsApp route", () => {
     expect(extractMedia(second.text)).toEqual([]);
   });
 
-  it("lists the two active services and attaches both posters on a services question", async () => {
+  it("lists the wider portfolio and attaches both reservable-service posters", async () => {
     const result = await postTwilio({
       body: "¿Qué servicios ofrecéis ahora?",
       sid: "SM_MEDIA_SERVICES_1",
       from: "whatsapp:+34600000999",
     });
 
-    expect(result.message).toMatch(/charla informativa gratuita|taller presencial BLW/i);
+    expect(result.message).toMatch(/charlas y talleres|Pilates|AIPAP|suelo p[eé]lvico/i);
     expect(extractMedia(result.text)).toEqual([
       "https://maternaly.example.test/maternaly/services/charla-informativa-embarazo.jpeg",
       "https://maternaly.example.test/maternaly/services/taller-blw.jpeg",

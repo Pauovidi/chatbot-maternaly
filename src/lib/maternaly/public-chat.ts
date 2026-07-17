@@ -20,7 +20,7 @@ export function getMaternalyChatWelcomeMessage(): string {
   return "Hola, soy el asistente de Maternaly. Estoy aquí para ayudarte de forma cercana con información o con una solicitud para talleres y charlas. ¿Qué necesitas mirar hoy? 🫶";
 }
 
-function buildPublicReplyFromIntent(intent: StructuredIntent): string {
+function buildPublicReplyFromIntent(intent: StructuredIntent, message: string): string {
   const renderer = new MaternalyCopyRenderer();
   if (intent.intent === "handoff_request" || intent.should_handoff) {
     return (
@@ -51,6 +51,15 @@ function buildPublicReplyFromIntent(intent: StructuredIntent): string {
     return renderer.render({ decision: { action: "invoice" } }) ?? renderer.renderTechnicalFallback();
   }
 
+  if (intent.intent === "service_discovery" || intent.service_scope === "catalog") {
+    return (
+      renderer.render({
+        decision: { action: "catalog_info", modalityPreference: intent.slots.modality },
+        message,
+      }) ?? renderer.renderTechnicalFallback()
+    );
+  }
+
   const service = getKnowledgeService(intent.service_candidate);
   if (service) {
     return (
@@ -73,6 +82,6 @@ export function resolveMaternalyChatReply(
 ): { text: string; actions?: MaternalyChatAction[] } {
   const intent = new LlmIntentClassifier().classifyWithMock(text);
   return {
-    text: ensureMaternalySafeReply(buildPublicReplyFromIntent(intent)),
+    text: ensureMaternalySafeReply(buildPublicReplyFromIntent(intent, text)),
   };
 }
