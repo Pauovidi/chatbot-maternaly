@@ -126,6 +126,107 @@ describe("Maternaly conversation authority", () => {
     });
   });
 
+  it("honors a general-information correction instead of repeating the session list", async () => {
+    const result = await new MaternalyCoreAdapter().handle({
+      conversation: fakeConversation({
+        serviceDetected: "Taller BLW",
+        maternalyNormalizedFlow: {
+          serviceKey: "taller_blw",
+          stage: "choosing_session",
+          selectedSessionId: "sesion_blw_erandio_20261007",
+          selectedGroupId: "grupo_blw_erandio",
+          updatedAt: "2026-07-17T10:21:00.000Z",
+        },
+      }),
+      inbound: {
+        provider: "twilio_sandbox",
+        from: "whatsapp:+34600111222",
+        text: "me has dado plazas, cuando te pedía info en general ¿qué me puedes contar del taller?",
+      },
+    });
+
+    expect(result.intent).toMatchObject({
+      intent: "service_question",
+      service_candidate: "taller_blw",
+      service_question_focus: "general",
+      needs_availability_lookup: false,
+    });
+    expect(result.authorityTrace.policy).toMatchObject({
+      action: "service_info",
+      reason: "faq_escape_hatch",
+    });
+    expect(result.reply).toMatch(/Tienes raz[oó]n|alimentaci[oó]n complementaria autorregulada/i);
+    expect(result.reply).toMatch(/seguridad|alergias|alimentaci[oó]n saludable/i);
+    expect(result.reply).not.toMatch(/Opciones para Taller BLW|plazas disponibles/i);
+    expect(eventTypes(result)).not.toContain("maternaly_availability_checked");
+  });
+
+  it("answers an online question before resuming a pending BLW registration", async () => {
+    const result = await new MaternalyCoreAdapter().handle({
+      conversation: fakeConversation({
+        serviceDetected: "Taller BLW",
+        maternalyNormalizedFlow: {
+          serviceKey: "taller_blw",
+          stage: "collecting_contact",
+          selectedSessionId: "sesion_blw_erandio_20261007",
+          selectedGroupId: "grupo_blw_erandio",
+          pendingFields: ["email", "peopleCount", "babyBirthDate"],
+          updatedAt: "2026-07-17T10:24:00.000Z",
+        },
+      }),
+      inbound: {
+        provider: "twilio_sandbox",
+        from: "whatsapp:+34600111222",
+        text: "oye, pero antes de esto ¿tenéis algún taller online?",
+      },
+    });
+
+    expect(result.authorityTrace.policy.action).toBe("service_info");
+    expect(result.reply).toMatch(/no tiene modalidad online|presencial/i);
+    expect(result.reply).not.toMatch(/me faltan|email|fecha de nacimiento del beb[eé]/i);
+    expect(result.state).toMatchObject({
+      serviceKey: "taller_blw",
+      selectedSessionId: "sesion_blw_erandio_20261007",
+    });
+  });
+
+  it("never emits an identical non-safety reply twice in the recent conversation", async () => {
+    const adapter = new MaternalyCoreAdapter();
+    const first = await adapter.handle({
+      conversation: fakeConversation(),
+      inbound: {
+        provider: "twilio_sandbox",
+        from: "whatsapp:+34600111222",
+        text: "hola",
+      },
+    });
+    const second = await adapter.handle({
+      conversation: fakeConversation({
+        ...first.conversationPatch,
+        messages: [
+          {
+            id: "msg_previous_bot_reply",
+            conversationId: "conv_authority",
+            direction: "outbound",
+            senderType: "bot",
+            transport: "whatsapp",
+            body: first.reply ?? "",
+            createdAt: "2026-07-17T10:00:00.000Z",
+          },
+        ],
+      }),
+      inbound: {
+        provider: "twilio_sandbox",
+        from: "whatsapp:+34600111222",
+        text: "hola",
+      },
+    });
+
+    expect(second.reply).not.toBe(first.reply);
+    expect(second.reply).toContain(first.reply);
+    expect(eventTypes(second)).toContain("maternaly_copy_repetition_avoided");
+  });
+
   it("persists outbound text through the Maternaly outbox", async () => {
     const store = new FileConversationStore(path.join(tempDir, "conversations.json"));
 

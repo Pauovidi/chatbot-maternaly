@@ -226,4 +226,80 @@ describe("Maternaly LLM interpreter", () => {
       service_question_focus: "unknown",
     });
   });
+
+  it("treats a bare service name as a request for information, not a booking", async () => {
+    const classifier = new LlmIntentClassifier();
+
+    await expect(classifier.classify("taller blw")).resolves.toMatchObject({
+      intent: "service_question",
+      service_candidate: "taller_blw",
+      service_question_focus: "general",
+      needs_availability_lookup: false,
+    });
+  });
+
+  it("honors a correction asking for general information instead of repeating availability", async () => {
+    const classifier = new LlmIntentClassifier();
+
+    await expect(
+      classifier.classify(
+        "me has dado plazas, cuando te pedía info en general ¿qué me puedes contar del taller?",
+        { active_service_id: "taller_blw", active_stage: "choosing_session" },
+      ),
+    ).resolves.toMatchObject({
+      intent: "service_question",
+      service_candidate: "taller_blw",
+      service_question_focus: "general",
+      needs_availability_lookup: false,
+    });
+  });
+
+  it("lets an online-modality question interrupt an active registration flow", async () => {
+    const classifier = new LlmIntentClassifier();
+
+    await expect(
+      classifier.classify("oye, pero antes de esto ¿tenéis algún taller online?", {
+        active_service_id: "taller_blw",
+        active_stage: "collecting_contact",
+      }),
+    ).resolves.toMatchObject({
+      intent: "service_question",
+      service_candidate: "taller_blw",
+      service_question_focus: "locations",
+      needs_availability_lookup: false,
+      slots: expect.objectContaining({ modality: "online" }),
+    });
+  });
+
+  it("stabilizes an OpenAI booking misclassification for a bare service mention", async () => {
+    vi.stubEnv("LLM_PROVIDER", "openai");
+    process.env.OPENAI_API_KEY = "test-openai-key";
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          output_text: JSON.stringify({
+            intent: "registration_start",
+            slots: {
+              service_id: "taller_blw",
+              normalized_service_key: "taller_blw",
+            },
+            service_question_focus: "booking",
+            needs_availability_lookup: true,
+            confidence: 0.98,
+            missing_fields: [],
+            should_handoff: false,
+            safety_flags: [],
+          }),
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    await expect(new LlmIntentClassifier().classify("taller blw")).resolves.toMatchObject({
+      intent: "service_question",
+      service_candidate: "taller_blw",
+      service_question_focus: "general",
+      needs_availability_lookup: false,
+    });
+  });
 });

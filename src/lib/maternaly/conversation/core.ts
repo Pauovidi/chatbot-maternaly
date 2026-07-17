@@ -1,5 +1,8 @@
 import type { ConversationRecord, MaternalyNormalizedFlowState } from "@/lib/hotel/conversations/types";
-import { MaternalyCopyRenderer } from "@/lib/maternaly/conversation/copy-renderer";
+import {
+  MaternalyCopyRenderer,
+  ensureDistinctMaternalyReply,
+} from "@/lib/maternaly/conversation/copy-renderer";
 import type { MaternalyRenderedMessage } from "@/lib/maternaly/conversation/outbox";
 import {
   findKnowledgeService,
@@ -149,6 +152,7 @@ interface PolicyDecision {
   service?: KnowledgeService | null;
   serviceQuestionFocus?: StructuredIntent["service_question_focus"];
   locationPreference?: string;
+  modalityPreference?: "presencial" | "online";
   reason?: string;
 }
 
@@ -960,7 +964,8 @@ export class MaternalyConversationPolicy {
 
     const service = getKnowledgeService(intent.service_candidate);
     const isInformationalServiceQuestion =
-      intent.intent === "service_question" && intent.service_question_focus !== "booking";
+      ["general_info", "service_question"].includes(intent.intent) &&
+      intent.service_question_focus !== "booking";
     if (
       service &&
       !intent.needs_availability_lookup &&
@@ -973,6 +978,7 @@ export class MaternalyConversationPolicy {
         reason: "faq_escape_hatch",
         serviceQuestionFocus: intent.service_question_focus,
         locationPreference: intent.location_preference,
+        modalityPreference: intent.slots.modality,
       };
     }
 
@@ -998,6 +1004,7 @@ export class MaternalyConversationPolicy {
         service,
         serviceQuestionFocus: intent.service_question_focus,
         locationPreference: intent.location_preference,
+        modalityPreference: intent.slots.modality,
       };
     }
 
@@ -1394,7 +1401,33 @@ export class MaternalyCoreAdapter {
     }
 
     const rendererStartedAt = Date.now();
-    const reply = this.renderer.render({ decision, state: nextState, toolResult });
+    const baseReply = this.renderer.render({
+      decision,
+      state: nextState,
+      toolResult,
+      message: input.inbound.text,
+    });
+    const distinctReply = baseReply
+      ? ensureDistinctMaternalyReply({
+          reply: baseReply,
+          recentAssistantReplies: input.conversation.messages
+            .filter((message) => message.senderType === "bot" && message.body.trim())
+            .slice(-20)
+            .map((message) => message.body),
+          action: decision.action,
+        })
+      : undefined;
+    const reply = distinctReply?.reply;
+    if (distinctReply?.changed) {
+      events.push({
+        eventType: "maternaly_copy_repetition_avoided",
+        payload: {
+          action: decision.action,
+          duplicateCount: distinctReply.duplicateCount,
+          serviceKey: decision.serviceKey ?? state.serviceKey,
+        },
+      });
+    }
     const rendererMs = elapsedSince(rendererStartedAt);
     const renderedMessage: MaternalyRenderedMessage | undefined = reply
       ? {

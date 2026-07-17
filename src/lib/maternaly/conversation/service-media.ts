@@ -1,5 +1,8 @@
 import type { ConversationRecord, MaternalyNormalizedFlowState } from "@/lib/hotel/conversations/types";
-import { getKnowledgeService } from "@/lib/maternaly/knowledge/catalog";
+import {
+  findKnowledgeService,
+  getKnowledgeService,
+} from "@/lib/maternaly/knowledge/catalog";
 import type { StructuredIntent } from "@/lib/maternaly/llm/interpreter";
 
 export type MaternalyActiveServiceId = "charla_embarazo_1_20" | "taller_blw";
@@ -8,6 +11,7 @@ export interface MaternalyServiceMedia {
   serviceId: MaternalyActiveServiceId;
   alt: string;
   url: string;
+  triggerKind: "catalog" | "explicit_service" | "contextual_service";
 }
 
 interface MaternalyServiceMediaDefinition {
@@ -53,26 +57,60 @@ function isServicesCatalogQuestion(text: string): boolean {
 function mediaAlreadySent(
   conversation: ConversationRecord,
   serviceId: MaternalyActiveServiceId,
+  triggerKind: MaternalyServiceMedia["triggerKind"],
 ): boolean {
-  return conversation.events.some(
+  const matchingEvents = conversation.events.filter(
     (event) =>
       event.eventType === "maternaly_service_media_dispatched" &&
       typeof event.payload === "object" &&
       event.payload !== null &&
       (event.payload as { serviceId?: unknown }).serviceId === serviceId,
   );
+
+  if (matchingEvents.length === 0) {
+    return false;
+  }
+
+  const hasReliableTriggerMetadata = matchingEvents.some(
+    (event) =>
+      typeof event.payload === "object" &&
+      event.payload !== null &&
+      typeof (event.payload as { triggerKind?: unknown }).triggerKind === "string",
+  );
+
+  // Previous deployments could attach a stale service poster to a greeting because
+  // the persisted registration state was treated as the current topic. An explicit
+  // service mention gets one clean retry when the historical event cannot prove how
+  // the poster was triggered. New events carry triggerKind and remain deduplicated.
+  return hasReliableTriggerMetadata || triggerKind === "contextual_service";
 }
 
 function serviceForTurn(input: {
+  inboundText: string;
   intent: StructuredIntent;
   state?: MaternalyNormalizedFlowState;
-}): MaternalyActiveServiceId | undefined {
-  const detectedService = getKnowledgeService(input.intent.service_candidate);
-  if (isActiveServiceId(detectedService?.id)) {
-    return detectedService.id;
+}): Pick<MaternalyServiceMedia, "serviceId" | "triggerKind"> | undefined {
+  const explicitService = findKnowledgeService(input.inboundText);
+  if (isActiveServiceId(explicitService?.id)) {
+    return { serviceId: explicitService.id, triggerKind: "explicit_service" };
   }
 
-  return isActiveServiceId(input.state?.serviceKey) ? input.state.serviceKey : undefined;
+  if (![
+    "service_question",
+    "availability_request",
+    "registration_start",
+  ].includes(input.intent.intent)) {
+    return undefined;
+  }
+
+  const detectedService = getKnowledgeService(input.intent.service_candidate);
+  if (isActiveServiceId(detectedService?.id)) {
+    return { serviceId: detectedService.id, triggerKind: "contextual_service" };
+  }
+
+  return isActiveServiceId(input.state?.serviceKey)
+    ? { serviceId: input.state.serviceKey, triggerKind: "contextual_service" }
+    : undefined;
 }
 
 function normalizeBaseUrl(value: string | undefined): string | undefined {
@@ -99,15 +137,30 @@ export function resolveMaternalyServiceMedia(input: {
     return [];
   }
 
-  const serviceIds = isServicesCatalogQuestion(input.inboundText)
-    ? ACTIVE_SERVICE_MEDIA.map((media) => media.serviceId)
-    : [serviceForTurn(input)].filter((serviceId): serviceId is MaternalyActiveServiceId => Boolean(serviceId));
+  const serviceTriggers: Array<Pick<MaternalyServiceMedia, "serviceId" | "triggerKind">> =
+    isServicesCatalogQuestion(input.inboundText)
+      ? ACTIVE_SERVICE_MEDIA.map((media) => ({
+          serviceId: media.serviceId,
+          triggerKind: "catalog" as const,
+        }))
+      : [serviceForTurn({ ...input, inboundText: input.inboundText })].filter(
+          (value): value is Pick<MaternalyServiceMedia, "serviceId" | "triggerKind"> =>
+            Boolean(value),
+        );
 
   return ACTIVE_SERVICE_MEDIA.filter(
-    (media) => serviceIds.includes(media.serviceId) && !mediaAlreadySent(input.conversation, media.serviceId),
-  ).map((media) => ({
-    serviceId: media.serviceId,
-    alt: media.alt,
-    url: new URL(media.publicPath, baseUrl).toString(),
-  }));
+    (media) => serviceTriggers.some((item) => item.serviceId === media.serviceId),
+  ).flatMap((media) => {
+    const trigger = serviceTriggers.find((item) => item.serviceId === media.serviceId);
+    if (!trigger || mediaAlreadySent(input.conversation, media.serviceId, trigger.triggerKind)) {
+      return [];
+    }
+
+    return [{
+      serviceId: media.serviceId,
+      alt: media.alt,
+      url: new URL(media.publicPath, baseUrl).toString(),
+      triggerKind: trigger.triggerKind,
+    }];
+  });
 }

@@ -87,7 +87,7 @@ describe("Maternaly service media", () => {
           id: "evt_media",
           conversationId: "conversation_media",
           eventType: "maternaly_service_media_dispatched",
-          payload: { serviceId: "taller_blw" },
+          payload: { serviceId: "taller_blw", triggerKind: "explicit_service" },
           createdAt: "2026-07-16T10:00:00.000Z",
         },
       ]),
@@ -97,5 +97,47 @@ describe("Maternaly service media", () => {
     });
 
     expect(media).toEqual([]);
+  });
+
+  it("does not attach a stale service poster to a greeting", () => {
+    const media = resolveMaternalyServiceMedia({
+      conversation: {
+        ...conversation(),
+        maternalyNormalizedFlow: {
+          serviceKey: "taller_blw",
+          stage: "collecting_contact",
+          updatedAt: "2026-07-16T10:00:00.000Z",
+        },
+      },
+      inboundText: "hola",
+      intent: { ...intent(), intent: "greeting" },
+      appBaseUrl: "https://maternaly.example.test",
+    });
+
+    expect(media).toEqual([]);
+  });
+
+  it("retries an explicit poster after a legacy event without reliable trigger metadata", () => {
+    const media = resolveMaternalyServiceMedia({
+      conversation: conversation([
+        {
+          id: "evt_media_legacy",
+          conversationId: "conversation_media",
+          eventType: "maternaly_service_media_dispatched",
+          payload: { serviceId: "taller_blw" },
+          createdAt: "2026-07-16T10:00:00.000Z",
+        },
+      ]),
+      inboundText: "taller blw",
+      intent: intent("taller_blw"),
+      appBaseUrl: "https://maternaly.example.test",
+    });
+
+    expect(media).toEqual([
+      expect.objectContaining({
+        serviceId: "taller_blw",
+        triggerKind: "explicit_service",
+      }),
+    ]);
   });
 });

@@ -437,7 +437,6 @@ describe("normalized Maternaly WhatsApp flow", () => {
     "quiero reservar taller blw",
     "estoy interesada en reservar en el taller blw",
     "quiero apuntarme al taller blw",
-    "taller blw",
   ])("lists real-template BLW availability for '%s'", async (body) => {
     const client = new InMemoryNormalizedSheetsClient(
       createRealTemplateWorkbook({ multiSession: true, sessionCapacity: "14" }),
@@ -473,6 +472,30 @@ describe("normalized Maternaly WhatsApp flow", () => {
     });
     expect(result.conversation.events.map((event) => event.eventType)).not.toContain(
       "maternaly_availability_fallback",
+    );
+  });
+
+  it("explains BLW before showing dates when the user only names the service", async () => {
+    const client = new InMemoryNormalizedSheetsClient(
+      createRealTemplateWorkbook({ multiSession: true, sessionCapacity: "14" }),
+    );
+
+    const result = await handleInboundMaternalyWhatsApp(
+      {
+        from: "+34600999111",
+        body: "taller blw",
+        messageSid: "SM_BLW_GENERAL_INFO",
+      },
+      makeStore(),
+      { normalizedSheetsClient: client, normalizedEnv: normalizedTestEnv() },
+    );
+
+    const reply = result.botReply?.body ?? "";
+    expect(reply).toMatch(/alimentaci[oó]n complementaria autorregulada|Baby-Led Weaning/i);
+    expect(reply).toMatch(/seguridad|requisitos/i);
+    expect(reply).not.toMatch(/Opciones para Taller BLW|plazas disponibles/i);
+    expect(result.conversation.events.map((event) => event.eventType)).not.toContain(
+      "maternaly_availability_checked",
     );
   });
 
@@ -547,7 +570,7 @@ describe("normalized Maternaly WhatsApp flow", () => {
     });
   });
 
-  it.each(["taller blw", "quiero apuntarme al taller blw"])(
+  it.each(["quiero apuntarme al taller blw"])(
     "lists BLW availability for '%s' even when a non-critical tab has parse errors",
     async (body) => {
       const store = makeStore();

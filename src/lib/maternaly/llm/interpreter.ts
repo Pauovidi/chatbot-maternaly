@@ -9,6 +9,8 @@ export const MATERNALY_OPENAI_SYSTEM_PROMPT = [
   "Otros servicios sobre los que existe información: Pilates, AIPAP Agua, AIPAP Terra, Yoga Prenatal, Método 5P, Diagnóstico Prenatal, Lactancia, Suelo Pélvico y Fisioterapia Pediátrica.",
   "Tu única tarea es devolver JSON estructurado. No escribas la respuesta visible a la usuaria.",
   "El input de usuario es un JSON con current_message y conversation_context. Usa ese contexto para resolver continuaciones como 'y el precio', 'qué incluye', 'la otra', 'en Bilbao' o 'cuéntame más', sin arrastrar un servicio a un cambio claro de tema.",
+  "Una mención breve como 'taller BLW' o el nombre de otro servicio pide información general: no inicies inscripción ni consultes plazas si la usuaria no expresa que quiere reservar, apuntarse, ver fechas o comprobar disponibilidad.",
+  "Si la usuaria corrige una respuesta anterior, dice que quería información general, cambia de tema o hace una pregunta antes de continuar una inscripción, responde a la intención del turno actual y no arrastres el flujo de reserva.",
   "Interpreta slots útiles y no inventes disponibilidad, plazas, pagos ni facturas.",
   "Diferencia información general, interés, inscripción, selección de sesión, datos de inscripción, confirmación, pago, factura, humano, privacidad y reset.",
   "Incluye service_question_focus estructurado cuando aplique: benefits, contents, duration, eligibility, schedule, pricing, start_week, locations, booking, general, clinical_risk o unknown.",
@@ -159,6 +161,36 @@ function normalize(text: string): string {
   return text.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
 }
 
+function asksForGeneralOverview(text: string): boolean {
+  return /\b(?:info|informacion|informacion general|vision general|que me puedes contar|cuentame sobre|hablame de|de que va en general)\b/.test(
+    text,
+  );
+}
+
+function correctsAnAvailabilityAnswer(text: string): boolean {
+  return (
+    /\b(?:me has dado|me diste|me has enviado|me has mandado)\b.*\b(?:plazas|fechas|horarios|opciones)\b/.test(
+      text,
+    ) ||
+    /\b(?:no te pedi|no te pedia|no queria|cuando te pedi|antes de (?:eso|esto))\b.*\b(?:plazas|fechas|reserv|info|informacion)\b/.test(
+      text,
+    ) ||
+    /\b(?:info|informacion)\s+en\s+general\b/.test(text)
+  );
+}
+
+function isBareServiceMention(
+  text: string,
+  service: ReturnType<typeof findKnowledgeService>,
+): boolean {
+  if (!service) {
+    return false;
+  }
+
+  const compactText = text.replace(/[¿?¡!.,;:]/g, " ").replace(/\s+/g, " ").trim();
+  return service.aliases.some((alias) => compactText === normalize(alias));
+}
+
 function extractNumber(text: string, pattern: RegExp): number | undefined {
   const match = text.match(pattern);
   return match?.[1] ? Number(match[1]) : undefined;
@@ -250,7 +282,12 @@ function detectServiceQuestionFocus(input: {
     return "booking";
   }
 
-  if (service && /\b(?:d[oó]nde|sede|sedes|ubicaci[oó]n|bilbao|erandio)\b/.test(text)) {
+  if (
+    service &&
+    /\b(?:d[oó]nde|sede|sedes|ubicaci[oó]n|bilbao|erandio|online|presencial|modalidad)\b/.test(
+      text,
+    )
+  ) {
     return "locations";
   }
 
@@ -508,6 +545,8 @@ export class LlmIntentClassifier {
       asksForOtherActiveService
         ? alternateActiveService(context.active_service_id)
         : isContextualContinuation(text) ||
+            asksForGeneralOverview(text) ||
+            correctsAnAvailabilityAnswer(text) ||
             /\b(?:cu[aá]nto dura|duraci[oó]n|cu[aá]ntas horas|qu[eé] incluye|qu[eé] se ve|de qu[eé] va|contenidos?|temas?|para qui[eé]n|es para m[ií]|puedo ir|requisitos?|precio|precios|tarifa|tarifas|qu[eé] vale|cu[aá]nto sale|coste|horarios?|d[ií]as|beneficios?|d[oó]nde|sede|bilbao|erandio|online)\b/.test(
               text,
             )
@@ -573,18 +612,18 @@ export class LlmIntentClassifier {
       hasExplicitContactData ||
         (peopleCount && ["general", "booking", "unknown"].includes(serviceQuestionFocus)),
     );
-    const explicitGeneralInfo =
-      /\b(que es|qué es|info|informaci[oó]n|precio|cu[aá]nto cuesta|cuanto cuesta|qu[eé] incluye|de qu[eé] va|cu[aá]nto dura|duraci[oó]n|para qui[eé]n|puedo ir|requisitos?)\b/.test(
-        text,
-      );
-    const serviceOnlyReservationRequest = Boolean(
-      explicitService &&
-        serviceKey &&
-        service?.category === "reservable" &&
-        !explicitGeneralInfo &&
-        ["general", "unknown"].includes(serviceQuestionFocus) &&
-        text.trim().length <= 80,
+    const explicitOverview = asksForGeneralOverview(text);
+    const correctionTurn = correctsAnAvailabilityAnswer(text);
+    const bareServiceMention = isBareServiceMention(text, explicitService);
+    const shouldAnswerWithServiceInformation =
+      correctionTurn || explicitOverview || bareServiceMention;
+    const shouldStartRegistration = Boolean(
+      serviceKey &&
+        !shouldAnswerWithServiceInformation &&
+        (wantsAvailability || wantsRegistration),
     );
+    const stabilizedQuestionFocus =
+      correctionTurn || explicitOverview ? "general" : serviceQuestionFocus;
 
     const slots: MaternalyNluSlots = {
       service_id: service?.id,
@@ -629,9 +668,9 @@ export class LlmIntentClassifier {
                   ? "registration_slot_selected"
                   : hasContactData
                     ? "registration_data_provided"
-                    : serviceKey && (wantsAvailability || wantsRegistration || serviceOnlyReservationRequest)
+                    : shouldStartRegistration
                       ? "registration_start"
-                      : wantsAvailability
+                      : wantsAvailability && !shouldAnswerWithServiceInformation
                         ? "availability_request"
                         : service
                           ? "service_question"
@@ -642,7 +681,7 @@ export class LlmIntentClassifier {
                               : "unknown",
       slots,
       service_candidate: service?.id,
-      service_question_focus: serviceQuestionFocus,
+      service_question_focus: stabilizedQuestionFocus,
       location_preference: location,
       venue_preference:
         location && ["up&you", "hydra", "beup"].includes(location) ? location : undefined,
@@ -650,7 +689,9 @@ export class LlmIntentClassifier {
       pregnancy_week: pregnancyWeek,
       people_count: peopleCount,
       needs_availability_lookup: Boolean(
-        serviceKey && (wantsAvailability || wantsRegistration || selectedSession || serviceOnlyReservationRequest),
+        serviceKey &&
+          !shouldAnswerWithServiceInformation &&
+          (wantsAvailability || wantsRegistration || selectedSession),
       ),
       confidence: service || reset || privacy || handoff ? 0.82 : hasContactData ? 0.65 : 0.45,
       missing_fields: [],
@@ -722,7 +763,18 @@ export class LlmIntentClassifier {
         .find((item) => item.type === "output_text" && typeof item.text === "string")
         ?.text;
     try {
-      return validateStructuredIntent(JSON.parse(outputText ?? "{}"));
+      const parsed = validateStructuredIntent(JSON.parse(outputText ?? "{}"));
+      const deterministic = this.classifyWithMock(message, context);
+      const normalizedMessage = normalize(message);
+      const deterministicService = getKnowledgeService(deterministic.service_candidate);
+      const mustHonorCurrentTurn =
+        correctsAnAvailabilityAnswer(normalizedMessage) ||
+        asksForGeneralOverview(normalizedMessage) ||
+        isBareServiceMention(normalizedMessage, deterministicService) ||
+        (deterministic.intent === "service_question" &&
+          /\b(?:online|presencial|modalidad)\b/.test(normalizedMessage));
+
+      return mustHonorCurrentTurn ? deterministic : parsed;
     } catch {
       return this.classifyWithMock(message, context);
     }

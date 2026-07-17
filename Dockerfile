@@ -47,6 +47,9 @@ COPY --from=builder --chown=nextjs:nodejs /app/scripts/db-migrate.mjs ./scripts/
 COPY --from=builder --chown=nextjs:nodejs /app/scripts/maternaly-sheets-live-write-test.mjs ./scripts/maternaly-sheets-live-write-test.mjs
 COPY --from=builder --chown=nextjs:nodejs /app/scripts/maternaly-sheets-sync-group-tabs.mjs ./scripts/maternaly-sheets-sync-group-tabs.mjs
 
+RUN test -s /app/public/maternaly/services/taller-blw.jpeg \
+  && test -s /app/public/maternaly/services/charla-informativa-embarazo.jpeg
+
 USER nextjs
 EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 CMD node -e "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"

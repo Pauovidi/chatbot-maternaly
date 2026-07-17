@@ -251,6 +251,7 @@ export async function handleInboundMaternalyWhatsApp(
     await store.addEvent(
       createEvent(latest.id, "maternaly_service_media_dispatched", {
         serviceId: item.serviceId,
+        triggerKind: item.triggerKind,
         source: "maternaly_service_media",
       }),
     );

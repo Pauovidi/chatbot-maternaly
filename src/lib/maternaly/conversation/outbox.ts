@@ -12,6 +12,7 @@ export interface MaternalyOutboundMedia {
   serviceId: "charla_embarazo_1_20" | "taller_blw";
   alt: string;
   url: string;
+  triggerKind?: "catalog" | "explicit_service" | "contextual_service";
 }
 
 export interface MaternalyOutboxResult {

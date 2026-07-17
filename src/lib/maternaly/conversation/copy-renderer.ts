@@ -29,6 +29,7 @@ export interface MaternalyCopyDecision {
   service?: KnowledgeService | null;
   serviceQuestionFocus?: MaternalyServiceQuestionFocus;
   locationPreference?: string;
+  modalityPreference?: "presencial" | "online";
   reason?: string;
 }
 
@@ -95,11 +96,70 @@ function normalizeLocation(value: string | undefined): "bilbao" | "erandio" | un
   return undefined;
 }
 
+function normalizeCopy(value: string): string {
+  return value.replace(/\s+/g, " ").trim().toLocaleLowerCase("es");
+}
+
+function isCorrectionTurn(message: string | undefined): boolean {
+  if (!message) {
+    return false;
+  }
+
+  const normalized = message
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  return (
+    /\b(?:me has dado|me diste|me has enviado|me has mandado)\b.*\b(?:plazas|fechas|horarios|opciones)\b/.test(
+      normalized,
+    ) ||
+    /\b(?:no te pedi|no te pedia|cuando te pedi|info en general|informacion en general)\b/.test(
+      normalized,
+    )
+  );
+}
+
+export function ensureDistinctMaternalyReply(input: {
+  reply: string;
+  recentAssistantReplies: string[];
+  action: MaternalyCopyAction;
+}): { reply: string; changed: boolean; duplicateCount: number } {
+  const previous = new Set(input.recentAssistantReplies.map(normalizeCopy));
+  const normalizedReply = normalizeCopy(input.reply);
+  const duplicateCount = input.recentAssistantReplies.filter(
+    (item) => normalizeCopy(item) === normalizedReply,
+  ).length;
+
+  if (!previous.has(normalizedReply) || ["handoff", "silent_human"].includes(input.action)) {
+    return { reply: input.reply, changed: false, duplicateCount };
+  }
+
+  const openings = [
+    "Te lo cuento de otra manera, para no sonar repetitiva:",
+    "Voy a enfocarlo desde otro ángulo y con un poco más de contexto:",
+    "Claro; esta vez voy a explicártelo de una forma distinta:",
+    "Retomo la idea, pero sin soltarte exactamente la misma respuesta:",
+    "Vamos a mirarlo con otro enfoque, que creo que te va a resultar más útil:",
+    "Te amplío la respuesta y cambio el punto de partida:",
+  ];
+
+  for (const opening of openings) {
+    const candidate = `${opening}\n\n${input.reply}`;
+    if (!previous.has(normalizeCopy(candidate))) {
+      return { reply: candidate, changed: true, duplicateCount };
+    }
+  }
+
+  const candidate = `${input.reply}\n\nSi me dices qué parte te interesa más, adapto la explicación a eso y seguimos desde ahí.`;
+  return { reply: candidate, changed: true, duplicateCount };
+}
+
 export class MaternalyCopyRenderer {
   render(input: {
     decision: MaternalyCopyDecision;
     state?: MaternalyNormalizedFlowState;
     toolResult?: MaternalyCopyToolResult;
+    message?: string;
   }): string | undefined {
     const service = serviceFromDecision(input.decision, input.state);
 
@@ -128,7 +188,9 @@ export class MaternalyCopyRenderer {
       case "greeting":
         return "¡Hola! Soy el asistente de Maternaly. Estoy aquí para ayudarte de forma cercana con información o con una solicitud para talleres y charlas. ¿Qué necesitas mirar hoy? 🫶";
       case "service_info":
-        return service ? this.renderServiceInfo(service, input.decision) : this.renderGeneral();
+        return service
+          ? this.renderServiceInfo(service, input.decision, input.message)
+          : this.renderGeneral();
       case "normalized_registration":
         return this.renderNormalizedRegistration(input.toolResult, service);
       case "general":
@@ -145,7 +207,11 @@ export class MaternalyCopyRenderer {
     return "Ahora mismo puedes consultar dos servicios de Maternaly: la charla informativa gratuita para embarazo de la semana 1 a la 20, y el taller presencial BLW de alimentación complementaria autorregulada. ¿Sobre cuál te gustaría saber más? 💛";
   }
 
-  private renderServiceInfo(service: KnowledgeService, decision?: MaternalyCopyDecision): string {
+  private renderServiceInfo(
+    service: KnowledgeService,
+    decision?: MaternalyCopyDecision,
+    message?: string,
+  ): string {
     if (service.id === "charla_embarazo_1_20") {
       return this.renderCharlaInfo(
         decision?.serviceQuestionFocus ?? "general",
@@ -157,6 +223,8 @@ export class MaternalyCopyRenderer {
       return this.renderBlwInfo(
         decision?.serviceQuestionFocus ?? "general",
         decision?.locationPreference,
+        decision?.modalityPreference,
+        message,
       );
     }
 
@@ -223,6 +291,8 @@ export class MaternalyCopyRenderer {
   private renderBlwInfo(
     focus: MaternalyServiceQuestionFocus,
     locationPreference?: string,
+    modalityPreference?: "presencial" | "online",
+    message?: string,
   ): string {
     const location = normalizeLocation(locationPreference);
 
@@ -243,6 +313,10 @@ export class MaternalyCopyRenderer {
     }
 
     if (focus === "locations") {
+      if (modalityPreference === "online") {
+        return "El taller BLW no tiene modalidad online: es un taller práctico y presencial, con convocatorias en Maternaly Bilbao y Maternaly Erandio. La charla informativa de embarazo sí puede tener ediciones online, por si era ese el servicio que tenías en mente. Si quieres, te cuento cómo es el BLW presencial o dejamos aparcadas las fechas hasta que tú me las pidas. 💛";
+      }
+
       return "El taller BLW es presencial y se organiza en Maternaly Bilbao y Maternaly Erandio. Si me dices qué sede prefieres, puedo consultar las próximas opciones. 💛";
     }
 
@@ -259,7 +333,10 @@ export class MaternalyCopyRenderer {
       return "Puedo comprobar próximas sesiones y preparar una preinscripción. Necesitaremos tus datos, si vienes sola o en pareja y la fecha de nacimiento del bebé; la plaza solo se confirma tras la reserva y el pago reales.";
     }
 
-    return "El taller presencial BLW ayuda a empezar la alimentación complementaria autorregulada con seguridad. Incluye requisitos de inicio, introducción de alimentos, alergias y alimentación saludable; dura de 17:00 a 20:00 y cuesta 45 € por persona o 75 € por pareja. ¿Te cuento contenido, fechas o inscripción? 🥕";
+    const acknowledgement = isCorrectionTurn(message)
+      ? "Tienes razón: me he adelantado con las plazas cuando tú querías primero una explicación general. Vamos a empezar por ahí. "
+      : "Claro, te cuento el taller con calma antes de hablar de fechas o reservas. ";
+    return `${acknowledgement}El BLW —Baby-Led Weaning o alimentación complementaria autorregulada— propone que el bebé participe activamente cuando llega el momento de empezar con otros alimentos, siempre respetando sus señales y los requisitos de seguridad. En el taller se explica cómo saber si está preparado, cómo ofrecer los alimentos y hacer cortes seguros, cómo acompañar sin forzar, qué tener en cuenta con las alergias y cómo construir una alimentación familiar saludable. Es presencial, dura tres horas (de 17:00 a 20:00) y podéis venir una persona por 45 € o en pareja por 75 €. La idea no es darte una lista de fechas nada más nombrarlo, sino que entiendas bien en qué consiste y después decidamos juntas qué quieres mirar. ¿Te apetece que profundice en la parte de seguridad, en los contenidos o en si encaja con la edad de tu bebé? 🥕`;
   }
 
   private renderPilatesInfo(
