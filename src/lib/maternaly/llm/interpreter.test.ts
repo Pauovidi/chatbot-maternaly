@@ -752,6 +752,205 @@ describe("Maternaly LLM interpreter", () => {
     });
   });
 
+  it.each([
+    ["Sí, en la online", "online", "online", "registration_start"],
+    ["vale, la de Bilbao", "bilbao", "presencial", "registration_start"],
+    ["de acuerdo, presencial en Erandio", "erandio", "presencial", "registration_start"],
+    ["online", "online", "online", "registration_start"],
+    ["Quisiera la online", "online", "online", "registration_start"],
+    ["Bilbao me viene mejor", "bilbao", "presencial", "registration_start"],
+    ["Sí, a las 19:00", "online", "online", "registration_start"],
+    ["sí, online el 10 de agosto", "online", "online", "registration_slot_selected"],
+  ])(
+    "compone la aceptación contextual '%s' con su sede, modalidad o fecha",
+    async (message, expectedLocation, expectedModality, expectedIntent) => {
+      const result = await new LlmIntentClassifier().classify(message, {
+        active_service_id: "charla_embarazo_1_20",
+        active_normalized_service_key: "charla_embarazo_1_20",
+        active_stage: "awaiting_booking_decision",
+        recent_messages: [
+          { role: "assistant", text: "¿Quieres reservar tu plaza?" },
+        ],
+      });
+
+      expect(result).toMatchObject({
+        intent: expectedIntent,
+        service_scope: "contextual",
+        service_candidate: "charla_embarazo_1_20",
+        slots: expect.objectContaining({
+          consent: true,
+          last_question_answered: "reservation_accepted",
+          location: expectedLocation,
+          modality: expectedModality,
+        }),
+        needs_availability_lookup: true,
+      });
+    },
+  );
+
+  it("conserva la aceptación cuando el mismo turno ya aporta asistentes", async () => {
+    const result = await new LlmIntentClassifier().classify("Sí, somos dos", {
+      active_service_id: "charla_embarazo_1_20",
+      active_normalized_service_key: "charla_embarazo_1_20",
+      active_stage: "awaiting_booking_decision",
+      recent_messages: [
+        { role: "assistant", text: "¿Quieres reservar tu plaza?" },
+      ],
+    });
+
+    expect(result).toMatchObject({
+      intent: "registration_start",
+      slots: expect.objectContaining({
+        consent: true,
+        people_count: 2,
+        last_question_answered: "reservation_accepted",
+      }),
+      needs_availability_lookup: true,
+    });
+  });
+
+  it("mantiene una pregunta informativa aunque empiece por sí y mencione modalidad", async () => {
+    const result = await new LlmIntentClassifier().classify(
+      "Sí, online, pero antes dime cuánto dura",
+      {
+        active_service_id: "charla_embarazo_1_20",
+        active_normalized_service_key: "charla_embarazo_1_20",
+        active_stage: "awaiting_booking_decision",
+        recent_messages: [
+          { role: "assistant", text: "¿Quieres reservar tu plaza?" },
+        ],
+      },
+    );
+
+    expect(result).toMatchObject({
+      intent: "service_question",
+      service_candidate: "charla_embarazo_1_20",
+      service_question_focus: "duration",
+      needs_availability_lookup: false,
+    });
+    expect(result.slots.consent).toBeUndefined();
+  });
+
+  it.each([
+    "¿Es online?",
+    "Sí, pero no online",
+    "Sí, presencial, pero no Bilbao",
+    "Sí, pero no sé si online",
+    "Sí, quizá Bilbao",
+  ])(
+    "no convierte la duda o preferencia negada '%s' en consentimiento de reserva",
+    async (message) => {
+      const result = await new LlmIntentClassifier().classify(message, {
+        active_service_id: "charla_embarazo_1_20",
+        active_normalized_service_key: "charla_embarazo_1_20",
+        active_stage: "awaiting_booking_decision",
+        recent_messages: [
+          { role: "assistant", text: "¿Quieres reservar tu plaza?" },
+        ],
+      });
+
+      expect(result.intent).not.toBe("registration_start");
+      expect(result.slots.consent).toBeUndefined();
+      expect(result.needs_availability_lookup).toBe(false);
+    },
+  );
+
+  it.each([
+    "Sí, pero antes de reservar, ¿cuánto cuesta la online?",
+    "Antes de reservar, ¿qué precio tiene?",
+    "Quería reservar, pero antes dime el precio",
+  ])(
+    "pospone la reserva para contestar la pregunta previa: %s",
+    async (message) => {
+      const result = await new LlmIntentClassifier().classify(message, {
+        active_service_id: "charla_embarazo_1_20",
+        active_normalized_service_key: "charla_embarazo_1_20",
+        active_stage: "awaiting_booking_decision",
+        recent_messages: [
+          { role: "assistant", text: "¿Quieres reservar tu plaza?" },
+        ],
+      });
+
+      expect(result).toMatchObject({
+        intent: "service_question",
+        service_question_focus: "pricing",
+        needs_availability_lookup: false,
+      });
+      expect(result.slots.consent).toBeUndefined();
+    },
+  );
+
+  it.each([
+    "No quiero reservar",
+    "No me interesa reservar",
+    "Prefiero no reservar",
+    "Todavía no quiero reservar",
+    "No por ahora, gracias",
+    "No, gracias. Solo quería saber el horario",
+  ])(
+    "reconoce el rechazo natural a la reserva: %s",
+    async (message) => {
+      const result = await new LlmIntentClassifier().classify(message, {
+        active_service_id: "charla_embarazo_1_20",
+        active_normalized_service_key: "charla_embarazo_1_20",
+        active_stage: "awaiting_booking_decision",
+        recent_messages: [
+          { role: "assistant", text: "¿Quieres reservar tu plaza?" },
+        ],
+      });
+
+      expect(result.slots).toMatchObject({
+        consent: false,
+        last_question_answered: "reservation_declined",
+      });
+      expect(result.needs_availability_lookup).toBe(false);
+    },
+  );
+
+  it("estabiliza sí en la online aunque OpenAI lo devuelva como pregunta de modalidad", async () => {
+    vi.stubEnv("LLM_PROVIDER", "openai");
+    process.env.OPENAI_API_KEY = "test-openai-key";
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          output_text: JSON.stringify({
+            intent: "service_question",
+            service_scope: "contextual",
+            service_candidate: "charla_embarazo_1_20",
+            slots: {
+              service_id: "charla_embarazo_1_20",
+              normalized_service_key: "charla_embarazo_1_20",
+              location: "online",
+              modality: "online",
+            },
+            service_question_focus: "locations",
+            needs_availability_lookup: false,
+            confidence: 0.99,
+            missing_fields: [],
+            should_handoff: false,
+            safety_flags: [],
+          }),
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    await expect(
+      new LlmIntentClassifier().classify("Sí, en la online", {
+        active_service_id: "charla_embarazo_1_20",
+        active_normalized_service_key: "charla_embarazo_1_20",
+        active_stage: "awaiting_booking_decision",
+        recent_messages: [
+          { role: "assistant", text: "¿Quieres reservar tu plaza?" },
+        ],
+      }),
+    ).resolves.toMatchObject({
+      intent: "registration_start",
+      slots: expect.objectContaining({ consent: true, location: "online", modality: "online" }),
+      needs_availability_lookup: true,
+    });
+  });
+
   it("recognizes a Spanish natural date as a session choice in the active Charla flow", async () => {
     await expect(
       new LlmIntentClassifier().classify("Online, 10 de agosto", {

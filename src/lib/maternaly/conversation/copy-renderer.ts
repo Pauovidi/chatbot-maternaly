@@ -910,9 +910,28 @@ export class MaternalyCopyRenderer {
     sessions: NormalizedAvailableSession[],
     state?: MaternalyNormalizedFlowState,
   ): string {
-    const preferred = normalizeCopy([state?.location, state?.modality].filter(Boolean).join(" "));
+    const preferredLocation = normalizeCopy(state?.location ?? "");
+    const preferredModality = normalizeCopy(state?.modality ?? "");
+    const hasPreference = Boolean(preferredLocation || preferredModality);
+    const visibleOptions = MATERNALY_CHARLA_OPTIONS.filter((option) => {
+      const optionLocation = normalizeCopy(option.location);
+      const locationMatches =
+        !preferredLocation ||
+        optionLocation.includes(preferredLocation) ||
+        (preferredLocation === "online" && option.id === "online");
+      const modalityMatches = !preferredModality || option.modality === preferredModality;
+      return locationMatches && modalityMatches;
+    });
+    if (hasPreference && visibleOptions.length === 0) {
+      return [
+        "No encuentro una opción que combine esa sede y esa modalidad.",
+        "En esta charla, Erandio y Bilbao son presenciales; la opción online se realiza en directo por Zoom.",
+        "Dime cuál de las tres prefieres y te muestro únicamente sus fechas.",
+      ].join("\n\n");
+    }
+    const narrowed = visibleOptions.length < MATERNALY_CHARLA_OPTIONS.length;
     let ordinal = 0;
-    const sections = MATERNALY_CHARLA_OPTIONS.map((option) => {
+    const sections = visibleOptions.map((option) => {
       const matching = sessions.filter((session) => resolveCharlaOption(session)?.id === option.id);
       const heading = `${option.location} — ${option.modality === "online" ? "online en directo" : "presencial"} — ${option.startTime}`;
       const dates = matching.length
@@ -926,16 +945,22 @@ export class MaternalyCopyRenderer {
             return `${ordinal}. ${formatSpanishDate(session.date)}, ${session.startTime ?? option.startTime}${availability}`;
           })
         : ["Sin fecha publicada en la agenda en este momento."];
-      const marker = preferred && normalizeCopy(`${option.location} ${option.modality}`).includes(preferred)
-        ? " (tu preferencia)"
-        : "";
-      return `${heading}${marker}\n${dates.map((date) => `   ${date}`).join("\n")}`;
+      return `${heading}\n${dates.map((date) => `   ${date}`).join("\n")}`;
     });
 
+    const intro = narrowed
+      ? visibleOptions.length === 1
+        ? `Perfecto. Estas son las fechas de la Charla Informativa en ${visibleOptions[0].location === "Online" ? "modalidad online" : visibleOptions[0].location}:`
+        : "Perfecto. Estas son las opciones presenciales de la Charla Informativa:"
+      : "Claro. Opciones para Charla Informativa gratuita (las tres modalidades):";
+    const closing = narrowed
+      ? "Dime qué fecha prefieres y continúo con la solicitud."
+      : "Dime si te encaja mejor Erandio, Bilbao u online y, si ya lo sabes, qué fecha prefieres.";
+
     return [
-      "Claro. Opciones para Charla Informativa gratuita (las tres modalidades):",
+      intro,
       ...sections,
-      "Dime si te encaja mejor Erandio, Bilbao u online y, si ya lo sabes, qué fecha prefieres.",
+      closing,
     ].join("\n\n");
   }
 

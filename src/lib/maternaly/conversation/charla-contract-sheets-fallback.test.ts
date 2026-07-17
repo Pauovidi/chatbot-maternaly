@@ -233,7 +233,7 @@ describe("Charla: calendario contractual con respaldo parcial de Sheets", () => 
     expect(harness.client.appended).toHaveLength(0);
   });
 
-  it("resuelve el ordinal sobre las ocho opciones globales aunque Bilbao sea la preferencia", async () => {
+  it("resuelve el ordinal sobre las fechas de Bilbao que acaba de mostrar", async () => {
     const harness = makeHarness({ liveWrite: true, from: "whatsapp:+34600991005" });
     await requestContractCalendar(harness);
 
@@ -243,18 +243,16 @@ describe("Charla: calendario contractual con respaldo parcial de Sheets", () => 
       location: "bilbao",
     });
     expect(preferred.conversation.maternalyNormalizedFlow?.selectedSessionId).toBeUndefined();
-    expect(preferred.botReply?.body).toMatch(/1\.\s*20 de agosto/i);
+    expect(preferred.botReply?.body).toMatch(/1\.\s*6 de octubre/i);
+    expect(preferred.botReply?.body).not.toMatch(/Erandio|Online|20 de agosto/i);
 
     const selected = await harness.send("1");
     expect(selected.conversation.maternalyNormalizedFlow).toMatchObject({
       stage: "collecting_contact",
-      location: "Erandio",
+      location: "Bilbao",
       modality: "presencial",
     });
-    expect(selected.conversation.maternalyNormalizedFlow?.selectedSessionId).toContain(
-      "contract-pending:erandio:2026-08-20:18:30",
-    );
-    expect(selected.conversation.maternalyNormalizedFlow?.selectedSessionId).not.toBe(
+    expect(selected.conversation.maternalyNormalizedFlow?.selectedSessionId).toBe(
       SPARSE_SHEET_SESSION_ID,
     );
     expect(selected.botReply?.body).toMatch(/acudir[eé]is una o dos personas/i);

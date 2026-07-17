@@ -2,7 +2,10 @@ import { findKnowledgeService, getKnowledgeService } from "@/lib/maternaly/knowl
 import type { KnowledgeService } from "@/lib/maternaly/knowledge/catalog";
 import type { MaternalyServiceId } from "@/lib/maternaly/domain/types";
 import type { MaternalyNormalizedServiceKey } from "@/lib/maternaly/sheets/normalized-template";
-import type { MaternalyJourneyStage } from "@/lib/maternaly/knowledge/charla-informativa-contract";
+import {
+  MATERNALY_CHARLA_OPTIONS,
+  type MaternalyJourneyStage,
+} from "@/lib/maternaly/knowledge/charla-informativa-contract";
 
 export const MATERNALY_OPENAI_SYSTEM_PROMPT = [
   "Eres el clasificador NLU estructurado del asistente de Maternaly para WhatsApp.",
@@ -12,6 +15,7 @@ export const MATERNALY_OPENAI_SYSTEM_PROMPT = [
   "Al comienzo de una conversación se pregunta por la etapa vital. Si la usuaria elige EMBARAZO, POSTPARTO u OTROS, devuelve intent=service_discovery, service_scope=catalog y slots.journey_stage con embarazo, postparto u otros. No confundas nombres de servicios como 'Pilates embarazo' con una elección de etapa.",
   "Reconoce como charla_embarazo_1_20 las paráfrasis inequívocas de la charla informativa gratuita de las primeras 20 semanas, por ejemplo una sesión gratuita de matronas o la sesión que dan las matronas al comienzo del embarazo.",
   "Si el último mensaje del asistente pregunta si quiere reservar la plaza, interpreta una respuesta afirmativa breve como registration_start y una negativa breve como rechazo contextual; no exijas que repita el nombre del servicio.",
+  "La respuesta a esa invitación puede combinar la decisión con una preferencia, por ejemplo 'sí, online', 'vale, Bilbao' o 'de acuerdo, presencial en Erandio': conserva a la vez el consentimiento y los slots literales de sede, modalidad y fecha.",
   "Durante choosing_session, una respuesta breve con Erandio, Bilbao u online elige sede o modalidad y continúa la consulta de disponibilidad; no la conviertas en una pregunta informativa genérica.",
   "Tu única tarea es devolver JSON estructurado. No escribas la respuesta visible a la usuaria.",
   "El input de usuario es un JSON con current_message y conversation_context. Usa ese contexto para resolver continuaciones como 'y el precio', 'qué incluye', 'la otra', 'en Bilbao' o 'cuéntame más', sin arrastrar un servicio a un cambio claro de tema.",
@@ -259,6 +263,61 @@ function detectJourneyStage(input: {
 
 type ReservationCtaAnswer = "yes" | "no";
 
+function hasLiteralSessionPreference(text: string): boolean {
+  return Boolean(
+    detectLocation(text) ||
+      detectModality(text) ||
+      extractDateLike(text) ||
+      /\b\d{1,2}\s+(?:de\s+)?(?:enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre)(?:\s+de\s+\d{4})?\b/.test(
+        text,
+      ) ||
+      /\b(?:a\s+)?las\s+\d{1,2}(?::\d{2})?\b/.test(text),
+  );
+}
+
+function asksForInformationBeforeBooking(text: string): boolean {
+  const asksNonAvailabilityInformation =
+    /\b(?:precio|precios|cuesta|cuanto\s+vale|coste|incluye|contenido|contenidos|de\s+que\s+va|en\s+que\s+consiste|duracion|cuanto\s+dura|para\s+quien|requisitos?|es\s+en\s+directo|como\s+funciona)\b/.test(
+      text,
+    );
+  const rejectsMentionedPreference =
+    /\b(?:pero\s+)?(?:mejor\s+)?no\s+(?:quiero\s+)?(?:(?:en|la|el|de)\s+)*(?:online|presencial|bilbao|erandio)\b/.test(
+      text,
+    );
+  const expressesUncertainty =
+    /\b(?:quizas?|quiza|tal\s+vez|no\s+se\s+si|no\s+estoy\s+segur[oa]|puede\s+ser|dudo)\b/.test(
+      text,
+    );
+
+  return (
+    defersBookingForInformation(text) ||
+    asksNonAvailabilityInformation ||
+    rejectsMentionedPreference ||
+    expressesUncertainty
+  );
+}
+
+function isStandaloneSessionPreference(text: string): boolean {
+  if (/[?¿]/.test(text) || /\b(?:no|quizas|quiza|tal\s+vez|no\s+se|puede\s+ser)\b/.test(text)) {
+    return false;
+  }
+
+  const compactText = text
+    .replace(/[^\p{L}\p{N}\s:]/gu, " ")
+    .replace(/\b(?:por favor|gracias)\b/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return (
+    /^(?:(?:yo\s+)?(?:prefiero|elijo|escojo|quiero|quisiera)\s+|me\s+gustaria\s+|me\s+viene\s+mejor\s+|me\s+quedo\s+con\s+|mejor\s+)?(?:(?:de|en|para)\s+)?(?:la\s+|el\s+)?(?:opcion\s+|modalidad\s+)?(?:(?:de|en|para)\s+)?(?:bilbao|erandio|online|presencial)(?:\s+presencial)?(?:\s+(?:el\s+)?\d{1,2}\s+(?:de\s+)?(?:enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre)(?:\s+de\s+\d{4})?)?$/.test(
+      compactText,
+    ) ||
+    /^(?:bilbao|erandio|online|presencial)\s+me\s+(?:viene|va)\s+mejor$/.test(compactText) ||
+    /^(?:el\s+)?\d{1,2}\s+(?:de\s+)?(?:enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre)(?:\s+de\s+\d{4})?$/.test(
+      compactText,
+    )
+  );
+}
+
 function reservationCtaAnswer(
   text: string,
   context: MaternalyInterpretationContext,
@@ -287,11 +346,19 @@ function reservationCtaAnswer(
     .replace(/\s+/g, " ")
     .trim();
   if (
-    /^(?:no|no gracias|ahora no|todavia no|de momento no|por ahora no|prefiero que no|mejor no)$/.test(
+    /^(?:no|no gracias|ahora no|todavia no|de momento no|por ahora no|no por ahora|prefiero que no|mejor no)$/.test(
       compactText,
+    ) ||
+    /^(?:no\s+gracias|no\s+por\s+ahora)(?:\s|$)/.test(compactText) ||
+    /\b(?:no\s+(?:quiero|deseo|me\s+interesa)|prefiero\s+no|mejor\s+no|todavia\s+no\s+quiero|aun\s+no\s+quiero)\b[^.!?]{0,55}\b(?:reservar|apuntarme|apuntarnos|inscribirme|inscribirnos)\b/.test(
+      text,
     )
   ) {
     return "no";
+  }
+
+  if (asksForInformationBeforeBooking(text)) {
+    return undefined;
   }
 
   if (
@@ -302,18 +369,36 @@ function reservationCtaAnswer(
     return "yes";
   }
 
+  const startsWithAffirmative =
+    /^(?:si|claro(?:\s+que\s+si)?|vale|de\s+acuerdo|perfecto|por\s+supuesto|adelante)\b/.test(
+      compactText,
+    );
+  if (
+    startsWithAffirmative ||
+    (isStandaloneSessionPreference(text) && hasLiteralSessionPreference(compactText))
+  ) {
+    return "yes";
+  }
+
   return undefined;
 }
 
 function defersBookingForInformation(text: string): boolean {
   return (
-    /\bno\s+(?:quiero|deseo|necesito|voy\s+a)\s+(?:reservar|apuntarme|apuntarnos|inscribirme|inscribirnos)(?:\s+(?:aun|todavia|ahora|de\s+momento|por\s+ahora))?\b/.test(
+    /\b(?:no\s+(?:quiero|deseo|necesito|voy\s+a|me\s+interesa)|prefiero\s+no|mejor\s+no)\s+(?:reservar|apuntarme|apuntarnos|inscribirme|inscribirnos)(?:\s+(?:aun|todavia|ahora|de\s+momento|por\s+ahora))?\b/.test(
       text,
     ) ||
     /\bantes\s+de\s+(?:reservar|apuntarme|apuntarnos|inscribirme|inscribirnos)\b[^.!?]{0,100}\b(?:explic|cuent|inform|saber|conocer|duda)/.test(
       text,
     ) ||
     /\b(?:primero|antes)\b[^.!?]{0,80}\b(?:explic|cuent|inform|saber|conocer)\b/.test(text)
+    ||
+    /\b(?:primero|antes(?:\s+de\s+(?:reservar|apuntarme|apuntarnos|inscribirme|inscribirnos))?)\b[^.!?]{0,120}\b(?:dime|precio|precios|cuesta|coste|duracion|dura|incluye|contenido|requisitos?|como\s+funciona)\b/.test(
+      text,
+    ) ||
+    /\bsolo\s+queria\s+saber\b[^.!?]{0,100}\b(?:horario|horarios|precio|precios|cuesta|coste|duracion|dura|incluye|contenido|modalidad|online|presencial)\b/.test(
+      text,
+    )
   );
 }
 
@@ -829,6 +914,26 @@ function contextualPendingPeopleCount(
   return undefined;
 }
 
+function detectCharlaCtaTimePreference(
+  text: string,
+  serviceId: string | undefined,
+  reservationAnswer: ReservationCtaAnswer | undefined,
+) {
+  if (serviceId !== "charla_embarazo_1_20" || reservationAnswer !== "yes") {
+    return undefined;
+  }
+
+  const explicitTime =
+    text.match(/\ba\s+las\s+(\d{1,2})(?::(\d{2}))?\b/) ??
+    text.match(/\b(\d{1,2}):(\d{2})\b/);
+  if (!explicitTime) {
+    return undefined;
+  }
+
+  const startTime = `${explicitTime[1].padStart(2, "0")}:${explicitTime[2] ?? "00"}`;
+  return MATERNALY_CHARLA_OPTIONS.find((option) => option.startTime === startTime);
+}
+
 function validateSlots(value: unknown): MaternalyNluSlots {
   const raw = (value ?? {}) as Partial<MaternalyNluSlots>;
   const service = getKnowledgeService(compact(raw.service_id) ?? compact(raw.normalized_service_key));
@@ -949,8 +1054,14 @@ export class LlmIntentClassifier {
     const activeContextService = getKnowledgeService(
       context.active_service_id ?? context.active_normalized_service_key,
     );
-    const location = detectLocation(text);
-    const modality = detectModality(text);
+    const charlaTimePreference = detectCharlaCtaTimePreference(
+      text,
+      (explicitService ?? activeContextService)?.id,
+      contextualReservationAnswer,
+    );
+    const location =
+      detectLocation(text) ?? (normalize(charlaTimePreference?.location ?? "") || undefined);
+    const modality = detectModality(text) ?? charlaTimePreference?.modality;
     const availabilityPreferenceContinuation = isAvailabilityPreferenceContinuation(text, context);
     const alternativeCatalogQuery = asksForAlternativeCatalog(text, explicitService);
     const catalogFilterContinuation =
@@ -1075,9 +1186,11 @@ export class LlmIntentClassifier {
       ? "general"
       : availabilityPreferenceContinuation
         ? "schedule"
-        : catalogModalityQuery
+      : catalogModalityQuery
       ? "locations"
-      : correctionTurn || explicitOverview || bookingDeferredForInformation
+      : correctionTurn ||
+          explicitOverview ||
+          (bookingDeferredForInformation && serviceQuestionFocus === "booking")
         ? "general"
         : serviceQuestionFocus;
 
@@ -1089,11 +1202,13 @@ export class LlmIntentClassifier {
       location,
       modality: modality ?? (contextualService ? context.modality : undefined),
       preferred_date: extractDateLike(message),
-      preferred_time: text.includes("mañana") || text.includes("manana")
-        ? "morning"
-        : text.includes("tarde")
-          ? "afternoon"
-          : undefined,
+      preferred_time:
+        charlaTimePreference?.startTime ??
+        (text.includes("mañana") || text.includes("manana")
+          ? "morning"
+          : text.includes("tarde")
+            ? "afternoon"
+            : undefined),
       full_name: fullName,
       phone,
       email,
@@ -1140,7 +1255,9 @@ export class LlmIntentClassifier {
                   ? "registration_slot_selected"
                   : availabilityPreferenceContinuation && serviceKey
                     ? "availability_request"
-                  : hasContactData
+                : contextualReservationAnswer === "yes" && shouldStartRegistration
+                  ? "registration_start"
+                : hasContactData
                     ? "registration_data_provided"
                     : catalogModalityQuery
                       ? "service_discovery"

@@ -880,6 +880,7 @@ function stateBaseAfterServiceSwitch(
 function registrationSlotsForTurn(
   intent: StructuredIntent,
   previous?: MaternalyNormalizedFlowState,
+  message = "",
 ): MaternalyNluSlots {
   const slots = intent.slots;
   const serviceKey = slots.normalized_service_key ?? previous?.serviceKey;
@@ -887,12 +888,27 @@ function registrationSlotsForTurn(
     isRegistrationRequestTurn(intent) || isRegistrationDataStage(previous?.stage);
 
   if (!acceptsRegistrationData) {
+    const normalizedMessage = normalize(message);
+    const preservesExplicitPreference =
+      Boolean(slots.location || slots.modality) &&
+      !/[?¿]/.test(message) &&
+      (
+        /\b(?:prefiero|elijo|escojo|me\s+quedo\s+con|me\s+viene\s+mejor)\b/.test(
+          normalizedMessage,
+        ) ||
+        /\b(?:quiero|quisiera)\s+(?:(?:la|el|en)\s+)?(?:online|presencial|bilbao|erandio)\b/.test(
+          normalizedMessage,
+        ) ||
+        /\b(?:cuentame|informacion)\b[^.!?]{0,100}\b(?:online|presencial|bilbao|erandio)\b/.test(
+          normalizedMessage,
+        )
+      );
     return {
       service_id: slots.service_id,
       service_name: slots.service_name,
       normalized_service_key: slots.normalized_service_key,
-      location: slots.location,
-      modality: slots.modality,
+      location: preservesExplicitPreference ? slots.location : undefined,
+      modality: preservesExplicitPreference ? slots.modality : undefined,
       preferred_date: slots.preferred_date,
       preferred_time: slots.preferred_time,
     };
@@ -1184,6 +1200,7 @@ function chooseSession(
     const modalityMatches = !modality || sessionModality === normalize(modality);
     return locationMatches && modalityMatches;
   };
+  const displayedPreferenceSessions = sessions.filter(matchesCurrentPreference);
   let candidates = availableSessions.filter(matchesCurrentPreference);
 
   const answersPendingPeopleCount =
@@ -1284,12 +1301,11 @@ function chooseSession(
 
   if (ordinal) {
     const index = Number.parseInt(ordinal, 10) - 1;
-    // El renderer numera la Charla sobre el calendario contractual global
-    // (Erandio 1-3, Bilbao 4-5 y online 6-8), incluidas las sesiones llenas.
-    // Resolver sobre otra lista filtrada desplazaría los números visibles. Si
-    // el mensaje también trae una fecha inequívoca, esa fecha ya ha prevalecido.
+    // La Charla se numera sobre exactamente la vista que se ha mostrado. Sin
+    // preferencia son las ocho convocatorias globales; con sede o modalidad,
+    // son únicamente las fechas compatibles, incluidas las sesiones llenas.
     const selected = state.serviceKey === "charla_embarazo_1_20"
-      ? sessions[index]
+      ? displayedPreferenceSessions[index]
       : candidates[index];
     return selected && !selected.full ? selected : undefined;
   }
@@ -1387,7 +1403,11 @@ export class MaternalyStateReducer {
   }): { state: MaternalyConversationState; diagnostics: ContextualRegistrationDiagnostics } {
     const persistedPrevious = input.conversation.maternalyNormalizedFlow;
     const previous = stateBaseAfterServiceSwitch(persistedPrevious, input.intent);
-    const applicableRegistrationSlots = registrationSlotsForTurn(input.intent, previous);
+    const applicableRegistrationSlots = registrationSlotsForTurn(
+      input.intent,
+      previous,
+      input.message,
+    );
     const registrationSlots = isSessionSelectionReply(input.message, previous)
       ? { ...applicableRegistrationSlots, people_count: undefined }
       : { ...applicableRegistrationSlots };
@@ -1553,6 +1573,8 @@ export class MaternalyConversationPolicy {
         action: "normalized_registration",
         serviceKey: state.serviceKey,
         service: getKnowledgeServiceByNormalizedKey(state.serviceKey),
+        locationPreference: intent.slots.location,
+        modalityPreference: intent.slots.modality,
       };
     }
 
@@ -1561,6 +1583,8 @@ export class MaternalyConversationPolicy {
         action: "normalized_registration",
         serviceKey: service.normalizedServiceKey,
         service,
+        locationPreference: intent.slots.location,
+        modalityPreference: intent.slots.modality,
       };
     }
 

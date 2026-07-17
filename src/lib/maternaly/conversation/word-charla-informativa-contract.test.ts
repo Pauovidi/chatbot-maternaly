@@ -487,6 +487,123 @@ describe("contrato conversacional del Word: Charla Informativa Gratuita", () => 
     expect(selected.botReply?.body).toMatch(/una o dos personas|1 o 2 personas/i);
   });
 
+  it("entiende 'Sí, en la online', muestra solo sus fechas y resuelve el ordinal sobre esa lista", async () => {
+    const harness = makeHarness();
+    await harness.send("Cuéntame la charla informativa gratuita para las primeras veinte semanas");
+
+    const options = await harness.send("Sí, en la online");
+    const reply = options.botReply?.body ?? "";
+
+    const detectedIntent = [...options.conversation.events]
+      .reverse()
+      .find((event) => event.eventType === "maternaly_intent_detected");
+    expect(detectedIntent?.payload).toMatchObject({
+      intent: "registration_start",
+      needsAvailabilityLookup: true,
+    });
+    expect(options.conversation.maternalyNormalizedFlow).toMatchObject({
+      stage: "choosing_session",
+      location: "online",
+      modality: "online",
+    });
+    expect(reply).toMatch(/online[\s\S]{0,80}19:00/i);
+    expect(reply).toMatch(/1\.\s*10 de agosto/i);
+    expect(reply).toMatch(/2\.\s*7 de septiembre/i);
+    expect(reply).toMatch(/3\.\s*5 de octubre/i);
+    expect(reply).not.toMatch(/Erandio|Bilbao|18:30|17:00/i);
+    expect(reply).not.toMatch(/quieres reservar tu plaza/i);
+    expect(harness.client.appended).toHaveLength(0);
+
+    const selected = await harness.send("1");
+    expect(selected.conversation.maternalyNormalizedFlow?.selectedSessionId).toBe(
+      "sesion_charla_online_20260810",
+    );
+    expect(selected.botReply?.body).toMatch(/una o dos personas|1 o 2 personas/i);
+    expect(harness.client.appended).toHaveLength(0);
+  });
+
+  it("conserva una preferencia online declarada al pedir la explicación y la aplica al aceptar", async () => {
+    const harness = makeHarness();
+    const information = await harness.send(
+      "Cuéntame la charla informativa gratuita online para las primeras veinte semanas",
+    );
+    expect(information.conversation.maternalyNormalizedFlow).toMatchObject({
+      stage: "awaiting_booking_decision",
+      location: "online",
+      modality: "online",
+    });
+
+    const options = await harness.send("Sí");
+    const reply = options.botReply?.body ?? "";
+    expect(reply).toMatch(/online[\s\S]{0,80}19:00/i);
+    expect(reply).not.toMatch(/Erandio|Bilbao|18:30|17:00/i);
+    expect(options.conversation.maternalyNormalizedFlow?.stage).toBe("choosing_session");
+    expect(harness.client.appended).toHaveLength(0);
+  });
+
+  it.each([
+    {
+      answer: "vale, la de Bilbao",
+      expectedLocation: "bilbao",
+      expectedSession: "sesion_charla_bilbao_20261006",
+      expectedDates: [/1\.\s*6 de octubre/i, /2\.\s*15 de diciembre/i],
+      excluded: /Erandio|Online|18:30|19:00/i,
+    },
+    {
+      answer: "de acuerdo, presencial en Erandio",
+      expectedLocation: "erandio",
+      expectedSession: "sesion_charla_erandio_20260820",
+      expectedDates: [/1\.\s*20 de agosto/i, /2\.\s*24 de septiembre/i, /3\.\s*8 de octubre/i],
+      excluded: /Bilbao|Online|17:00|19:00/i,
+    },
+  ])(
+    "compone '$answer' y mantiene alineadas lista y selección",
+    async ({ answer, expectedLocation, expectedSession, expectedDates, excluded }) => {
+      const harness = makeHarness();
+      await harness.send("Cuéntame la charla informativa gratuita para las primeras veinte semanas");
+
+      const options = await harness.send(answer);
+      const reply = options.botReply?.body ?? "";
+      expect(options.conversation.maternalyNormalizedFlow).toMatchObject({
+        stage: "choosing_session",
+        location: expectedLocation,
+        modality: "presencial",
+      });
+      for (const expectedDate of expectedDates) {
+        expect(reply).toMatch(expectedDate);
+      }
+      expect(reply).not.toMatch(excluded);
+      expect(harness.client.appended).toHaveLength(0);
+
+      const selected = await harness.send("1");
+      expect(selected.conversation.maternalyNormalizedFlow?.selectedSessionId).toBe(expectedSession);
+      expect(harness.client.appended).toHaveLength(0);
+    },
+  );
+
+  it("responde la duda previa sin convertirla en consentimiento ni guardar modalidad", async () => {
+    const harness = makeHarness();
+    await harness.send("Cuéntame la charla informativa gratuita para las primeras veinte semanas");
+
+    const result = await harness.send("Sí, online, pero antes dime cuánto dura");
+    const reply = result.botReply?.body ?? "";
+
+    const detectedIntent = [...result.conversation.events]
+      .reverse()
+      .find((event) => event.eventType === "maternaly_intent_detected");
+    expect(detectedIntent?.payload).toMatchObject({
+      intent: "service_question",
+      serviceQuestionFocus: "duration",
+      needsAvailabilityLookup: false,
+    });
+    expect(result.conversation.maternalyNormalizedFlow?.stage).toBe("awaiting_booking_decision");
+    expect(result.conversation.maternalyNormalizedFlow?.location).toBeUndefined();
+    expect(result.conversation.maternalyNormalizedFlow?.modality).toBeUndefined();
+    expect(reply).toMatch(/dur|hora|minut/i);
+    expect(reply).not.toMatch(/10 de agosto|7 de septiembre|5 de octubre/i);
+    expect(harness.client.appended).toHaveLength(0);
+  });
+
   it.each([
     {
       label: "Erandio",

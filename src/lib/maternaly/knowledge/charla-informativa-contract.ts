@@ -147,7 +147,7 @@ export interface MaternalyCharlaOption {
   attendanceNote?: string;
 }
 
-/** Las tres opciones se muestran siempre de forma explícita y en este orden. */
+/** Sin preferencia se muestran las tres opciones en este orden; con preferencia se conserva el subconjunto compatible. */
 export const MATERNALY_CHARLA_OPTIONS = [
   {
     id: "erandio",
