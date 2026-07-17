@@ -15,6 +15,7 @@ export const MATERNALY_OPENAI_SYSTEM_PROMPT = [
   "Preguntas como '¿tenéis algún taller online?', '¿qué servicios tenéis online?' o '¿hay actividades presenciales?' son búsquedas de catálogo: usa intent=service_discovery, service_scope=catalog y no heredes el servicio activo. En cambio, '¿el BLW es online?', '¿este taller es online?' o '¿y online?' sí pueden referirse al servicio activo.",
   "Si la usuaria corrige una respuesta anterior, dice que quería información general, cambia de tema o hace una pregunta antes de continuar una inscripción, responde a la intención del turno actual y no arrastres el flujo de reserva.",
   "Interpreta slots útiles y no inventes disponibilidad, plazas, pagos ni facturas.",
+  "Una revelación de contexto personal como el mes o la semana de embarazo no es por sí sola una petición de reserva ni de disponibilidad. Extrae pregnancy_month o pregnancy_week, pero usa needs_availability_lookup=false salvo que el turno pida explícitamente fechas, plazas, reserva o responda a un dato pendiente de una inscripción activa.",
   "Diferencia información general, interés, inscripción, selección de sesión, datos de inscripción, confirmación, pago, factura, humano, privacidad y reset.",
   "Incluye service_question_focus estructurado cuando aplique: benefits, contents, duration, eligibility, schedule, pricing, start_week, locations, booking, general, clinical_risk o unknown.",
   "Si falta un dato, márcalo en missing_fields; no te bloquees ni inventes datos.",
@@ -73,6 +74,7 @@ export interface MaternalyNluSlots {
   people_count?: number;
   partner_name?: string;
   pregnancy_week?: number;
+  pregnancy_month?: number;
   fpp_or_due_date?: string;
   baby_birth_date?: string;
   baby_name?: string;
@@ -91,6 +93,7 @@ export interface StructuredIntent {
   venue_preference?: string;
   time_preference?: string;
   pregnancy_week?: number;
+  pregnancy_month?: number;
   people_count?: number;
   needs_availability_lookup: boolean;
   confidence: number;
@@ -335,6 +338,64 @@ function validPregnancyWeek(value: unknown): number | undefined {
   return Number.isFinite(number) && number > 0 && number < 45 ? number : undefined;
 }
 
+function validPregnancyMonth(value: unknown): number | undefined {
+  const number = typeof value === "number" ? value : Number.parseInt(String(value ?? ""), 10);
+  return Number.isFinite(number) && number > 0 && number <= 9 ? number : undefined;
+}
+
+function extractPregnancyMonth(text: string): number | undefined {
+  const numeric = extractNumber(
+    text,
+    /\b(?:estoy|embarazad[ao]|embarazo|gestacion|gestando|voy)\b[^.!?]{0,40}\b(?:de|en|por el|por la)?\s*(\d)\s*(?:º|°)?\s*mes\b/,
+  );
+  if (numeric) {
+    return validPregnancyMonth(numeric);
+  }
+
+  const monthWords: Record<string, number> = {
+    un: 1,
+    uno: 1,
+    primer: 1,
+    primero: 1,
+    dos: 2,
+    segundo: 2,
+    tres: 3,
+    tercer: 3,
+    tercero: 3,
+    cuatro: 4,
+    cuarto: 4,
+    cinco: 5,
+    quinto: 5,
+    seis: 6,
+    sexto: 6,
+    siete: 7,
+    septimo: 7,
+    ocho: 8,
+    octavo: 8,
+    nueve: 9,
+    noveno: 9,
+  };
+  const match = text.match(
+    /\b(?:estoy|embarazad[ao]|embarazo|gestacion|gestando|voy)\b[^.!?]{0,40}\b(?:de|en|por el|por la)?\s*(un|uno|primer|primero|dos|segundo|tres|tercer|tercero|cuatro|cuarto|cinco|quinto|seis|sexto|siete|septimo|ocho|octavo|nueve|noveno)\s+mes(?:es)?\b/,
+  );
+  return match?.[1] ? monthWords[match[1]] : undefined;
+}
+
+function isGestationalContextDisclosure(text: string): boolean {
+  const hasGestationalContext = Boolean(
+    extractPregnancyMonth(text) ??
+      extractNumber(
+        text,
+        /\b(?:estoy|embarazad[ao]|embarazo|gestacion|gestando|voy|tengo)\b[^.!?]{0,40}\b(\d{1,2})\s*(?:semanas?|sem)\b/,
+      ),
+  );
+  const requestsTransaction =
+    /\b(?:horarios?|plazas?|disponibilidad|hay hueco|fechas?|cu[aá]ndo es|pr[oó]xima|reserv|apunt|inscrib|preinscrib|quiero ir|quiero asistir|gu[aá]rdame)\b/.test(
+      text,
+    );
+  return hasGestationalContext && !requestsTransaction;
+}
+
 function validServiceQuestionFocus(value: unknown): MaternalyServiceQuestionFocus {
   return ALLOWED_SERVICE_QUESTION_FOCUS.includes(value as MaternalyServiceQuestionFocus)
     ? (value as MaternalyServiceQuestionFocus)
@@ -427,7 +488,10 @@ function isContextualContinuation(text: string): boolean {
     /^(?:y|pero)?\s*(?:el|la|los|las)?\s*(?:precio|coste|horario|duraci[oó]n|contenido|requisitos?|beneficios?|ubicaci[oó]n|sede)[?!.\s]*$/.test(
       text.trim(),
     ) ||
-    /^(?:y\s+)?(?:en\s+)?(?:bilbao|erandio|online)[?!.\s]*$/.test(text.trim())
+    /^(?:y\s+)?(?:en\s+)?(?:bilbao|erandio|online)[?!.\s]*$/.test(text.trim()) ||
+    /^(?:(?:si|vale|perfecto)[,\s]+)?(?:(?:me\s+)?(?:quiero|gustaria|interesa)\s+)?(?:reservar|apuntar(?:me)?|inscribir(?:me)?|asistir|ir)(?:\s+(?:ya|ahora))?[.!?]*$/.test(
+      text.trim(),
+    )
   );
 }
 
@@ -464,6 +528,7 @@ const MATERNALY_STRUCTURED_OUTPUT_SCHEMA = {
     venue_preference: { type: ["string", "null"] },
     time_preference: { type: ["string", "null"] },
     pregnancy_week: { type: ["number", "null"] },
+    pregnancy_month: { type: ["number", "null"] },
     people_count: { type: ["number", "null"] },
     needs_availability_lookup: { type: "boolean" },
     confidence: { type: "number", minimum: 0, maximum: 1 },
@@ -481,6 +546,7 @@ const MATERNALY_STRUCTURED_OUTPUT_SCHEMA = {
     "venue_preference",
     "time_preference",
     "pregnancy_week",
+    "pregnancy_month",
     "people_count",
     "needs_availability_lookup",
     "confidence",
@@ -579,6 +645,7 @@ function validateSlots(value: unknown): MaternalyNluSlots {
       : detectNormalizedServiceKey(service?.id);
   const peopleCount = validPeopleCount(raw.people_count);
   const pregnancyWeek = validPregnancyWeek(raw.pregnancy_week);
+  const pregnancyMonth = validPregnancyMonth(raw.pregnancy_month);
 
   return {
     service_id: service?.id,
@@ -598,6 +665,7 @@ function validateSlots(value: unknown): MaternalyNluSlots {
     people_count: peopleCount,
     partner_name: compact(raw.partner_name),
     pregnancy_week: pregnancyWeek,
+    pregnancy_month: pregnancyMonth,
     fpp_or_due_date: compact(raw.fpp_or_due_date),
     baby_birth_date: compact(raw.baby_birth_date),
     baby_name: compact(raw.baby_name),
@@ -625,6 +693,7 @@ export function validateStructuredIntent(value: unknown): StructuredIntent {
   const locationPreference = compact(raw.location_preference) ?? slots.location;
   const peopleCount = validPeopleCount(raw.people_count) ?? slots.people_count;
   const pregnancyWeek = validPregnancyWeek(raw.pregnancy_week) ?? slots.pregnancy_week;
+  const pregnancyMonth = validPregnancyMonth(raw.pregnancy_month) ?? slots.pregnancy_month;
   const safetyFlags = Array.from(
     new Set([
       ...(Array.isArray(raw.safety_flags) ? raw.safety_flags.map(String) : []),
@@ -647,6 +716,7 @@ export function validateStructuredIntent(value: unknown): StructuredIntent {
     venue_preference: compact(raw.venue_preference),
     time_preference: compact(raw.time_preference) ?? slots.preferred_time,
     pregnancy_week: pregnancyWeek,
+    pregnancy_month: pregnancyMonth,
     people_count: peopleCount,
     needs_availability_lookup: Boolean(raw.needs_availability_lookup),
     confidence:
@@ -689,15 +759,19 @@ export class LlmIntentClassifier {
       (!explicitService || alternativeCatalogQuery);
     const pureGreeting = isPureGreeting(text);
     const asksForOtherActiveService = /\b(?:la|el)\s+otr[ao]\b/.test(text);
+    const selectedSession =
+      /\b(?:opci[oó]n\s*)?([1-9])\b/.test(text) || Boolean(extractDateLike(message));
+    const selectsActiveSession = context.active_stage === "choosing_session" && selectedSession;
     const contextualService =
       catalogModalityQuery || pureGreeting
         ? null
         : asksForOtherActiveService
         ? alternateActiveService(context.active_service_id)
-        : isContextualContinuation(text) ||
+        : selectsActiveSession ||
+            isContextualContinuation(text) ||
             asksForGeneralOverview(text) ||
             correctsAnAvailabilityAnswer(text) ||
-            /\b(?:cu[aá]nto dura|duraci[oó]n|cu[aá]ntas horas|qu[eé] incluye|qu[eé] se ve|de qu[eé] va|contenidos?|temas?|para qui[eé]n|es para m[ií]|puedo ir|requisitos?|precio|precios|tarifa|tarifas|qu[eé] vale|cu[aá]nto sale|coste|horarios?|d[ií]as|pr[oó]xim[ao]s?|ediciones?|beneficios?|d[oó]nde|sede|bilbao|erandio|online)\b/.test(
+            /\b(?:cu[aá]nto dura|duraci[oó]n|cu[aá]ntas horas|qu[eé] incluye|qu[eé] se ve|de qu[eé] va|contenidos?|temas?|para qui[eé]n|es para m[ií]|puedo ir|requisitos?|precio|precios|tarifa|tarifas|qu[eé] vale|cu[aá]nto sale|coste|horarios?|fechas?|plazas?|disponibilidad|d[ií]as|pr[oó]xim[ao]s?|ediciones?|beneficios?|d[oó]nde|sede|bilbao|erandio|online)\b/.test(
               text,
             )
           ? getKnowledgeService(context.active_service_id)
@@ -736,7 +810,6 @@ export class LlmIntentClassifier {
       /(hablar con|persona humana|humano|humana|llamad|equipo|matrona|profesional)/.test(text);
     const reset = isMaternalyResetRequest(text);
     const privacy = /(privacidad|datos|proteccion de datos|protección de datos|rgpd|consentimiento)/.test(text);
-    const selectedSession = /\b(?:opci[oó]n\s*)?([1-9])\b/.test(text) || Boolean(extractDateLike(message));
     const location = detectLocation(text);
     const asksAboutCompanionEligibility =
       /\b(?:puedo ir con|puede venir|puedo acudir con|admit[ií]s|acept[aá]is)\b.*\b(?:pareja|acompa[nñ]ante)\b/.test(
@@ -744,6 +817,7 @@ export class LlmIntentClassifier {
       );
     const peopleCount = asksAboutCompanionEligibility ? undefined : inferPeopleCount(text);
     const pregnancyWeek = extractNumber(text, /\b(\d{1,2})\s*(semanas|semana)\b/);
+    const pregnancyMonth = extractPregnancyMonth(text);
     const fullName = extractFullName(message);
     const phone = extractPhone(message);
     const email = extractEmail(message);
@@ -803,6 +877,7 @@ export class LlmIntentClassifier {
       people_count: peopleCount,
       partner_name: extractPartnerName(message),
       pregnancy_week: pregnancyWeek,
+      pregnancy_month: pregnancyMonth,
       fpp_or_due_date: /fpp|fecha probable|parto/.test(text) ? extractDateLike(message) : undefined,
       baby_birth_date: /beb[eé]|nacimiento/.test(text) ? extractDateLike(message) : undefined,
       observations: text.includes("prueba_bot_codex_no_cliente_real")
@@ -850,6 +925,7 @@ export class LlmIntentClassifier {
         location && ["up&you", "hydra", "beup"].includes(location) ? location : undefined,
       time_preference: slots.preferred_time,
       pregnancy_week: pregnancyWeek,
+      pregnancy_month: pregnancyMonth,
       people_count: peopleCount,
       needs_availability_lookup: Boolean(
         serviceKey &&
@@ -940,8 +1016,10 @@ export class LlmIntentClassifier {
         deterministic.intent === "reset" ||
         deterministic.intent === "greeting" ||
         deterministic.intent === "service_discovery" ||
+        deterministic.intent === "registration_slot_selected" ||
         deterministic.service_scope === "catalog" ||
         correctsAnAvailabilityAnswer(normalizedMessage) ||
+        isGestationalContextDisclosure(normalizedMessage) ||
         asksForGeneralOverview(normalizedMessage) ||
         isBareServiceMention(normalizedMessage, deterministicService) ||
         (deterministic.intent === "service_question" &&

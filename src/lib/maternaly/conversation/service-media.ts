@@ -2,7 +2,6 @@ import type { ConversationRecord, MaternalyNormalizedFlowState } from "@/lib/hot
 import {
   findKnowledgeService,
   getKnowledgeService,
-  getKnowledgeServicesByModality,
 } from "@/lib/maternaly/knowledge/catalog";
 import {
   isMaternalyResetRequest,
@@ -37,25 +36,8 @@ const ACTIVE_SERVICE_MEDIA: readonly MaternalyServiceMediaDefinition[] = [
   },
 ];
 
-function normalize(text: string): string {
-  return text
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase();
-}
-
 function isActiveServiceId(value: string | undefined): value is MaternalyActiveServiceId {
   return value === "charla_embarazo_1_20" || value === "taller_blw";
-}
-
-function isServicesCatalogQuestion(text: string): boolean {
-  const normalized = normalize(text);
-  if (normalized.trim() === "servicio" || normalized.trim() === "servicios") {
-    return true;
-  }
-
-  return /\bservicios?\b/.test(normalized) &&
-    /\b(?:que|cuales|cual|ten[eé]is|ofrec[eé]is|hay|ver|lista|informacion|info)\b/.test(normalized);
 }
 
 function mediaAlreadySent(
@@ -84,18 +66,23 @@ function mediaAlreadySent(
     return false;
   }
 
-  const hasReliableTriggerMetadata = matchingEvents.some(
-    (event) =>
-      typeof event.payload === "object" &&
-      event.payload !== null &&
-      typeof (event.payload as { triggerKind?: unknown }).triggerKind === "string",
+  const confirmedServiceTrigger = matchingEvents.some((event) => {
+    const previousTrigger = (event.payload as { triggerKind?: unknown }).triggerKind;
+    return previousTrigger === "explicit_service" || previousTrigger === "contextual_service";
+  });
+  if (confirmedServiceTrigger) {
+    return true;
+  }
+
+  const hasLegacyUnknownTrigger = matchingEvents.some(
+    (event) => typeof (event.payload as { triggerKind?: unknown }).triggerKind !== "string",
   );
 
-  // Previous deployments could attach a stale service poster to a greeting because
-  // the persisted registration state was treated as the current topic. An explicit
-  // service mention gets one clean retry when the historical event cannot prove how
-  // the poster was triggered. New events carry triggerKind and remain deduplicated.
-  return hasReliableTriggerMetadata || triggerKind === "contextual_service";
+  // An older catalog response could record both posters even though Twilio delivered
+  // only the first attachment. A later explicit service request must therefore retry
+  // events marked as catalog. Unknown legacy events stay conservative for contextual
+  // inference, while an explicit service mention receives one recoverable retry.
+  return triggerKind === "contextual_service" && hasLegacyUnknownTrigger;
 }
 
 function serviceForTurn(input: {
@@ -154,22 +141,15 @@ export function resolveMaternalyServiceMedia(input: {
     return [];
   }
 
-  const isCatalogTurn =
-    input.intent.intent === "service_discovery" ||
-    input.intent.service_scope === "catalog" ||
-    isServicesCatalogQuestion(input.inboundText);
-  const catalogServiceIds = input.intent.slots.modality
-    ? getKnowledgeServicesByModality(input.intent.slots.modality)
-        .map((service) => service.id)
-        .filter(isActiveServiceId)
-    : ACTIVE_SERVICE_MEDIA.map((media) => media.serviceId);
-  const serviceTriggers: Array<Pick<MaternalyServiceMedia, "serviceId" | "triggerKind">> =
-    isCatalogTurn
-      ? catalogServiceIds.map((serviceId) => ({ serviceId, triggerKind: "catalog" as const }))
-      : [serviceForTurn({ ...input, inboundText: input.inboundText })].filter(
-          (value): value is Pick<MaternalyServiceMedia, "serviceId" | "triggerKind"> =>
-            Boolean(value),
-        );
+  // A catalog answer can mention several services, but WhatsApp accepts only one
+  // media attachment per message. Wait until the user actually selects or names a
+  // service so its poster is both relevant and reliably deliverable.
+  const serviceTriggers: Array<Pick<MaternalyServiceMedia, "serviceId" | "triggerKind">> = [
+    serviceForTurn({ ...input, inboundText: input.inboundText }),
+  ].filter(
+    (value): value is Pick<MaternalyServiceMedia, "serviceId" | "triggerKind"> =>
+      Boolean(value),
+  );
 
   return ACTIVE_SERVICE_MEDIA.filter(
     (media) => serviceTriggers.some((item) => item.serviceId === media.serviceId),

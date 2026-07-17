@@ -4,7 +4,23 @@ import path from "node:path";
 
 const repoRoot = process.cwd();
 const maternalyRoot = path.join(repoRoot, "src", "lib", "maternaly");
-const allowedOpenAiFile = path.join("src", "lib", "maternaly", "llm", "interpreter.ts");
+const groundedCopyFile = path.join(
+  "src",
+  "lib",
+  "maternaly",
+  "conversation",
+  "grounded-copy-generator.ts",
+);
+const allowedOpenAiFiles = new Set([
+  path.join("src", "lib", "maternaly", "llm", "interpreter.ts"),
+  groundedCopyFile,
+]);
+const allowedGroundedCopyImporters = new Set([
+  path.join("src", "lib", "maternaly", "conversation", "authority.test.ts"),
+  path.join("src", "lib", "maternaly", "conversation", "copy-renderer.ts"),
+  path.join("src", "lib", "maternaly", "conversation", "copy-renderer.test.ts"),
+  path.join("src", "lib", "maternaly", "conversation", "grounded-copy-generator.test.ts"),
+]);
 const allowedTwimlFiles = new Set([
   path.join("src", "lib", "maternaly", "conversation", "outbox.ts"),
 ]);
@@ -29,15 +45,23 @@ for (const file of files) {
   const relative = rel(file);
   const source = readFileSync(file, "utf8");
 
-  if (source.includes("https://api.openai.com") && relative !== allowedOpenAiFile) {
-    findings.push(`${relative}: OpenAI direct call outside structured NLU interpreter`);
+  if (source.includes("https://api.openai.com") && !allowedOpenAiFiles.has(relative)) {
+    findings.push(`${relative}: OpenAI direct call outside NLU or guarded grounded-copy generator`);
+  }
+
+  if (
+    source.includes("grounded-copy-generator") &&
+    relative !== groundedCopyFile &&
+    !allowedGroundedCopyImporters.has(relative)
+  ) {
+    findings.push(`${relative}: grounded-copy generator imported outside MaternalyCopyRenderer`);
   }
 
   if (source.includes("buildTwilioMessageResponse(") && !allowedTwimlFiles.has(relative)) {
     findings.push(`${relative}: TwiML construction outside Maternaly Outbox`);
   }
 
-  if (relative === allowedOpenAiFile) {
+  if (relative === path.join("src", "lib", "maternaly", "llm", "interpreter.ts")) {
     const structuredIntentBody = source.match(/export interface StructuredIntent \{([\s\S]*?)\n\}/)?.[1] ?? "";
     for (const field of forbiddenNluVisibleFields) {
       const visibleFieldPattern = new RegExp(`\\b${field}\\??\\s*:`);

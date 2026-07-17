@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { MaternalyConversationOutbox } from "./outbox";
 
 describe("Maternaly conversation outbox", () => {
-  it("renders text and service media in one Twilio WhatsApp response", () => {
+  it("renders text and at most one service poster in a Twilio WhatsApp response", () => {
     const result = new MaternalyConversationOutbox().buildText({
       conversationId: "conversation_media",
       provider: "twilio",
@@ -18,6 +18,11 @@ describe("Maternaly conversation outbox", () => {
           alt: "Cartel BLW",
           url: "https://maternaly.example.test/maternaly/services/taller-blw.jpeg",
         },
+        {
+          serviceId: "charla_embarazo_1_20",
+          alt: "Cartel charla",
+          url: "https://maternaly.example.test/maternaly/services/charla-informativa-embarazo.jpeg",
+        },
       ],
     });
 
@@ -25,5 +30,7 @@ describe("Maternaly conversation outbox", () => {
     expect(result.twiml).toContain(
       "<Media>https://maternaly.example.test/maternaly/services/taller-blw.jpeg</Media>",
     );
+    expect(result.twiml).not.toContain("charla-informativa-embarazo.jpeg");
+    expect(result.media.map((item) => item.serviceId)).toEqual(["taller_blw"]);
   });
 });

@@ -62,7 +62,7 @@ describe("Maternaly service media", () => {
     ]);
   });
 
-  it("attaches both active service posters for a services catalog question", () => {
+  it("waits for a concrete service before attaching a poster to a catalog question", () => {
     const media = resolveMaternalyServiceMedia({
       conversation: conversation(),
       inboundText: "¿Qué servicios ofrecéis?",
@@ -70,13 +70,10 @@ describe("Maternaly service media", () => {
       appBaseUrl: "https://maternaly.example.test",
     });
 
-    expect(media.map((item) => item.serviceId)).toEqual([
-      "charla_embarazo_1_20",
-      "taller_blw",
-    ]);
+    expect(media).toEqual([]);
   });
 
-  it("recognizes a one-word services question as the active catalog", () => {
+  it("does not attach posters to a one-word services question", () => {
     const media = resolveMaternalyServiceMedia({
       conversation: conversation(),
       inboundText: "servicios",
@@ -84,10 +81,7 @@ describe("Maternaly service media", () => {
       appBaseUrl: "https://maternaly.example.test",
     });
 
-    expect(media.map((item) => item.serviceId)).toEqual([
-      "charla_embarazo_1_20",
-      "taller_blw",
-    ]);
+    expect(media).toEqual([]);
   });
 
   it("does not repeat a poster already dispatched in the same conversation", () => {
@@ -112,7 +106,7 @@ describe("Maternaly service media", () => {
   it.each([
     "¿Qué servicios online tenéis?",
     "Además del BLW, ¿qué opciones online tenéis?",
-  ])("filters catalog media by modality for '%s'", (inboundText) => {
+  ])("does not attach media before a service is selected for '%s'", (inboundText) => {
     const media = resolveMaternalyServiceMedia({
       conversation: conversation(),
       inboundText,
@@ -120,8 +114,7 @@ describe("Maternaly service media", () => {
       appBaseUrl: "https://maternaly.example.test",
     });
 
-    expect(media.map((item) => item.serviceId)).toEqual(["charla_embarazo_1_20"]);
-    expect(media.map((item) => item.serviceId)).not.toContain("taller_blw");
+    expect(media).toEqual([]);
   });
 
   it("does not attach a stale service poster to a greeting", () => {
@@ -199,6 +192,31 @@ describe("Maternaly service media", () => {
       expect.objectContaining({
         serviceId: "taller_blw",
         triggerKind: "explicit_service",
+      }),
+    ]);
+  });
+
+  it("retries the BLW poster when an older catalog event falsely marked it as dispatched", () => {
+    const media = resolveMaternalyServiceMedia({
+      conversation: conversation([
+        {
+          id: "evt_media_old_catalog",
+          conversationId: "conversation_media",
+          eventType: "maternaly_service_media_dispatched",
+          payload: { serviceId: "taller_blw", triggerKind: "catalog" },
+          createdAt: "2026-07-16T10:00:00.000Z",
+        },
+      ]),
+      inboundText: "taller blw",
+      intent: intent("taller_blw"),
+      appBaseUrl: "https://maternaly.example.test",
+    });
+
+    expect(media).toEqual([
+      expect.objectContaining({
+        serviceId: "taller_blw",
+        triggerKind: "explicit_service",
+        url: "https://maternaly.example.test/maternaly/services/taller-blw.jpeg",
       }),
     ]);
   });

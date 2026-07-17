@@ -1,10 +1,14 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   ensureDistinctMaternalyReply,
   MaternalyCopyRenderer,
   type MaternalyCopyToolResult,
 } from "@/lib/maternaly/conversation/copy-renderer";
-import { getKnowledgeService } from "@/lib/maternaly/knowledge/catalog";
+import { MaternalyGroundedCopyGenerator } from "@/lib/maternaly/conversation/grounded-copy-generator";
+import {
+  getKnowledgeService,
+  MATERNALY_KNOWLEDGE_SERVICES,
+} from "@/lib/maternaly/knowledge/catalog";
 
 const emojiPattern = /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu;
 const clinicalClosing =
@@ -162,6 +166,171 @@ describe("MaternalyCopyRenderer availability guardrails", () => {
     expect(reply).toMatch(/taller online.*ninguno confirmado|opci[oó]n online/i);
     expect(reply).toMatch(/charla informativa gratuita/i);
     expect(reply).not.toMatch(/^El taller BLW|te cuento c[oó]mo es el BLW/i);
+  });
+
+  it("builds the general portfolio from every canonical service", () => {
+    const renderer = new MaternalyCopyRenderer();
+    const reply = renderer.render({
+      decision: { action: "catalog_info" },
+      message: "¿Qué servicios dais?",
+    }) ?? "";
+
+    for (const service of MATERNALY_KNOWLEDGE_SERVICES) {
+      expect(reply).toContain(service.name);
+    }
+    expect(reply).toContain("Taller BLW");
+  });
+
+  it("keeps the complete catalog deterministic even when adaptive copy is configured", async () => {
+    const fetchMock = vi.fn();
+    const renderer = new MaternalyCopyRenderer(
+      new MaternalyGroundedCopyGenerator({
+        fetchImpl: fetchMock as unknown as typeof fetch,
+      }),
+    );
+    const result = await renderer.renderGrounded(
+      {
+        decision: { action: "catalog_info" },
+        message: "¿Qué servicios dais?",
+        intent: {
+          intent: "service_discovery",
+          slots: {},
+          service_scope: "catalog",
+          service_question_focus: "general",
+          needs_availability_lookup: false,
+          confidence: 0.99,
+          missing_fields: [],
+          should_handoff: false,
+          safety_flags: [],
+        },
+      },
+      { OPENAI_API_KEY: "test-key" } as NodeJS.ProcessEnv,
+    );
+
+    for (const service of MATERNALY_KNOWLEDGE_SERVICES) {
+      expect(result?.text).toContain(service.name);
+    }
+    expect(result).toMatchObject({ mode: "skipped", attempted: false });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("uses grounded copy to acknowledge gestational context without opening BLW availability", async () => {
+    const contextualDraft =
+      "Gracias por contármelo; eso me ayuda a situar mejor la consulta. Durante el embarazo, el taller BLW puede servirte para preparar una etapa posterior: está pensado para cuando el bebé se acerque al inicio de la alimentación complementaria. Si te apetece, seguimos viendo BLW con calma para más adelante o te oriento ahora entre los servicios de embarazo de Maternaly. 💛";
+    const fetchMock = vi.fn(
+      async (...args: Parameters<typeof fetch>) => {
+        void args;
+        return new Response(
+          JSON.stringify({
+            output_text: JSON.stringify({
+              plans: [
+                { opening_id: "none", closing_id: "available" },
+                { opening_id: "none", closing_id: "unhurried" },
+              ],
+            }),
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      },
+    );
+    const renderer = new MaternalyCopyRenderer(
+      new MaternalyGroundedCopyGenerator({
+        fetchImpl: fetchMock as unknown as typeof fetch,
+      }),
+    );
+    const result = await renderer.renderGrounded(
+      {
+        decision: {
+          action: "service_info",
+          service: getKnowledgeService("taller_blw"),
+          serviceQuestionFocus: "general",
+        },
+        message: "estoy en el quinto mes, por cierto",
+        recentTurns: [
+          { role: "assistant", text: "Te he contado el Taller BLW." },
+          { role: "user", text: "Estoy en [etapa de embarazo compartida], por cierto." },
+        ],
+        intent: {
+          intent: "general_info",
+          slots: { pregnancy_month: 5 },
+          service_scope: "contextual",
+          service_candidate: "taller_blw",
+          service_question_focus: "general",
+          pregnancy_month: 5,
+          needs_availability_lookup: false,
+          confidence: 0.98,
+          missing_fields: [],
+          should_handoff: false,
+          safety_flags: [],
+        },
+      },
+      {
+        LLM_PROVIDER: "openai",
+        OPENAI_API_KEY: "test-key",
+        LLM_MODEL: "gpt-4.1-mini-test",
+      } as NodeJS.ProcessEnv,
+    );
+
+    expect(result).toMatchObject({
+      text: `${contextualDraft}\n\nEstoy aquí para seguir contigo.`,
+      mode: "generated",
+      source: "grounded_generator",
+      attempted: true,
+    });
+    expect(result?.text).toContain(contextualDraft);
+    expect(result?.text).not.toMatch(/plazas disponibles|2026-\d{2}-\d{2}|Opciones para/i);
+
+    const requestBody = JSON.parse(String(fetchMock.mock.calls[0][1]?.body)) as {
+      input: Array<{ role: string; content: string }>;
+    };
+    const requestInput = JSON.parse(requestBody.input[1].content) as {
+      action: string;
+      context_mode: string;
+      draft_shape: Record<string, unknown>;
+    };
+    expect(requestInput).toMatchObject({
+      action: "service_info",
+      context_mode: "shared_context",
+    });
+    expect(requestInput).not.toHaveProperty("authorized_facts");
+    expect(String(fetchMock.mock.calls[0][1]?.body)).not.toContain("Taller BLW");
+    expect(String(fetchMock.mock.calls[0][1]?.body)).not.toContain(contextualDraft);
+  });
+
+  it("keeps a contextual BLW answer when grounded generation is unavailable", async () => {
+    const renderer = new MaternalyCopyRenderer();
+    const result = await renderer.renderGrounded(
+      {
+        decision: { action: "general" },
+        state: {
+          serviceKey: "taller_blw",
+          stage: "collecting_service",
+          updatedAt: "2026-07-17T00:00:00.000Z",
+        },
+        message: "estoy en el quinto mes, por cierto",
+        intent: {
+          intent: "general_info",
+          slots: { pregnancy_month: 5 },
+          service_scope: "unknown",
+          service_question_focus: "unknown",
+          pregnancy_month: 5,
+          needs_availability_lookup: false,
+          confidence: 0.98,
+          missing_fields: [],
+          should_handoff: false,
+          safety_flags: [],
+        },
+      },
+      { LLM_PROVIDER: "openai", OPENAI_API_KEY: "" } as NodeJS.ProcessEnv,
+    );
+
+    expect(result).toMatchObject({
+      mode: "skipped",
+      reason: "missing_api_key",
+      attempted: false,
+    });
+    expect(result?.text).toMatch(/BLW.*preparar una etapa posterior/i);
+    expect(result?.text).not.toMatch(/plazas disponibles|2026-\d{2}-\d{2}|Opciones para/i);
   });
 
   it("answers a catalog-wide presencial question with confirmed presencial options", () => {

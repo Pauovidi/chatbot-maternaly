@@ -122,6 +122,8 @@ export interface MaternalyAuthorityTurnTrace {
     source: "MaternalyCopyRenderer";
     visibleReply: boolean;
     action: PolicyAction;
+    mode: "generated" | "fallback" | "skipped" | "none";
+    reason?: string;
   };
   outbox: {
     planned: boolean;
@@ -344,11 +346,123 @@ function isFutureDate(isoDate: string): boolean {
   return date.getTime() > today.getTime();
 }
 
-function extractContextualFullName(message: string): string | undefined {
-  const explicit = message.match(
-    /\b(?:(?:soy|me llamo|nombre(?:\s+y\s+apellidos)?[:\s]+)\s*)([A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+(?:\s+[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+){1,5})/i,
-  )?.[1];
-  const candidateSource = explicit ?? (() => {
+function extractPersonSegmentAfterPrefix(message: string, prefix: RegExp): string | undefined {
+  const prefixMatch = prefix.exec(message);
+  if (!prefixMatch || prefixMatch.index === undefined) {
+    return undefined;
+  }
+
+  const remainder = message.slice(prefixMatch.index + prefixMatch[0].length).trim();
+  const boundaryPatterns = [
+    /[,;.!?]/,
+    /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i,
+    /(?:\+?\d[\d\s().-]{6,}\d)/,
+    /\b\d{4}-\d{2}-\d{2}\b|\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b/,
+    /\s+(?:y\s+)?(?:mi\s+)?(?:email|correo|tel[eé]fono|telefono|fecha|fpp)\b/i,
+    /\s+y\s+(?:voy|vengo|vamos|somos|estoy|tengo|quiero|necesito|prefiero)\b/i,
+  ];
+  const boundaries = boundaryPatterns
+    .map((pattern) => remainder.search(pattern))
+    .filter((index) => index >= 0);
+  const end = boundaries.length > 0 ? Math.min(...boundaries) : remainder.length;
+  return remainder.slice(0, end).trim() || undefined;
+}
+
+function normalizeFullNameCandidate(
+  value: string | undefined,
+  options: { requireCapitalized?: boolean } = {},
+): string | undefined {
+  const candidate = value
+    ?.replace(/[.,;:!?]+$/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!candidate) {
+    return undefined;
+  }
+
+  const normalized = normalize(candidate);
+  const tokens = candidate.match(/[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+/g) ?? [];
+  const nonNameTokens = new Set([
+    "ahora",
+    "bien",
+    "buenas",
+    "buenos",
+    "claro",
+    "como",
+    "cuando",
+    "correo",
+    "dias",
+    "entiendo",
+    "email",
+    "estoy",
+    "gracias",
+    "hola",
+    "informacion",
+    "me",
+    "mi",
+    "necesito",
+    "no",
+    "perfecto",
+    "por",
+    "quiero",
+    "si",
+    "sola",
+    "solo",
+    "sobre",
+    "telefono",
+    "tengo",
+    "vale",
+    "vengo",
+    "voy",
+    "y",
+  ]);
+  const nameParticles = new Set(["de", "del", "la", "las", "los"]);
+  const normalizedTokens = tokens.map((token) => normalize(token));
+  const hasValidParticles = normalizedTokens.every(
+    (token, index) =>
+      !nameParticles.has(token) || (index > 0 && index < normalizedTokens.length - 1),
+  );
+  const hasStrongBareNameShape =
+    !options.requireCapitalized ||
+    (tokens.length <= 4 &&
+      tokens.every(
+        (token, index) =>
+          nameParticles.has(normalizedTokens[index]) ||
+          /^[A-ZÁÉÍÓÚÜÑ][A-Za-zÁÉÍÓÚÜÑáéíóúüñ]*$/.test(token),
+      ));
+  if (
+    tokens.length < 2 ||
+    tokens.length > 6 ||
+    normalizedTokens.some((token) => nonNameTokens.has(token)) ||
+    !hasValidParticles ||
+    !hasStrongBareNameShape ||
+    !/^[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+(?:[ '\-][A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+){1,5}$/.test(candidate) ||
+    /\b(?:embarazad[ao]|gestacion|semanas?|mes(?:es)?|por cierto)\b/.test(normalized)
+  ) {
+    return undefined;
+  }
+
+  return tokens.join(" ");
+}
+
+function extractContextualFullName(
+  message: string,
+  options: { allowBareName: boolean },
+): string | undefined {
+  const explicit = extractPersonSegmentAfterPrefix(
+    message,
+    /\b(?:soy|me\s+llamo|mi\s+nombre\s+es|nombre(?:\s+y\s+apellidos)?)\s*:?\s+/i,
+  );
+  const explicitCandidate = normalizeFullNameCandidate(explicit);
+  if (explicitCandidate) {
+    return explicitCandidate;
+  }
+
+  if (!options.allowBareName) {
+    return undefined;
+  }
+
+  const candidateSource = (() => {
     const emailIndex = message.search(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
     const phoneIndex = message.search(/(?:\+?\d[\d\s().-]{6,}\d)/);
     const dateIndex = message.search(/\b\d{4}-\d{2}-\d{2}\b|\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b/);
@@ -358,31 +472,18 @@ function extractContextualFullName(message: string): string | undefined {
     return message.slice(0, end);
   })();
   const candidate = candidateSource
-    .replace(/^\s*(?:soy|me llamo|nombre(?:\s+y\s+apellidos)?[:\s]+)\s*/i, "")
+    .replace(/^\s*(?:soy|me llamo|mi nombre es|nombre(?:\s+y\s+apellidos)?[:\s]+)\s*/i, "")
     .trim();
-  const normalized = normalize(candidate);
-  if (
-    !candidate ||
-    /^(?:voy|vamos|somos|fecha|fpp|email|correo|tel[eé]fono|telefono|opci[oó]n|persona|pareja|naci[oó]|beb[eé]|hola)\b/.test(normalized)
-  ) {
-    return undefined;
-  }
-
-  const tokens = candidate.match(/[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+/g) ?? [];
-  if (tokens.length < 2 || tokens.length > 6) {
-    return undefined;
-  }
-
-  return tokens.join(" ");
+  return normalizeFullNameCandidate(candidate, { requireCapitalized: true });
 }
 
 function inferContextualPeopleCount(message: string): number | undefined {
   const text = normalize(message);
-  if (/\b(?:voy|vamos)\s+en\s+pareja\b|\bsomos\s+dos\b|\b2\s*personas?\b|\bdos\s+personas?\b/.test(text)) {
+  if (/\b(?:voy|vengo|vamos)\s+en\s+pareja\b|\bsomos\s+dos\b|\b2\s*personas?\b|\bdos\s+personas?\b/.test(text)) {
     return 2;
   }
 
-  if (/\b(?:voy|yo)\s+sol[ao]\b|\b1\s*persona\b|\buna\s+persona\b/.test(text)) {
+  if (/\b(?:voy|vengo|yo)\s+sol[ao]\b|\b1\s*persona\b|\buna\s+persona\b/.test(text)) {
     return 1;
   }
 
@@ -418,7 +519,10 @@ function isSessionSelectionReply(message: string, previous?: MaternalyNormalized
     /^(?:la\s+)?(?:primera|segunda|tercera|cuarta|quinta|sexta|septima|octava|novena)$/.test(text);
 }
 
-function normalizePartnerNameCandidate(value: string | undefined): string | undefined {
+function normalizePartnerNameCandidate(
+  value: string | undefined,
+  options: { requireCapitalized?: boolean } = {},
+): string | undefined {
   const raw = value
     ?.replace(/[.,;:!?]+$/g, "")
     .replace(/\s+/g, " ")
@@ -428,11 +532,41 @@ function normalizePartnerNameCandidate(value: string | undefined): string | unde
   }
 
   const tokens = raw.match(/[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+/g) ?? [];
-  const normalized = normalize(tokens.join(" "));
+  const normalizedTokens = tokens.map((token) => normalize(token));
+  const nameParticles = new Set(["de", "del", "la", "las", "los"]);
+  const forbiddenTokens = new Set([
+    "acompanante",
+    "algo",
+    "cuentame",
+    "en",
+    "estoy",
+    "gracias",
+    "mi",
+    "no",
+    "pareja",
+    "sabe",
+    "se",
+    "si",
+    "somos",
+    "todavia",
+    "vengo",
+    "viene",
+    "voy",
+    "y",
+  ]);
+  const hasStrongBareNameShape =
+    !options.requireCapitalized ||
+    tokens.every(
+      (token, index) =>
+        nameParticles.has(normalizedTokens[index]) ||
+        /^[A-ZÁÉÍÓÚÜÑ][A-Za-zÁÉÍÓÚÜÑáéíóúüñ]*$/.test(token),
+    );
   if (
     tokens.length < 1 ||
     tokens.length > 4 ||
-    /^(?:hola|buenas|ok|vale|si|sí|no|gracias|perfecto|correcto|confirmo|pareja|acompanante|acompañante)$/i.test(normalized)
+    normalizedTokens.some((token) => forbiddenTokens.has(token)) ||
+    !hasStrongBareNameShape ||
+    !/^[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+(?:[ '\-][A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+){0,3}$/.test(raw)
   ) {
     return undefined;
   }
@@ -441,11 +575,10 @@ function normalizePartnerNameCandidate(value: string | undefined): string | unde
 }
 
 function extractContextualPartnerName(message: string): string | undefined {
-  const explicit =
-    message.match(
-      /\b(?:mi\s+)?(?:pareja|acompa[nñ]ante)\s+(?:se\s+llama|es)\s+([A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+(?:\s+[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+){0,3})/i,
-    )?.[1] ??
-    message.match(/\bse\s+llama\s+([A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+(?:\s+[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+){0,3})/i)?.[1];
+  const explicit = extractPersonSegmentAfterPrefix(
+    message,
+    /\b(?:(?:mi\s+)?(?:pareja|acompa[nñ]ante)\s+(?:se\s+llama|es)|se\s+llama)\s+/i,
+  );
   const explicitCandidate = normalizePartnerNameCandidate(explicit);
   if (explicitCandidate) {
     return explicitCandidate;
@@ -455,7 +588,7 @@ function extractContextualPartnerName(message: string): string | undefined {
     return undefined;
   }
 
-  return normalizePartnerNameCandidate(message);
+  return normalizePartnerNameCandidate(message, { requireCapitalized: true });
 }
 
 function mergeObservations(...values: Array<string | undefined>): string | undefined {
@@ -472,15 +605,22 @@ function extractContextualRegistrationSlots(input: {
   slots: MaternalyNluSlots;
   serviceKey?: MaternalyNormalizedServiceKey;
   inboundFrom?: string;
+  allowRegistrationData: boolean;
 }): {
   slots: Partial<MaternalyNormalizedFlowState>;
   diagnostics: ContextualRegistrationDiagnostics;
 } {
-  const inboundPhone = normalizeInboundWhatsappPhone(input.inboundFrom);
-  const messagePhone = extractMessagePhone(input.message);
-  const email = input.slots.email ?? extractMessageEmail(input.message);
-  const peopleCount = input.slots.people_count ?? inferContextualPeopleCount(input.message);
-  const collectPartnerName = shouldCollectOptionalPartnerName({
+  const inboundPhone = input.allowRegistrationData
+    ? normalizeInboundWhatsappPhone(input.inboundFrom)
+    : undefined;
+  const messagePhone = input.allowRegistrationData ? extractMessagePhone(input.message) : undefined;
+  const email = input.allowRegistrationData
+    ? input.slots.email ?? extractMessageEmail(input.message)
+    : undefined;
+  const peopleCount = input.allowRegistrationData
+    ? input.slots.people_count ?? inferContextualPeopleCount(input.message)
+    : undefined;
+  const collectPartnerName = input.allowRegistrationData && shouldCollectOptionalPartnerName({
     previous: input.previous,
     slots: input.slots,
     serviceKey: input.serviceKey,
@@ -488,9 +628,19 @@ function extractContextualRegistrationSlots(input: {
   });
   const partnerNameSkipped = collectPartnerName && isPendingPartnerNameReply(input.message);
   const partnerName = collectPartnerName && !partnerNameSkipped ? extractContextualPartnerName(input.message) : undefined;
-  const collectingContact = input.previous?.stage === "collecting_contact";
-  const hasContactSignal = collectingContact || Boolean(email || messagePhone || peopleCount || input.message.includes(","));
-  const fullName = input.slots.full_name ?? (hasContactSignal ? extractContextualFullName(input.message) : undefined);
+  const collectingContact = input.allowRegistrationData && input.previous?.stage === "collecting_contact";
+  const expectsBareFullName = Boolean(
+    collectingContact &&
+      !input.previous?.fullName &&
+      (input.previous?.pendingFields?.includes("fullName") ?? true),
+  );
+  const contextualFullName = input.allowRegistrationData
+    ? extractContextualFullName(input.message, { allowBareName: expectsBareFullName })
+    : undefined;
+  const hasContactSignal =
+    input.allowRegistrationData &&
+    Boolean(email || messagePhone || peopleCount || contextualFullName);
+  const fullName = hasContactSignal ? contextualFullName : undefined;
   const contextualDate = extractDateFromMessage(input.message);
   const syntheticContext = hasSyntheticMarker(
     [input.message, input.previous?.fullName, input.previous?.email, input.previous?.observations]
@@ -502,7 +652,7 @@ function extractContextualRegistrationSlots(input: {
   const phoneDiscrepancy =
     Boolean(inboundPhone && messagePhone && inboundPhone !== messagePhone);
 
-  if (fullName && !input.previous?.fullName && !input.slots.full_name) {
+  if (fullName && !input.previous?.fullName) {
     contextualSlots.fullName = fullName;
   }
 
@@ -644,6 +794,139 @@ function serviceKeyFromSlots(
   return slots.normalized_service_key ?? previous?.serviceKey;
 }
 
+const REGISTRATION_REQUEST_INTENTS = new Set<StructuredIntent["intent"]>([
+  "availability_request",
+  "registration_start",
+  "registration_slot_selected",
+  "registration_confirm",
+]);
+
+function isRegistrationRequestTurn(intent: StructuredIntent): boolean {
+  return intent.needs_availability_lookup || REGISTRATION_REQUEST_INTENTS.has(intent.intent);
+}
+
+function isRegistrationDataStage(stage: MaternalyNormalizedFlowState["stage"]): boolean {
+  return stage === "collecting_contact" || stage === "write_planned";
+}
+
+function isActiveRegistrationStage(stage: MaternalyNormalizedFlowState["stage"]): boolean {
+  return (
+    stage === "choosing_session" ||
+    stage === "collecting_contact" ||
+    stage === "write_planned" ||
+    stage === "blocked"
+  );
+}
+
+function shouldReplaceServiceFlow(
+  previous: MaternalyNormalizedFlowState | undefined,
+  intent: StructuredIntent,
+): boolean {
+  if (
+    !previous?.serviceKey ||
+    intent.service_scope !== "explicit"
+  ) {
+    return false;
+  }
+
+  const explicitService = getKnowledgeService(
+    intent.service_candidate ?? intent.slots.service_id ?? intent.slots.normalized_service_key,
+  );
+  const previousService = getKnowledgeServiceByNormalizedKey(previous.serviceKey);
+  const changesService = Boolean(explicitService && explicitService.id !== previousService?.id);
+  return changesService && (
+    isRegistrationRequestTurn(intent) || !isActiveRegistrationStage(previous.stage)
+  );
+}
+
+function stateBaseAfterServiceSwitch(
+  previous: MaternalyNormalizedFlowState | undefined,
+  intent: StructuredIntent,
+): MaternalyNormalizedFlowState | undefined {
+  if (!shouldReplaceServiceFlow(previous, intent)) {
+    return previous;
+  }
+
+  if (!previous || !isRegistrationRequestTurn(intent)) {
+    return undefined;
+  }
+
+  // Starting a transaction for a different service keeps reusable contact
+  // data, but discards the old service's session, group, clinical/service
+  // fields, observations, pending fields and idempotency context.
+  return {
+    fullName: previous.fullName,
+    phone: previous.phone,
+    email: previous.email,
+    peopleCount: previous.peopleCount,
+    updatedAt: nowIso(),
+  };
+}
+
+function registrationSlotsForTurn(
+  intent: StructuredIntent,
+  previous?: MaternalyNormalizedFlowState,
+): MaternalyNluSlots {
+  const slots = intent.slots;
+  const serviceKey = slots.normalized_service_key ?? previous?.serviceKey;
+  const acceptsRegistrationData =
+    isRegistrationRequestTurn(intent) || isRegistrationDataStage(previous?.stage);
+
+  if (!acceptsRegistrationData) {
+    return {
+      service_id: slots.service_id,
+      service_name: slots.service_name,
+      normalized_service_key: slots.normalized_service_key,
+      location: slots.location,
+      modality: slots.modality,
+      preferred_date: slots.preferred_date,
+      preferred_time: slots.preferred_time,
+    };
+  }
+
+  return {
+    ...slots,
+    pregnancy_week: serviceKey === "charla_embarazo_1_20" ? slots.pregnancy_week : undefined,
+    fpp_or_due_date: serviceKey === "charla_embarazo_1_20" ? slots.fpp_or_due_date : undefined,
+    baby_birth_date: serviceKey === "taller_blw" ? slots.baby_birth_date : undefined,
+  };
+}
+
+function registrationFieldChanged(
+  before: MaternalyNormalizedFlowState,
+  after: MaternalyConversationState,
+  field: keyof MaternalyNormalizedFlowState,
+): boolean {
+  return JSON.stringify(before[field]) !== JSON.stringify(after[field]);
+}
+
+function hasRelevantRegistrationDataChange(
+  before: MaternalyNormalizedFlowState | undefined,
+  after: MaternalyConversationState,
+): boolean {
+  if (!before || !isRegistrationDataStage(before.stage)) {
+    return false;
+  }
+
+  const commonFields: Array<keyof MaternalyNormalizedFlowState> = [
+    "fullName",
+    "phone",
+    "email",
+    "peopleCount",
+    "observations",
+  ];
+  const serviceFields: Array<keyof MaternalyNormalizedFlowState> =
+    before.serviceKey === "charla_embarazo_1_20"
+      ? ["partnerName", "pregnancyWeek", "fppOrDueDate"]
+      : before.serviceKey === "taller_blw"
+        ? ["babyBirthDate"]
+        : [];
+
+  return [...commonFields, ...serviceFields].some((field) =>
+    registrationFieldChanged(before, after, field),
+  );
+}
+
 function hasRegistrationDataSlots(slots: MaternalyNluSlots): boolean {
   return Boolean(
     slots.full_name ||
@@ -668,11 +951,20 @@ function serviceFromDecision(decision: PolicyDecision, state?: MaternalyNormaliz
 }
 
 function serviceFromConversationContext(conversation: ConversationRecord): KnowledgeService | null {
-  return (
-    getKnowledgeServiceByNormalizedKey(conversation.maternalyNormalizedFlow?.serviceKey) ??
-    findKnowledgeService(conversation.serviceDetected ?? "") ??
-    null
+  const normalizedFlowService = getKnowledgeServiceByNormalizedKey(
+    conversation.maternalyNormalizedFlow?.serviceKey,
   );
+  const detectedTopic = findKnowledgeService(conversation.serviceDetected ?? "");
+
+  // A collecting_service state is itself the current informational topic
+  // (including a catalog result). During an active registration, however, a
+  // newer detected service can be an intentional informational detour while
+  // the transactional state remains safely parked in the background.
+  if (conversation.maternalyNormalizedFlow?.stage === "collecting_service") {
+    return normalizedFlowService ?? detectedTopic ?? null;
+  }
+
+  return detectedTopic ?? normalizedFlowService ?? null;
 }
 
 function redactConversationContextText(value: string): string {
@@ -680,6 +972,44 @@ function redactConversationContextText(value: string): string {
     .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, "[email]")
     .replace(/(?:\+?\d[\d\s().-]{6,}\d)/g, "[telefono]")
     .slice(0, 500);
+}
+
+function redactGroundedCopyContextText(value: string): string {
+  const text = normalize(value);
+
+  // The stylistic OpenAI call never receives free-form conversation text. It
+  // only receives this small allow-list of semantic categories; the NLU and
+  // deterministic policy have already resolved the actual meaning upstream.
+  if (/\b(?:hola|buenos dias|buenas tardes|buenas noches)\b/.test(text)) {
+    return "[saludo]";
+  }
+  if (/\b(?:gracias|muchas gracias|perfecto|vale)\b/.test(text)) {
+    return "[agradecimiento o asentimiento]";
+  }
+  if (/\b(?:reservar|apuntar|inscribir|plaza|disponibilidad|fecha|horario)\b/.test(text)) {
+    return "[consulta transaccional]";
+  }
+  if (/\b(?:diabetes|dolor|sintoma|diagnostico|gestacional|medicacion|tratamiento|urgencias?)\b/.test(text)) {
+    return "[contexto clinico omitido]";
+  }
+  if (/\b(?:embarazo|embarazada|gestacion|semanas?|mes(?:es)?)\b/.test(text)) {
+    return "[contexto de etapa vital compartido]";
+  }
+  if (/\b(?:precio|cuanto|contenido|taller|servicio|online|presencial)\b/.test(text)) {
+    return "[consulta informativa]";
+  }
+
+  return "[turno conversacional omitido por privacidad]";
+}
+
+function buildGroundedCopyTurns(conversation: ConversationRecord) {
+  return messagesAfterLatestReset(conversation)
+    .filter((message) => message.senderType !== "system" && message.body.trim())
+    .slice(-6)
+    .map((message) => ({
+      role: message.senderType === "user" ? ("user" as const) : ("assistant" as const),
+      text: redactGroundedCopyContextText(message.body),
+    }));
 }
 
 function buildInterpretationContext(
@@ -720,7 +1050,10 @@ function isContextualServiceFollowUp(message: string): boolean {
     /^(?:si|vale|ok|perfecto|genial|bien)?[,\s]*(?:cuentame|dime|explicame)(?:\s+mas)?[.!?]*$/.test(
       normalized,
     ) ||
-    /\b(?:precio|precios|tarifa|tarifas|que vale|cuanto sale|coste|horarios?|dias|cuando es|proxima|proximo|cuanto dura|duracion|cuantas horas|que incluye|que se ve|de que va|contenidos?|temas?|para quien|es para mi|puedo ir|requisitos?|beneficios?|donde|sede|bilbao|erandio|online)\b/.test(
+    /\b(?:precio|precios|tarifa|tarifas|que vale|cuanto sale|coste|horarios?|fechas?|plazas?|disponibilidad|dias|cuando es|proxima|proximo|cuanto dura|duracion|cuantas horas|que incluye|que se ve|de que va|contenidos?|temas?|para quien|es para mi|puedo ir|requisitos?|beneficios?|donde|sede|bilbao|erandio|online)\b/.test(
+      normalized,
+    ) ||
+    /\b(?:reservar|apuntar(?:me)?|inscribir(?:me)?|quiero ir|quiero asistir|me interesa reservar|guardame (?:una )?plaza)\b/.test(
       normalized,
     )
   );
@@ -730,17 +1063,28 @@ function shouldUsePreviousServiceForContextualQuestion(
   intent: StructuredIntent,
   message: string,
 ): boolean {
-  return Boolean(
-    intent.intent !== "service_discovery" &&
-      intent.service_scope !== "catalog" &&
-    !intent.service_candidate &&
-      !intent.slots.service_id &&
-      !intent.slots.normalized_service_key &&
-      !intent.needs_availability_lookup &&
-      !hasRegistrationDataSlots(intent.slots) &&
-      ["general_info", "service_question"].includes(intent.intent) &&
-      (intent.service_question_focus !== "unknown" || isContextualServiceFollowUp(message)),
-  );
+  if (
+    intent.intent === "service_discovery" ||
+    intent.service_scope === "catalog" ||
+    intent.service_candidate ||
+    intent.slots.service_id ||
+    intent.slots.normalized_service_key
+  ) {
+    return false;
+  }
+
+  const contextualQuestion =
+    !intent.needs_availability_lookup &&
+    !hasRegistrationDataSlots(intent.slots) &&
+    ["general_info", "service_question"].includes(intent.intent) &&
+    (intent.service_question_focus !== "unknown" ||
+      Boolean(intent.slots.pregnancy_month || intent.slots.pregnancy_week) ||
+      isContextualServiceFollowUp(message));
+  const contextualTransaction =
+    ["availability_request", "registration_start"].includes(intent.intent) &&
+    isContextualServiceFollowUp(message);
+
+  return contextualQuestion || contextualTransaction;
 }
 
 function enrichIntentWithConversationServiceContext(
@@ -889,22 +1233,30 @@ export class MaternalyStateReducer {
     message: string;
     inbound?: MaternalyNormalizedInbound;
   }): { state: MaternalyConversationState; diagnostics: ContextualRegistrationDiagnostics } {
-    const previous = input.conversation.maternalyNormalizedFlow;
-    const slots = input.intent.slots;
+    const persistedPrevious = input.conversation.maternalyNormalizedFlow;
+    const previous = stateBaseAfterServiceSwitch(persistedPrevious, input.intent);
+    const applicableRegistrationSlots = registrationSlotsForTurn(input.intent, previous);
     const registrationSlots = isSessionSelectionReply(input.message, previous)
-      ? { ...slots, people_count: undefined }
-      : slots;
-    const serviceKey = serviceKeyFromSlots(slots, previous);
+      ? { ...applicableRegistrationSlots, people_count: undefined }
+      : { ...applicableRegistrationSlots };
+    // Names are accepted only when the current text itself contains a valid
+    // explicit name, or a valid bare name while that exact field is pending.
+    // Never persist a free-form NLU guess independently of the source text.
+    registrationSlots.full_name = undefined;
+    registrationSlots.partner_name = undefined;
+    const serviceKey = serviceKeyFromSlots(registrationSlots, previous);
     const contextual = extractContextualRegistrationSlots({
       message: input.message,
       previous,
       slots: registrationSlots,
       serviceKey,
       inboundFrom: input.inbound?.from,
+      allowRegistrationData:
+        isRegistrationRequestTurn(input.intent) || isRegistrationDataStage(previous?.stage),
     });
     const observations = mergeObservations(
       previous?.observations,
-      slots.observations,
+      registrationSlots.observations,
       contextual.slots.observations,
     );
 
@@ -1001,15 +1353,8 @@ export class MaternalyConversationPolicy {
 
     const service = getKnowledgeService(intent.service_candidate);
     const continuesRegistration =
-      intent.needs_availability_lookup ||
-      hasRegistrationDataSlots(intent.slots) ||
-      [
-        "availability_request",
-        "registration_start",
-        "registration_slot_selected",
-        "registration_data_provided",
-        "registration_confirm",
-      ].includes(intent.intent);
+      isRegistrationRequestTurn(intent) ||
+      hasRelevantRegistrationDataChange(conversation.maternalyNormalizedFlow, state);
     const isInformationalServiceQuestion =
       ["general_info", "service_question"].includes(intent.intent) &&
       intent.service_question_focus !== "booking";
@@ -1029,10 +1374,7 @@ export class MaternalyConversationPolicy {
       };
     }
 
-    if (
-      state.serviceKey &&
-      (state.stage !== "collecting_service" || continuesRegistration)
-    ) {
+    if (state.serviceKey && continuesRegistration) {
       return {
         action: "normalized_registration",
         serviceKey: state.serviceKey,
@@ -1040,11 +1382,22 @@ export class MaternalyConversationPolicy {
       };
     }
 
-    if (service?.normalizedServiceKey) {
+    if (service?.normalizedServiceKey && continuesRegistration) {
       return {
         action: "normalized_registration",
         serviceKey: service.normalizedServiceKey,
         service,
+      };
+    }
+
+    if (service?.normalizedServiceKey) {
+      return {
+        action: "service_info",
+        service,
+        reason: "topic_without_transaction",
+        serviceQuestionFocus: intent.service_question_focus,
+        locationPreference: intent.location_preference,
+        modalityPreference: intent.slots.modality,
       };
     }
 
@@ -1255,6 +1608,7 @@ export class MaternalyCoreAdapter {
       input.conversation,
       input.inbound.text,
     );
+    const replacesServiceFlow = shouldReplaceServiceFlow(stateBefore, intent);
     const nluTotalMs = elapsedSince(nluStartedAt);
     const reducerStartedAt = Date.now();
     const reduced = this.reducer.reduceWithDiagnostics({
@@ -1289,6 +1643,7 @@ export class MaternalyCoreAdapter {
             modality: intent.slots.modality,
             people_count: intent.slots.people_count,
             pregnancy_week: intent.slots.pregnancy_week,
+            pregnancy_month: intent.slots.pregnancy_month,
           }),
           shouldHandoff: intent.should_handoff,
           safetyFlags: intent.safety_flags,
@@ -1343,8 +1698,10 @@ export class MaternalyCoreAdapter {
                 ? "handoff"
                 : decision.action === "normalized_registration" && state.serviceKey
                   ? "choosing_session"
+                  : decision.action === "service_info" && (!stateBefore?.stage || replacesServiceFlow)
+                    ? "collecting_service"
                   : state.stage,
-            pendingFields: [],
+            pendingFields: state.pendingFields ?? [],
             updatedAt: nowIso(),
           };
 
@@ -1458,12 +1815,21 @@ export class MaternalyCoreAdapter {
     }
 
     const rendererStartedAt = Date.now();
-    const baseReply = this.renderer.render({
+    const renderInput = {
       decision,
       state: nextState,
       toolResult,
       message: input.inbound.text,
-    });
+    };
+    const groundedRender = await this.renderer.renderGrounded(
+      {
+        ...renderInput,
+        intent,
+        recentTurns: buildGroundedCopyTurns(input.conversation),
+      },
+      input.env ?? process.env,
+    );
+    const baseReply = groundedRender?.text;
     const distinctReply = baseReply
       ? ensureDistinctMaternalyReply({
           reply: baseReply,
@@ -1472,15 +1838,26 @@ export class MaternalyCoreAdapter {
             .slice(-20)
             .map((message) => message.body),
           action: decision.action,
-          preferredAlternatives: this.renderer.renderAlternatives({
-            decision,
-            state: nextState,
-            toolResult,
-            message: input.inbound.text,
-          }),
+          preferredAlternatives: this.renderer.renderAlternatives(renderInput),
         })
       : undefined;
     const reply = distinctReply?.reply;
+    if (groundedRender) {
+      events.push({
+        eventType: "maternaly_grounded_copy_completed",
+        payload: {
+          action: decision.action,
+          mode: groundedRender.mode,
+          reason: groundedRender.reason,
+          attempted: groundedRender.attempted,
+          latencyMs: groundedRender.latencyMs,
+          acceptedCandidate: groundedRender.candidateAudits.find((audit) => audit.accepted)?.index,
+          rejectedCandidateReasons: groundedRender.candidateAudits
+            .filter((audit) => !audit.accepted)
+            .flatMap((audit) => audit.reasons),
+        },
+      });
+    }
     if (distinctReply?.changed) {
       events.push({
         eventType: "maternaly_copy_repetition_avoided",
@@ -1564,9 +1941,9 @@ export class MaternalyCoreAdapter {
       outboxMs: 0,
       persistenceMs: 0,
       eventLogMs: 0,
-      openaiCalls: openaiCallExpected ? 1 : 0,
-      usedDeterministicFastPath: !openaiCallExpected,
-      usedFallback: false,
+      openaiCalls: (openaiCallExpected ? 1 : 0) + (groundedRender?.attempted ? 1 : 0),
+      usedDeterministicFastPath: !openaiCallExpected && !groundedRender?.attempted,
+      usedFallback: groundedRender?.mode === "fallback",
     };
     const authorityTrace: MaternalyAuthorityTurnTrace = {
       turnId,
@@ -1613,6 +1990,8 @@ export class MaternalyCoreAdapter {
         source: "MaternalyCopyRenderer",
         visibleReply: Boolean(renderedMessage),
         action: decision.action,
+        mode: groundedRender?.mode ?? "none",
+        reason: groundedRender?.reason,
       },
       outbox: {
         planned: Boolean(renderedMessage),

@@ -98,6 +98,39 @@ function getTwilioInboundChannel() {
   return mode === "real" ? "twilio" : "twilio_sandbox";
 }
 
+function normalizePublicHttpOrigin(value: string | undefined): string | undefined {
+  if (!value?.trim()) {
+    return undefined;
+  }
+
+  try {
+    const url = new URL(value.trim());
+    return url.protocol === "http:" || url.protocol === "https:" ? url.origin : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function getPublicAppBaseUrl(request: Request): string {
+  const configured = normalizePublicHttpOrigin(process.env.APP_BASE_URL);
+  if (configured) {
+    return configured;
+  }
+
+  const requestUrl = new URL(request.url);
+  const forwardedHost = request.headers.get("x-forwarded-host")?.split(",")[0]?.trim();
+  const forwardedProto = request.headers.get("x-forwarded-proto")?.split(",")[0]?.trim();
+  if (forwardedHost) {
+    const protocol = forwardedProto || requestUrl.protocol.replace(":", "");
+    const forwardedOrigin = normalizePublicHttpOrigin(`${protocol}://${forwardedHost}`);
+    if (forwardedOrigin) {
+      return forwardedOrigin;
+    }
+  }
+
+  return requestUrl.origin;
+}
+
 function redactPhone(value: string) {
   const normalized = value.replace(/[^\d+]/g, "");
   if (normalized.length <= 5) {
@@ -219,6 +252,11 @@ export async function POST(request: Request) {
       displayName: String(raw.ProfileName ?? raw.profileName ?? ""),
       channel,
       rawPayload: sanitizeTwilioPayload(raw),
+    }, undefined, {
+      normalizedEnv: {
+        ...process.env,
+        APP_BASE_URL: getPublicAppBaseUrl(request),
+      },
     });
 
     logTwilioWebhook({

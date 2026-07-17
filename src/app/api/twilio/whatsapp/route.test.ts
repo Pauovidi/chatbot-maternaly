@@ -3,6 +3,7 @@ import path from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetConversationStoreForTests } from "@/lib/hotel/conversations/file-store";
+import { MATERNALY_KNOWLEDGE_SERVICES } from "@/lib/maternaly/knowledge/catalog";
 import { POST } from "./route";
 
 const LEGACY_HOTEL_PATTERN = /\b(?:hotel|perros|canino|vacunas|comida|visitas|residencia|qu[eé]\s+traer|somos\s+perros)\b/i;
@@ -23,6 +24,8 @@ async function postTwilio(input: {
   body: string;
   sid: string;
   from?: string;
+  requestUrl?: string;
+  headers?: Record<string, string>;
 }) {
   const form = new URLSearchParams({
     From: input.from ?? "whatsapp:+34600000123",
@@ -32,9 +35,12 @@ async function postTwilio(input: {
     ProfileName: "Demo Maternaly",
   });
   const response = await POST(
-    new Request("https://example.test/api/twilio/whatsapp", {
+    new Request(input.requestUrl ?? "https://example.test/api/twilio/whatsapp", {
       method: "POST",
-      headers: { "content-type": "application/x-www-form-urlencoded" },
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        ...input.headers,
+      },
       body: form,
     }),
   );
@@ -164,9 +170,7 @@ describe("Maternaly Twilio WhatsApp route", () => {
     expect(online.message).toMatch(/opci[oó]n online.*charla informativa|charla informativa.*online/i);
     expect(online.message).not.toMatch(/^El taller BLW no tiene|te cuento c[oó]mo es el BLW/i);
     expect(online.message).not.toMatch(/me faltan|email|fecha de nacimiento del beb[eé]/i);
-    expect(extractMedia(online.text)).toEqual([
-      "https://maternaly.example.test/maternaly/services/charla-informativa-embarazo.jpeg",
-    ]);
+    expect(extractMedia(online.text)).toEqual([]);
 
     const thanks = await postTwilio({ body: "gracias", sid: "SM_REGRESSION_THANKS" });
     expect(thanks.message).not.toMatch(/Taller BLW|17:00|plazas disponibles/i);
@@ -182,17 +186,57 @@ describe("Maternaly Twilio WhatsApp route", () => {
     expect(extractMedia(second.text)).toEqual([]);
   });
 
-  it("lists the wider portfolio and attaches both reservable-service posters", async () => {
+  it("lists every service and sends the BLW poster after the user selects BLW", async () => {
     const result = await postTwilio({
       body: "¿Qué servicios ofrecéis ahora?",
       sid: "SM_MEDIA_SERVICES_1",
       from: "whatsapp:+34600000999",
     });
 
-    expect(result.message).toMatch(/charlas y talleres|Pilates|AIPAP|suelo p[eé]lvico/i);
-    expect(extractMedia(result.text)).toEqual([
-      "https://maternaly.example.test/maternaly/services/charla-informativa-embarazo.jpeg",
+    for (const service of MATERNALY_KNOWLEDGE_SERVICES) {
+      expect(result.message).toContain(service.name);
+    }
+    expect(extractMedia(result.text)).toEqual([]);
+
+    const blw = await postTwilio({
+      body: "¿No tenéis taller BLW?",
+      sid: "SM_MEDIA_SERVICES_BLW_2",
+      from: "whatsapp:+34600000999",
+    });
+    expect(extractMedia(blw.text)).toEqual([
       "https://maternaly.example.test/maternaly/services/taller-blw.jpeg",
+    ]);
+  });
+
+  it("builds the poster URL from the public webhook origin when APP_BASE_URL is absent", async () => {
+    vi.stubEnv("APP_BASE_URL", "");
+    const result = await postTwilio({
+      body: "Quiero información del taller BLW",
+      sid: "SM_MEDIA_ORIGIN_FALLBACK",
+      from: "whatsapp:+34600000888",
+      requestUrl: "https://maternaly-public.example.test/api/twilio/whatsapp",
+    });
+
+    expect(extractMedia(result.text)).toEqual([
+      "https://maternaly-public.example.test/maternaly/services/taller-blw.jpeg",
+    ]);
+  });
+
+  it("uses the forwarded public origin when the configured base URL is invalid", async () => {
+    vi.stubEnv("APP_BASE_URL", "internal-service-without-a-scheme");
+    const result = await postTwilio({
+      body: "Quiero información del taller BLW",
+      sid: "SM_MEDIA_FORWARDED_ORIGIN",
+      from: "whatsapp:+34600000889",
+      requestUrl: "http://maternaly-chatbot:3000/api/twilio/whatsapp",
+      headers: {
+        "x-forwarded-host": "maternaly-public.example.test",
+        "x-forwarded-proto": "https",
+      },
+    });
+
+    expect(extractMedia(result.text)).toEqual([
+      "https://maternaly-public.example.test/maternaly/services/taller-blw.jpeg",
     ]);
   });
 });

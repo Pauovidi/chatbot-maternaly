@@ -228,6 +228,7 @@ export async function handleInboundMaternalyWhatsApp(
     rendered,
     media,
   });
+  const dispatchedMedia = outboxResult.media;
   const botReply = await store.addMessage(
     createMessage(outboxResult.messageDraft),
   );
@@ -244,10 +245,10 @@ export async function handleInboundMaternalyWhatsApp(
       mode: outboxResult.mode,
       renderedSource: outboxResult.renderedSource,
       messageId: botReply.id,
-      mediaServiceIds: media.map((item) => item.serviceId),
+      mediaServiceIds: dispatchedMedia.map((item) => item.serviceId),
     }),
   );
-  for (const item of media) {
+  for (const item of dispatchedMedia) {
     await store.addEvent(
       createEvent(latest.id, "maternaly_service_media_dispatched", {
         serviceId: item.serviceId,
@@ -261,7 +262,7 @@ export async function handleInboundMaternalyWhatsApp(
     conversation: (await store.getById(latest.id)) ?? patched,
     inbound,
     botReply,
-    outboundMedia: media.map((item) => ({ ...item, type: "image" })),
+    outboundMedia: dispatchedMedia.map((item) => ({ ...item, type: "image" })),
     twiml: outboxResult.twiml,
   };
 }

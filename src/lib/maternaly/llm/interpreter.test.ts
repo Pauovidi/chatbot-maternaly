@@ -227,6 +227,48 @@ describe("Maternaly LLM interpreter", () => {
     });
   });
 
+  it.each([
+    ["estoy en el quinto mes, por cierto", { pregnancy_month: 5 }],
+    ["estoy de cinco meses", { pregnancy_month: 5 }],
+    ["estoy de 20 semanas", { pregnancy_week: 20 }],
+  ])("treats gestational context '%s' as information rather than a BLW transaction", async (
+    message,
+    expectedSlots,
+  ) => {
+    const result = await new LlmIntentClassifier().classify(message, {
+      active_service_id: "taller_blw",
+      active_stage: "collecting_service",
+    });
+
+    expect(result).toMatchObject({
+      intent: "general_info",
+      service_scope: "unknown",
+      slots: expect.objectContaining(expectedSlots),
+      needs_availability_lookup: false,
+    });
+    expect(result.service_candidate).toBeUndefined();
+  });
+
+  it.each([
+    ["¿qué fechas hay?", "registration_start"],
+    ["me quiero apuntar", "registration_start"],
+  ])("resolves the explicit transactional continuation '%s' against active BLW", async (
+    message,
+    expectedIntent,
+  ) => {
+    await expect(
+      new LlmIntentClassifier().classify(message, {
+        active_service_id: "taller_blw",
+        active_stage: "collecting_service",
+      }),
+    ).resolves.toMatchObject({
+      intent: expectedIntent,
+      service_scope: "contextual",
+      service_candidate: "taller_blw",
+      needs_availability_lookup: true,
+    });
+  });
+
   it("treats a bare service name as a request for information, not a booking", async () => {
     const classifier = new LlmIntentClassifier();
 
@@ -531,6 +573,47 @@ describe("Maternaly LLM interpreter", () => {
       intent: "greeting",
       service_scope: "unknown",
       service_candidate: undefined,
+      needs_availability_lookup: false,
+    });
+  });
+
+  it("stabilizes a gestational disclosure even if OpenAI turns it into BLW availability", async () => {
+    vi.stubEnv("LLM_PROVIDER", "openai");
+    process.env.OPENAI_API_KEY = "test-openai-key";
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          output_text: JSON.stringify({
+            intent: "registration_data_provided",
+            service_scope: "contextual",
+            service_candidate: "taller_blw",
+            slots: {
+              service_id: "taller_blw",
+              normalized_service_key: "taller_blw",
+              pregnancy_week: 20,
+            },
+            service_question_focus: "booking",
+            needs_availability_lookup: true,
+            confidence: 0.98,
+            missing_fields: [],
+            should_handoff: false,
+            safety_flags: [],
+          }),
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    await expect(
+      new LlmIntentClassifier().classify("estoy en el quinto mes, por cierto", {
+        active_service_id: "taller_blw",
+        active_stage: "collecting_service",
+      }),
+    ).resolves.toMatchObject({
+      intent: "general_info",
+      service_scope: "unknown",
+      service_candidate: undefined,
+      slots: expect.objectContaining({ pregnancy_month: 5 }),
       needs_availability_lookup: false,
     });
   });

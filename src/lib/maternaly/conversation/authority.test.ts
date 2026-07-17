@@ -4,9 +4,22 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ConversationRecord } from "@/lib/hotel/conversations/types";
 import { FileConversationStore } from "@/lib/hotel/conversations/file-store";
-import { MaternalyCoreAdapter } from "@/lib/maternaly/conversation/core";
+import {
+  MaternalyCoreAdapter,
+  MaternalyToolExecutor,
+} from "@/lib/maternaly/conversation/core";
+import { MaternalyCopyRenderer } from "@/lib/maternaly/conversation/copy-renderer";
+import { MaternalyGroundedCopyGenerator } from "@/lib/maternaly/conversation/grounded-copy-generator";
 import { handleInboundMaternalyWhatsApp } from "@/lib/maternaly/conversation/twilio-inbound";
-import { validateStructuredIntent } from "@/lib/maternaly/llm/interpreter";
+import {
+  MaternalyConversationInterpreter,
+  validateStructuredIntent,
+} from "@/lib/maternaly/llm/interpreter";
+import {
+  createRealTemplateWorkbook,
+  InMemoryNormalizedSheetsClient,
+  normalizedTestEnv,
+} from "@/lib/maternaly/sheets/normalized-test-utils";
 
 const emojiPattern = /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu;
 const clinicalClosing =
@@ -160,6 +173,501 @@ describe("Maternaly conversation authority", () => {
     expect(result.reply).not.toMatch(/Opciones para Taller BLW|plazas disponibles/i);
     expect(eventTypes(result)).not.toContain("maternaly_availability_checked");
   });
+
+  it("keeps gestational context and social replies outside a topical BLW registration flow", async () => {
+    const client = new InMemoryNormalizedSheetsClient(
+      createRealTemplateWorkbook({ multiSession: true, sessionCapacity: "14" }),
+    );
+    const adapter = new MaternalyCoreAdapter(
+      undefined,
+      undefined,
+      undefined,
+      new MaternalyToolExecutor(client),
+    );
+    const env = normalizedTestEnv();
+    const topic = await adapter.handle({
+      conversation: fakeConversation(),
+      inbound: {
+        provider: "twilio_sandbox",
+        from: "whatsapp:+34600111222",
+        text: "¿no tenéis taller BLW?",
+      },
+      env,
+    });
+
+    expect(topic.authorityTrace.policy.action).toBe("service_info");
+    expect(topic.state).toMatchObject({
+      serviceKey: "taller_blw",
+      stage: "collecting_service",
+    });
+    expect(topic.state?.phone).toBeUndefined();
+
+    for (const message of [
+      "estoy en el quinto mes, por cierto",
+      "estoy de cinco meses",
+      "estoy de 20 semanas",
+      "gracias",
+    ]) {
+      const result = await adapter.handle({
+        conversation: fakeConversation({ ...topic.conversationPatch }),
+        inbound: {
+          provider: "twilio_sandbox",
+          from: "whatsapp:+34600111222",
+          text: message,
+        },
+        env,
+      });
+
+      expect(result.authorityTrace.policy.action).not.toBe("normalized_registration");
+      expect(eventTypes(result)).not.toContain("maternaly_availability_checked");
+      expect(result.reply).not.toMatch(/Opciones para Taller BLW|plazas disponibles|2026-\d{2}-\d{2}/i);
+      expect(result.state).toMatchObject({
+        serviceKey: "taller_blw",
+        stage: "collecting_service",
+      });
+      expect(result.state?.fullName).toBeUndefined();
+      expect(result.state?.pregnancyWeek).toBeUndefined();
+    }
+  });
+
+  it.each(["¿qué fechas hay?", "me quiero apuntar"])(
+    "continues topical BLW only for the explicit transaction '%s'",
+    async (message) => {
+      const client = new InMemoryNormalizedSheetsClient(
+        createRealTemplateWorkbook({ multiSession: true, sessionCapacity: "14" }),
+      );
+      const adapter = new MaternalyCoreAdapter(
+        undefined,
+        undefined,
+        undefined,
+        new MaternalyToolExecutor(client),
+      );
+      const env = normalizedTestEnv();
+      const topic = await adapter.handle({
+        conversation: fakeConversation(),
+        inbound: {
+          provider: "twilio_sandbox",
+          from: "whatsapp:+34600111222",
+          text: "taller BLW",
+        },
+        env,
+      });
+      const result = await adapter.handle({
+        conversation: fakeConversation({ ...topic.conversationPatch }),
+        inbound: {
+          provider: "twilio_sandbox",
+          from: "whatsapp:+34600111222",
+          text: message,
+        },
+        env,
+      });
+
+      expect(result.authorityTrace.policy.action).toBe("normalized_registration");
+      expect(eventTypes(result)).toContain("maternaly_availability_checked");
+      expect(result.reply).toMatch(/Opciones para Taller BLW|plazas disponibles/i);
+    },
+  );
+
+  it("accepts relevant contact data while a BLW registration is collecting contact", async () => {
+    const client = new InMemoryNormalizedSheetsClient(
+      createRealTemplateWorkbook({ multiSession: true, sessionCapacity: "14" }),
+    );
+    const adapter = new MaternalyCoreAdapter(
+      undefined,
+      undefined,
+      undefined,
+      new MaternalyToolExecutor(client),
+    );
+    const env = normalizedTestEnv();
+    const contact = await adapter.handle({
+      conversation: fakeConversation({
+        serviceDetected: "Taller BLW",
+        maternalyNormalizedFlow: {
+          serviceKey: "taller_blw",
+          stage: "collecting_contact",
+          selectedSessionId: "sesion_blw_bilbao_20260925",
+          selectedGroupId: "grupo_blw_bilbao",
+          phone: "+34600111222",
+          pendingFields: ["fullName", "email", "peopleCount", "babyBirthDate"],
+          updatedAt: "2026-07-17T12:00:00.000Z",
+        },
+      }),
+      inbound: {
+        provider: "twilio_sandbox",
+        from: "whatsapp:+34600111222",
+        text: "Soy Ana García, ana@example.test, 1 persona, fecha nacimiento bebé 2025-01-15",
+      },
+      env,
+    });
+
+    expect(contact.authorityTrace.policy.action).toBe("normalized_registration");
+    expect(eventTypes(contact)).toContain("maternaly_availability_checked");
+    expect(contact.state).toMatchObject({
+      fullName: "Ana García",
+      email: "ana@example.test",
+      peopleCount: 1,
+      babyBirthDate: "2025-01-15",
+      stage: "write_planned",
+    });
+  });
+
+  it.each([
+    ["Soy Ana García y voy sola", 1, undefined],
+    ["Me llamo Ana García y vengo en pareja", 2, undefined],
+    ["Soy Ana García ana@example.test", undefined, "ana@example.test"],
+    ["Soy Ana García mi email es ana@example.test", undefined, "ana@example.test"],
+    ["Soy Ana García y mi email es ana@example.test", undefined, "ana@example.test"],
+  ])(
+    "segments full name from the other contact fields in '%s'",
+    async (message, expectedPeopleCount, expectedEmail) => {
+      const client = new InMemoryNormalizedSheetsClient(
+        createRealTemplateWorkbook({ multiSession: true, sessionCapacity: "14" }),
+      );
+      const result = await new MaternalyCoreAdapter(
+        undefined,
+        undefined,
+        undefined,
+        new MaternalyToolExecutor(client),
+      ).handle({
+        conversation: fakeConversation({
+          serviceDetected: "Taller BLW",
+          maternalyNormalizedFlow: {
+            serviceKey: "taller_blw",
+            stage: "collecting_contact",
+            selectedSessionId: "sesion_blw_bilbao_20260925",
+            selectedGroupId: "grupo_blw_bilbao",
+            phone: "+34600111222",
+            pendingFields: ["fullName", "email", "peopleCount", "babyBirthDate"],
+            updatedAt: "2026-07-17T12:00:00.000Z",
+          },
+        }),
+        inbound: {
+          provider: "twilio_sandbox",
+          from: "whatsapp:+34600111222",
+          text: message,
+        },
+        env: normalizedTestEnv(),
+      });
+
+      expect(result.state?.fullName).toBe("Ana García");
+      if (expectedPeopleCount) {
+        expect(result.state?.peopleCount).toBe(expectedPeopleCount);
+      }
+      if (expectedEmail) {
+        expect(result.state?.email).toBe(expectedEmail);
+      }
+      expect(result.authorityTrace.policy.action).toBe("normalized_registration");
+    },
+  );
+
+  it.each([
+    "gracias por la información",
+    "qué interesante todo",
+    "cuéntame algo más",
+  ])("does not treat the social reply '%s' as the pending full name", async (message) => {
+    const result = await new MaternalyCoreAdapter().handle({
+      conversation: fakeConversation({
+        serviceDetected: "Taller BLW",
+        maternalyNormalizedFlow: {
+          serviceKey: "taller_blw",
+          stage: "collecting_contact",
+          selectedSessionId: "sesion_blw_bilbao_20260925",
+          selectedGroupId: "grupo_blw_bilbao",
+          phone: "+34600111222",
+          pendingFields: ["fullName", "email", "peopleCount", "babyBirthDate"],
+          updatedAt: "2026-07-17T12:00:00.000Z",
+        },
+      }),
+      inbound: {
+        provider: "twilio_sandbox",
+        from: "whatsapp:+34600111222",
+        text: message,
+      },
+    });
+
+    expect(result.state?.fullName).toBeUndefined();
+    expect(result.state?.pendingFields).toEqual([
+      "fullName",
+      "email",
+      "peopleCount",
+      "babyBirthDate",
+    ]);
+    expect(result.authorityTrace.policy.action).not.toBe("normalized_registration");
+    expect(eventTypes(result)).not.toContain("maternaly_availability_checked");
+  });
+
+  it("accepts a strong bare full name when it is one of several pending fields", async () => {
+    const client = new InMemoryNormalizedSheetsClient(
+      createRealTemplateWorkbook({ multiSession: true, sessionCapacity: "14" }),
+    );
+    const result = await new MaternalyCoreAdapter(
+      undefined,
+      undefined,
+      undefined,
+      new MaternalyToolExecutor(client),
+    ).handle({
+      conversation: fakeConversation({
+        serviceDetected: "Taller BLW",
+        maternalyNormalizedFlow: {
+          serviceKey: "taller_blw",
+          stage: "collecting_contact",
+          selectedSessionId: "sesion_blw_bilbao_20260925",
+          selectedGroupId: "grupo_blw_bilbao",
+          phone: "+34600111222",
+          pendingFields: ["fullName", "email", "peopleCount", "babyBirthDate"],
+          updatedAt: "2026-07-17T12:00:00.000Z",
+        },
+      }),
+      inbound: {
+        provider: "twilio_sandbox",
+        from: "whatsapp:+34600111222",
+        text: "Ana García",
+      },
+      env: normalizedTestEnv(),
+    });
+
+    expect(result.state?.fullName).toBe("Ana García");
+    expect(result.state?.pendingFields).toEqual(["email", "peopleCount", "babyBirthDate"]);
+    expect(result.authorityTrace.policy.action).toBe("normalized_registration");
+    expect(eventTypes(result)).toContain("maternaly_availability_checked");
+  });
+
+  it("sends only abstract conversation categories to the grounded-copy request", async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          output_text: JSON.stringify({
+            plans: [
+              { opening_id: "none", closing_id: "none" },
+              { opening_id: "friendly", closing_id: "available" },
+            ],
+          }),
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    const interpreter = {
+      interpret: vi.fn(async () =>
+        validateStructuredIntent({
+          intent: "service_question",
+          service_scope: "explicit",
+          service_candidate: "taller_blw",
+          service_question_focus: "general",
+          needs_availability_lookup: false,
+          slots: {
+            service_id: "taller_blw",
+            normalized_service_key: "taller_blw",
+          },
+        }),
+      ),
+    } as unknown as MaternalyConversationInterpreter;
+    const renderer = new MaternalyCopyRenderer(
+      new MaternalyGroundedCopyGenerator({ fetchImpl: fetchMock as unknown as typeof fetch }),
+    );
+    const adapter = new MaternalyCoreAdapter(
+      interpreter,
+      undefined,
+      undefined,
+      undefined,
+      renderer,
+    );
+
+    await adapter.handle({
+      conversation: fakeConversation({
+        messages: [
+          {
+            id: "msg_sensitive_user",
+            conversationId: "conv_authority",
+            direction: "inbound",
+            senderType: "user",
+            transport: "whatsapp",
+            body: "Soy Ana García y tengo diabetes gestacional",
+            createdAt: "2026-07-17T12:00:00.000Z",
+          },
+          {
+            id: "msg_sensitive_echo",
+            conversationId: "conv_authority",
+            direction: "outbound",
+            senderType: "bot",
+            transport: "whatsapp",
+            body: "Gracias, Ana García; anoto que tienes diabetes gestacional.",
+            createdAt: "2026-07-17T12:01:00.000Z",
+          },
+        ],
+      }),
+      inbound: {
+        provider: "twilio_sandbox",
+        from: "whatsapp:+34600111222",
+        text: "¿Qué me puedes contar del taller BLW?",
+      },
+      env: {
+        NODE_ENV: "test",
+        LLM_PROVIDER: "openai",
+        OPENAI_API_KEY: "unit-test-key",
+      } as NodeJS.ProcessEnv,
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [, init] = fetchMock.mock.calls[0];
+    const requestBody = String(init?.body);
+    expect(requestBody).not.toContain("Ana García");
+    expect(requestBody).not.toContain("diabetes gestacional");
+    expect(requestBody).not.toContain("[contexto clinico omitido]");
+    expect(requestBody).not.toContain("alimentación complementaria");
+    const body = JSON.parse(requestBody) as {
+      input: Array<{ role: string; content: string }>;
+    };
+    expect(JSON.parse(body.input[1].content)).toEqual({
+      action: "service_info",
+      context_mode: "informational",
+      draft_shape: expect.any(Object),
+      has_recent_assistant_reply: true,
+    });
+  });
+
+  it("does not treat pregnancy context as a BLW contact field during an active registration", async () => {
+    const result = await new MaternalyCoreAdapter().handle({
+      conversation: fakeConversation({
+        serviceDetected: "Taller BLW",
+        maternalyNormalizedFlow: {
+          serviceKey: "taller_blw",
+          stage: "collecting_contact",
+          selectedSessionId: "sesion_blw_bilbao_20260925",
+          selectedGroupId: "grupo_blw_bilbao",
+          phone: "+34600111222",
+          pendingFields: ["fullName", "email", "peopleCount", "babyBirthDate"],
+          updatedAt: "2026-07-17T12:00:00.000Z",
+        },
+      }),
+      inbound: {
+        provider: "twilio_sandbox",
+        from: "whatsapp:+34600111222",
+        text: "estoy en el quinto mes, por cierto",
+      },
+    });
+
+    expect(result.authorityTrace.policy.action).not.toBe("normalized_registration");
+    expect(eventTypes(result)).not.toContain("maternaly_availability_checked");
+    expect(result.state?.fullName).toBeUndefined();
+    expect(result.state?.pregnancyWeek).toBeUndefined();
+  });
+
+  it("accepts pregnancy week when it is relevant to an active Charla registration", async () => {
+    const client = new InMemoryNormalizedSheetsClient(
+      createRealTemplateWorkbook({ serviceKey: "charla_embarazo_1_20" }),
+    );
+    const result = await new MaternalyCoreAdapter(
+      undefined,
+      undefined,
+      undefined,
+      new MaternalyToolExecutor(client),
+    ).handle({
+      conversation: fakeConversation({
+        serviceDetected: "Charla informativa gratuita semana 1 a 20 de embarazo",
+        maternalyNormalizedFlow: {
+          serviceKey: "charla_embarazo_1_20",
+          stage: "collecting_contact",
+          selectedSessionId: "sesion_charla_bilbao_20261006",
+          selectedGroupId: "grupo_charla_bilbao",
+          fullName: "Ana García",
+          phone: "+34600111222",
+          email: "ana@example.test",
+          peopleCount: 1,
+          pendingFields: ["fppOrDueDate"],
+          updatedAt: "2026-07-17T12:00:00.000Z",
+        },
+      }),
+      inbound: {
+        provider: "twilio_sandbox",
+        from: "whatsapp:+34600111222",
+        text: "estoy de 20 semanas",
+      },
+      env: normalizedTestEnv(),
+    });
+
+    expect(result.authorityTrace.policy.action).toBe("normalized_registration");
+    expect(eventTypes(result)).toContain("maternaly_availability_checked");
+    expect(result.state).toMatchObject({
+      serviceKey: "charla_embarazo_1_20",
+      pregnancyWeek: 20,
+      stage: "write_planned",
+    });
+  });
+
+  it.each([
+    ["Mi pareja se llama Pedro y estoy de 20 semanas", "Pedro"],
+    ["Mi pareja se llama Pedro García y mi FPP es 20/12/2026", "Pedro García"],
+    ["Pedro García", "Pedro García"],
+  ])("segments a valid partner name from '%s'", async (message, expectedPartnerName) => {
+    const client = new InMemoryNormalizedSheetsClient(
+      createRealTemplateWorkbook({ serviceKey: "charla_embarazo_1_20" }),
+    );
+    const result = await new MaternalyCoreAdapter(
+      undefined,
+      undefined,
+      undefined,
+      new MaternalyToolExecutor(client),
+    ).handle({
+      conversation: fakeConversation({
+        serviceDetected: "Charla informativa gratuita semana 1 a 20 de embarazo",
+        maternalyNormalizedFlow: {
+          serviceKey: "charla_embarazo_1_20",
+          stage: "collecting_contact",
+          selectedSessionId: "sesion_charla_bilbao_20261006",
+          selectedGroupId: "grupo_charla_bilbao",
+          fullName: "Ana García",
+          phone: "+34600111222",
+          email: "ana@example.test",
+          peopleCount: 2,
+          pendingFields: ["fppOrDueDate"],
+          updatedAt: "2026-07-17T12:00:00.000Z",
+        },
+      }),
+      inbound: {
+        provider: "twilio_sandbox",
+        from: "whatsapp:+34600111222",
+        text: message,
+      },
+      env: normalizedTestEnv(),
+    });
+
+    expect(result.state?.partnerName).toBe(expectedPartnerName);
+    expect(result.authorityTrace.policy.action).toBe("normalized_registration");
+    expect(eventTypes(result)).toContain("maternaly_availability_checked");
+  });
+
+  it.each(["vengo en pareja", "mi pareja todavía no sabe si viene"])(
+    "does not infer a partner name from '%s'",
+    async (message) => {
+      const result = await new MaternalyCoreAdapter().handle({
+        conversation: fakeConversation({
+          serviceDetected: "Charla informativa gratuita semana 1 a 20 de embarazo",
+          maternalyNormalizedFlow: {
+            serviceKey: "charla_embarazo_1_20",
+            stage: "collecting_contact",
+            selectedSessionId: "sesion_charla_bilbao_20261006",
+            selectedGroupId: "grupo_charla_bilbao",
+            fullName: "Ana García",
+            phone: "+34600111222",
+            email: "ana@example.test",
+            peopleCount: 2,
+            pendingFields: ["fppOrDueDate"],
+            updatedAt: "2026-07-17T12:00:00.000Z",
+          },
+        }),
+        inbound: {
+          provider: "twilio_sandbox",
+          from: "whatsapp:+34600111222",
+          text: message,
+        },
+      });
+
+      expect(result.state?.partnerName).toBeUndefined();
+      expect(result.state?.pendingFields).toEqual(["fppOrDueDate"]);
+      expect(result.authorityTrace.policy.action).not.toBe("normalized_registration");
+      expect(eventTypes(result)).not.toContain("maternaly_availability_checked");
+    },
+  );
 
   it("answers a global online search from the catalog without resuming or contaminating BLW", async () => {
     const result = await new MaternalyCoreAdapter().handle({
@@ -557,6 +1065,130 @@ describe("Maternaly conversation authority", () => {
       action: "service_info",
       reason: "faq_escape_hatch",
     });
+  });
+
+  it("replaces stale BLW topic context when the user switches to Pilates", async () => {
+    const adapter = new MaternalyCoreAdapter();
+    const blw = await adapter.handle({
+      conversation: fakeConversation(),
+      inbound: {
+        provider: "twilio_sandbox",
+        from: "whatsapp:+34600111222",
+        text: "taller BLW",
+      },
+    });
+    const pilates = await adapter.handle({
+      conversation: fakeConversation({ ...blw.conversationPatch }),
+      inbound: {
+        provider: "twilio_sandbox",
+        from: "whatsapp:+34600111222",
+        text: "pilates embarazo",
+      },
+    });
+    const lifeStage = await adapter.handle({
+      conversation: fakeConversation({ ...pilates.conversationPatch }),
+      inbound: {
+        provider: "twilio_sandbox",
+        from: "whatsapp:+34600111222",
+        text: "estoy en el quinto mes",
+      },
+    });
+
+    expect(blw.state).toMatchObject({
+      serviceKey: "taller_blw",
+      stage: "collecting_service",
+    });
+    expect(pilates.conversationPatch.serviceDetected).toBe("Pilates Embarazo");
+    expect(pilates.state?.serviceKey).toBeUndefined();
+    expect(lifeStage.intent.service_candidate).toBe("pilates");
+    expect(lifeStage.reply).toMatch(/Pilates Embarazo/i);
+    expect(lifeStage.reply).not.toMatch(/taller BLW|alimentaci[oó]n complementaria/i);
+    expect(lifeStage.authorityTrace.policy.action).toBe("service_info");
+  });
+
+  it("keeps an active BLW registration intact during an informational Pilates detour", async () => {
+    const result = await new MaternalyCoreAdapter().handle({
+      conversation: fakeConversation({
+        serviceDetected: "Taller BLW",
+        maternalyNormalizedFlow: {
+          serviceKey: "taller_blw",
+          stage: "collecting_contact",
+          selectedSessionId: "sesion_blw_bilbao_20260925",
+          selectedGroupId: "grupo_blw_bilbao",
+          phone: "+34600111222",
+          pendingFields: ["fullName", "email", "peopleCount", "babyBirthDate"],
+          updatedAt: "2026-07-17T12:00:00.000Z",
+        },
+      }),
+      inbound: {
+        provider: "twilio_sandbox",
+        from: "whatsapp:+34600111222",
+        text: "¿qué beneficios tiene pilates embarazo?",
+      },
+    });
+
+    expect(result.authorityTrace.policy.action).toBe("service_info");
+    expect(result.conversationPatch.serviceDetected).toBe("Pilates Embarazo");
+    expect(result.state).toMatchObject({
+      serviceKey: "taller_blw",
+      stage: "collecting_contact",
+      selectedSessionId: "sesion_blw_bilbao_20260925",
+      selectedGroupId: "grupo_blw_bilbao",
+      pendingFields: ["fullName", "email", "peopleCount", "babyBirthDate"],
+    });
+    expect(eventTypes(result)).not.toContain("maternaly_availability_checked");
+  });
+
+  it("replaces an active BLW transaction when registration starts for Charla", async () => {
+    const client = new InMemoryNormalizedSheetsClient(
+      createRealTemplateWorkbook({ serviceKey: "charla_embarazo_1_20" }),
+    );
+    const result = await new MaternalyCoreAdapter(
+      undefined,
+      undefined,
+      undefined,
+      new MaternalyToolExecutor(client),
+    ).handle({
+      conversation: fakeConversation({
+        serviceDetected: "Taller BLW",
+        maternalyNormalizedFlow: {
+          serviceKey: "taller_blw",
+          stage: "collecting_contact",
+          selectedSessionId: "sesion_blw_bilbao_20260925",
+          selectedGroupId: "grupo_blw_bilbao",
+          fullName: "Ana García",
+          phone: "+34600111222",
+          email: "ana@example.test",
+          peopleCount: 1,
+          babyBirthDate: "2025-01-15",
+          observations: "dato específico del BLW",
+          pendingFields: [],
+          idempotencyKey: "old-blw-idempotency-key",
+          updatedAt: "2026-07-17T12:00:00.000Z",
+        },
+      }),
+      inbound: {
+        provider: "twilio_sandbox",
+        from: "whatsapp:+34600111222",
+        text: "quiero apuntarme a la charla informativa de embarazo",
+      },
+      env: normalizedTestEnv(),
+    });
+
+    expect(result.authorityTrace.policy.action).toBe("normalized_registration");
+    expect(result.state).toMatchObject({
+      serviceKey: "charla_embarazo_1_20",
+      fullName: "Ana García",
+      phone: "+34600111222",
+      email: "ana@example.test",
+      peopleCount: 1,
+    });
+    expect(result.state?.selectedSessionId).not.toBe("sesion_blw_bilbao_20260925");
+    expect(result.state?.selectedGroupId).not.toBe("grupo_blw_bilbao");
+    expect(result.state?.babyBirthDate).toBeUndefined();
+    expect(result.state?.observations).toBeUndefined();
+    expect(result.state?.idempotencyKey).not.toBe("old-blw-idempotency-key");
+    expect(eventTypes(result)).toContain("maternaly_availability_checked");
   });
 
   it.each([

@@ -10,7 +10,15 @@ import {
   MATERNALY_NORMALIZED_SERVICES,
   type MaternalyNormalizedServiceKey,
 } from "@/lib/maternaly/sheets/normalized-template";
-import type { MaternalyServiceQuestionFocus } from "@/lib/maternaly/llm/interpreter";
+import type {
+  MaternalyServiceQuestionFocus,
+  StructuredIntent,
+} from "@/lib/maternaly/llm/interpreter";
+import {
+  MaternalyGroundedCopyGenerator,
+  type MaternalyGroundedCopyResult,
+  type MaternalyGroundedCopyTurn,
+} from "@/lib/maternaly/conversation/grounded-copy-generator";
 
 export type MaternalyCopyAction =
   | "silent_human"
@@ -57,11 +65,16 @@ export interface MaternalyCopyToolResult {
   };
 }
 
-interface MaternalyCopyRenderInput {
+export interface MaternalyCopyRenderInput {
   decision: MaternalyCopyDecision;
   state?: MaternalyNormalizedFlowState;
   toolResult?: MaternalyCopyToolResult;
   message?: string;
+}
+
+export interface MaternalyGroundedCopyRenderInput extends MaternalyCopyRenderInput {
+  intent: StructuredIntent;
+  recentTurns?: MaternalyGroundedCopyTurn[];
 }
 
 function serviceFromDecision(
@@ -258,6 +271,48 @@ export function ensureDistinctMaternalyReply(input: {
 }
 
 export class MaternalyCopyRenderer {
+  constructor(
+    private readonly groundedCopyGenerator = new MaternalyGroundedCopyGenerator(),
+  ) {}
+
+  async renderGrounded(
+    input: MaternalyGroundedCopyRenderInput,
+    env: NodeJS.ProcessEnv = process.env,
+  ): Promise<MaternalyGroundedCopyResult | undefined> {
+    const service = serviceFromDecision(input.decision, input.state);
+    const sharesPregnancyContext =
+      (input.decision.action === "general" || input.decision.action === "service_info") &&
+      Boolean(input.intent.slots.pregnancy_month || input.intent.slots.pregnancy_week) &&
+      !input.intent.needs_availability_lookup;
+    const safeDraft = sharesPregnancyContext
+      ? this.renderPregnancyContext(service)
+      : this.render(input);
+    if (!safeDraft) {
+      return undefined;
+    }
+
+    const mustStayDeterministic =
+      input.decision.action === "catalog_info" ||
+      service?.category === "sensitive" ||
+      input.decision.serviceQuestionFocus === "clinical_risk";
+
+    return this.groundedCopyGenerator.generate(
+      {
+        // The complete catalog stays deterministic so no canonical service can
+        // disappear during a stylistic rewrite. Sensitive services stay on the
+        // reviewed renderer copy as well.
+        action: mustStayDeterministic
+          ? `deterministic_${input.decision.action}`
+          : input.decision.action,
+        safeDraft,
+        authorizedFacts: this.buildGroundedFacts(service, input.intent),
+        redactedContext: this.buildGroundedContext(service, input.intent),
+        recentTurns: input.recentTurns,
+      },
+      env,
+    );
+  }
+
   render(input: MaternalyCopyRenderInput): string | undefined {
     const service = serviceFromDecision(input.decision, input.state);
 
@@ -374,8 +429,71 @@ export class MaternalyCopyRenderer {
     return "Ahora mismo no he podido procesarlo con seguridad. Puedo orientarte sobre Maternaly o dejar tu consulta para que el equipo la revise con cuidado. ¿Me cuentas qué necesitas?";
   }
 
+  private renderPregnancyContext(service: KnowledgeService | null): string {
+    if (service?.id === "taller_blw") {
+      return "Gracias por contármelo; eso me ayuda a situar mejor la consulta. Durante el embarazo, el taller BLW puede servirte para preparar una etapa posterior: está pensado para cuando el bebé se acerque al inicio de la alimentación complementaria. Si te apetece, seguimos viendo BLW con calma para más adelante o te oriento ahora entre los servicios de embarazo de Maternaly. 💛";
+    }
+
+    if (service) {
+      return `Gracias por contarme en qué etapa estás; lo tendré en cuenta para orientarte mejor. Podemos seguir con ${service.name} y ver cómo encaja contigo, o comparar con calma otras opciones de Maternaly pensadas para el embarazo. ¿Qué te ayudaría más ahora? 💛`;
+    }
+
+    return "Gracias por contarme en qué etapa estás; eso me ayuda a orientarte mejor. Puedo comparar contigo los servicios de Maternaly pensados para el embarazo y explicarte cuáles pueden tener más sentido ahora, sin lanzarte fechas ni reservas que no has pedido. ¿Prefieres que empecemos por movimiento y bienestar, preparación o una charla informativa? 💛";
+  }
+
+  private buildGroundedFacts(
+    service: KnowledgeService | null,
+    intent: StructuredIntent,
+  ): string[] {
+    // The safe draft is already the complete factual authority for this turn.
+    // Give the style model only the current service identity and genuinely
+    // turn-specific context; a full service or catalog dump lets it introduce
+    // true-but-unasked facts and silently change the answer's scope.
+    const serviceFacts = service
+      ? [`El servicio actual de este turno es ${service.name}; no cambies de servicio.`]
+      : [];
+    const contextualFacts =
+      intent.slots.pregnancy_month || intent.slots.pregnancy_week
+        ? [
+            "La usuaria acaba de compartir su etapa de embarazo; debe reconocerse ese contexto sin convertirlo en una petición de fechas, plazas o reserva.",
+            ...(service?.id === "taller_blw"
+              ? [
+                  "El Taller BLW corresponde al momento en que el bebé vaya a iniciar la alimentación complementaria; durante el embarazo puede explicarse como preparación para más adelante.",
+                ]
+              : []),
+          ]
+        : [];
+
+    return Array.from(new Set([...serviceFacts, ...contextualFacts]));
+  }
+
+  private buildGroundedContext(
+    service: KnowledgeService | null,
+    intent: StructuredIntent,
+  ): string {
+    const parts = [
+      `Movimiento del turno: ${
+        intent.slots.pregnancy_month || intent.slots.pregnancy_week
+          ? "la usuaria comparte contexto personal y espera que la respuesta se adapte"
+          : "consulta informativa"
+      }.`,
+      service ? `Tema actual: ${service.name}.` : "Tema actual: orientación general de Maternaly.",
+      `Foco: ${intent.service_question_focus}.`,
+      intent.needs_availability_lookup
+        ? "La policy ya ha autorizado disponibilidad."
+        : "No se han pedido fechas, plazas ni una reserva.",
+    ];
+
+    return parts.join(" ");
+  }
+
   private renderGeneral(): string {
     return "Puedo orientarte sobre las charlas y talleres de Maternaly, Pilates para el embarazo, AIPAP en tierra o en agua, Yoga Prenatal, Método 5P, diagnóstico prenatal, fisioterapia y suelo pélvico, lactancia y fisioterapia pediátrica. Cuéntame qué estás buscando o en qué etapa te encuentras y te ayudo a encontrar la opción que mejor encaja. 💛";
+  }
+
+  private renderCatalogOverview(): string {
+    const serviceNames = MATERNALY_KNOWLEDGE_SERVICES.map((service) => `• ${service.name}`).join("\n");
+    return `Claro 😊 En Maternaly acompañamos distintas etapas del embarazo, el posparto y los primeros meses del bebé. Estos son los servicios sobre los que puedo orientarte ahora mismo:\n\n${serviceNames}\n\nNo hace falta que sepas cuál elegir: si me cuentas en qué momento estás o qué te preocupa, te ayudo a comparar los que mejor encajen contigo.`;
   }
 
   private renderGreeting(message?: string): string {
@@ -412,7 +530,7 @@ export class MaternalyCopyRenderer {
     }
 
     if (modalityPreference !== "online") {
-      return this.renderGeneral();
+      return this.renderCatalogOverview();
     }
 
     const onlineServices = MATERNALY_KNOWLEDGE_SERVICES.filter((service) =>

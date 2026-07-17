@@ -21,6 +21,7 @@ export interface MaternalyOutboxResult {
   provider: "twilio" | "twilio_sandbox" | "ycloud" | "api";
   renderedSource: MaternalyRenderedMessage["source"];
   twiml: string;
+  media: MaternalyOutboundMedia[];
   messageDraft: Omit<Message, "id" | "createdAt" | "transport">;
 }
 
@@ -42,12 +43,14 @@ export class MaternalyConversationOutbox {
     rendered: MaternalyRenderedMessage;
     media?: readonly MaternalyOutboundMedia[];
   }): MaternalyOutboxResult {
+    const acceptedMedia = [...(input.media ?? [])].slice(0, 1);
     return {
       ok: true,
       mode: "twiml",
       provider: input.provider,
       renderedSource: input.rendered.source,
-      twiml: buildMaternalyTwiml(input.rendered.text, input.media),
+      twiml: buildMaternalyTwiml(input.rendered.text, acceptedMedia),
+      media: acceptedMedia,
       messageDraft: {
         conversationId: input.conversationId,
         direction: "outbound",
@@ -73,6 +76,6 @@ function buildMaternalyTwiml(
     return buildTwilioMessageResponse(text);
   }
 
-  const mediaNodes = media.map((item) => `<Media>${escapeXml(item.url)}</Media>`).join("");
+  const mediaNodes = `<Media>${escapeXml(media[0].url)}</Media>`;
   return `<?xml version="1.0" encoding="UTF-8"?><Response><Message><Body>${escapeXml(text)}</Body>${mediaNodes}</Message></Response>`;
 }
