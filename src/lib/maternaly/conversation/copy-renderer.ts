@@ -15,6 +15,16 @@ import type {
   StructuredIntent,
 } from "@/lib/maternaly/llm/interpreter";
 import {
+  MATERNALY_CHARLA_CTA,
+  MATERNALY_CHARLA_FACTS,
+  MATERNALY_CHARLA_OPTIONS,
+  MATERNALY_CONTACT,
+  MATERNALY_JOURNEY_STAGE_OPTIONS,
+  MATERNALY_PREGNANCY_SERVICE_MENU,
+  resolveCharlaOption,
+  type MaternalyJourneyStage,
+} from "@/lib/maternaly/knowledge/charla-informativa-contract";
+import {
   MaternalyGroundedCopyGenerator,
   type MaternalyGroundedCopyResult,
   type MaternalyGroundedCopyTurn,
@@ -27,6 +37,7 @@ export type MaternalyCopyAction =
   | "privacy"
   | "payment"
   | "invoice"
+  | "booking_declined"
   | "normalized_registration"
   | "catalog_info"
   | "service_info"
@@ -40,6 +51,7 @@ export interface MaternalyCopyDecision {
   serviceQuestionFocus?: MaternalyServiceQuestionFocus;
   locationPreference?: string;
   modalityPreference?: "presencial" | "online";
+  journeyStage?: MaternalyJourneyStage;
   reason?: string;
 }
 
@@ -49,9 +61,11 @@ export interface MaternalyCopyToolResult {
     | "read_error"
     | "sessions_available"
     | "collecting_fields"
+    | "manual_validation_required"
     | "write_result";
   serviceKey: MaternalyNormalizedServiceKey;
   sessions: NormalizedAvailableSession[];
+  calendarSessions?: NormalizedAvailableSession[];
   selectedSession?: NormalizedAvailableSession;
   missingFields: string[];
   plan?: {
@@ -125,6 +139,21 @@ function normalizeCopy(value: string): string {
     .replace(/\s+/g, " ")
     .trim()
     .toLocaleLowerCase("es");
+}
+
+function formatSpanishDate(value: string | undefined): string {
+  const match = value?.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) {
+    return value ?? "fecha pendiente";
+  }
+
+  const date = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])));
+  return new Intl.DateTimeFormat("es-ES", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(date);
 }
 
 function isCorrectionTurn(message: string | undefined): boolean {
@@ -242,9 +271,9 @@ export function ensureDistinctMaternalyReply(input: {
 
   if (input.action === "greeting") {
     const greetingVariants = [
-      "¡Hola de nuevo! 😊 Encantada de leerte. Cuéntame, ¿qué necesitas hoy?",
-      "¡Aquí estoy! Dime qué te gustaría consultar y lo vemos juntas. 💛",
-      "¡Buenas! 😊 ¿En qué puedo echarte una mano ahora?",
+      "¡Hola de nuevo! Soy Ane, la asistente virtual de Maternaly 😊 Para orientarte bien, dime en qué etapa estás: EMBARAZO, POSTPARTO u OTROS.",
+      "¡Aquí estoy! Soy Ane 💛 Puedo informarte y ayudarte a reservar; si algo necesita atención personal, Macarena podrá contactar contigo. ¿Estás en EMBARAZO, POSTPARTO u OTROS?",
+      "¡Buenas! Soy Ane, la asistente virtual de Maternaly. Empezamos por tu momento actual: EMBARAZO, POSTPARTO u OTROS. ¿Cuál eliges?",
     ];
     const candidate = greetingVariants.find((item) => !previous.has(normalizeCopy(item)));
     if (candidate) {
@@ -338,16 +367,22 @@ export class MaternalyCopyRenderer {
         return "Puedo orientarte sobre pagos, pero no doy una plaza por confirmada sin validación real del pago. Si te parece, dejo tu consulta preparada para que la revise el equipo.";
       case "invoice":
         return "Puedo dejar anotada la solicitud de factura o justificante. El equipo la revisará con el pago validado antes de emitir nada.";
+      case "booking_declined":
+        return "Claro, no reservo nada 😊 Cuando quieras, puedo ayudarte a explorar otros servicios de embarazo o resolver cualquier otra duda. ¿Qué te apetece mirar?";
       case "greeting":
         return this.renderGreeting(input.message);
       case "catalog_info":
-        return this.renderCatalogInfo(input.decision.modalityPreference, input.message);
+        return this.renderCatalogInfo(
+          input.decision.journeyStage ?? input.state?.journeyStage,
+          input.decision.modalityPreference,
+          input.message,
+        );
       case "service_info":
         return service
           ? this.renderServiceInfo(service, input.decision, input.message)
           : this.renderGeneral();
       case "normalized_registration":
-        return this.renderNormalizedRegistration(input.toolResult, service);
+        return this.renderNormalizedRegistration(input.toolResult, service, input.state);
       case "general":
       default:
         return this.renderGeneral();
@@ -410,7 +445,7 @@ export class MaternalyCopyRenderer {
 
     if (service.id === "charla_embarazo_1_20") {
       return [
-        "Esta charla gratuita acompaña las primeras 20 semanas del embarazo con información práctica de matronas: cambios físicos y emocionales, cuidados, alimentación, actividad, revisiones, medicación segura y sexualidad. Puedes conectarte online o acudir a Bilbao o Erandio, sola o con acompañante. Dime qué aspecto quieres mirar con más detalle. 💛",
+        this.renderCharlaInfo("general"),
       ];
     }
 
@@ -488,7 +523,7 @@ export class MaternalyCopyRenderer {
   }
 
   private renderGeneral(): string {
-    return "Puedo orientarte sobre las charlas y talleres de Maternaly, Pilates para el embarazo, AIPAP en tierra o en agua, Yoga Prenatal, Método 5P, diagnóstico prenatal, fisioterapia y suelo pélvico, lactancia y fisioterapia pediátrica. Cuéntame qué estás buscando o en qué etapa te encuentras y te ayudo a encontrar la opción que mejor encaja. 💛";
+    return "Soy Ane, la asistente virtual de Maternaly. Puedo darte información precisa sobre nuestros servicios y ayudarte a preparar una reserva. Para orientarte sin dar nada por supuesto, dime primero en qué etapa estás: EMBARAZO, POSTPARTO u OTROS. 💛";
   }
 
   private renderCatalogOverview(): string {
@@ -498,25 +533,35 @@ export class MaternalyCopyRenderer {
 
   private renderGreeting(message?: string): string {
     const normalized = normalizeCopy(message ?? "");
-    if (normalized.includes("buenos dias")) {
-      return "¡Buenos días! 😊 Soy el asistente de Maternaly. Encantada de leerte. Cuéntame, ¿qué te gustaría saber o qué necesitas hoy?";
-    }
-
-    if (normalized.includes("buenas noches")) {
-      return "¡Buenas noches! 😊 Soy el asistente de Maternaly y estoy aquí para ayudarte. Cuéntame, ¿qué necesitas?";
-    }
-
-    if (normalized.includes("buenas tardes")) {
-      return "¡Buenas tardes! 😊 Soy el asistente de Maternaly. Encantada de leerte; cuéntame, ¿qué necesitas hoy?";
-    }
-
-    return "¡Hola! 😊 Soy el asistente de Maternaly y estoy aquí para ayudarte con información o con lo que necesites. Cuéntame, ¿qué necesitas hoy?";
+    const salutation = normalized.includes("buenos dias")
+      ? "¡Buenos días!"
+      : normalized.includes("buenas noches")
+        ? "¡Buenas noches!"
+        : normalized.includes("buenas tardes")
+          ? "¡Buenas tardes!"
+          : "¡Hola!";
+    const options = MATERNALY_JOURNEY_STAGE_OPTIONS.map((option) => `• ${option.label}`).join("\n");
+    return `${salutation} 😊 Soy Ane, la asistente virtual de Maternaly. Estoy aquí para darte información precisa sobre nuestros servicios y ayudarte a reservar. Si alguna cuestión no queda resuelta, Macarena podrá contactar contigo personalmente.\n\nPara empezar, ¿en qué momento o etapa estás?\n${options}`;
   }
 
   private renderCatalogInfo(
+    journeyStage?: MaternalyJourneyStage,
     modalityPreference?: "presencial" | "online",
     message?: string,
   ): string {
+    if (journeyStage === "embarazo") {
+      const services = MATERNALY_PREGNANCY_SERVICE_MENU.filter((item) => item.group === "servicio")
+        .map((item) => `• ${item.label}`)
+        .join("\n");
+      const activities = MATERNALY_PREGNANCY_SERVICE_MENU.filter((item) => item.group === "actividad")
+        .map((item) => `• ${item.label}`)
+        .join("\n");
+      const units = MATERNALY_PREGNANCY_SERVICE_MENU.filter((item) => item.group === "unidad")
+        .map((item) => `• ${item.label}`)
+        .join("\n");
+      return `Perfecto 😊 Estos son los servicios de Maternaly para el embarazo:\n\n${services}\n\nActividades físicas durante el embarazo:\n${activities}\n\n${units}\n\nDime cuál te interesa y te lo cuento de uno en uno, con calma.`;
+    }
+
     if (modalityPreference === "presencial") {
       const presencialNames = MATERNALY_KNOWLEDGE_SERVICES.filter((service) =>
         service.sessions?.some((session) => session.modality === "presencial"),
@@ -599,17 +644,19 @@ export class MaternalyCopyRenderer {
     locationPreference?: string,
   ): string {
     const location = normalizeLocation(locationPreference);
+    const fullExplanation = [
+      `${MATERNALY_CHARLA_FACTS.name} está pensada para acompañarte desde el comienzo del embarazo. La imparten matronas y es completamente gratuita.`,
+      "En la charla hablamos de los cambios que se producen en tu cuerpo durante el embarazo y de cómo cuidarte en esta etapa: autocuidados, alimentación, actividad física, pruebas y exámenes que irás realizando, y qué medicación se considera segura para ti y para el bebé. También tratamos la sexualidad y los cambios emocionales, para que puedas plantear tus dudas con confianza.",
+      "Puedes asistir de forma presencial o conectarte online en directo, y puedes venir sola o acompañada por tu pareja o acompañante.",
+      MATERNALY_CHARLA_CTA,
+    ].join("\n\n");
 
-    if (focus === "contents") {
-      return "En la charla se explican los cambios del cuerpo durante el embarazo, autocuidados, alimentación, actividad física, pruebas y revisiones, medicación segura, sexualidad y cambios emocionales. La idea es que puedas resolver dudas con las matronas desde el principio. ¿Quieres que miremos una fecha presencial u online? 💛";
-    }
-
-    if (focus === "eligibility" || focus === "start_week") {
-      return "La charla está pensada para embarazadas entre la semana 1 y la 20. Puedes acudir sola o con tu pareja o acompañante. ¿Te viene mejor Bilbao, Erandio u online? 😊";
+    if (["general", "contents", "eligibility", "start_week", "benefits"].includes(focus)) {
+      return fullExplanation;
     }
 
     if (focus === "pricing") {
-      return "La charla informativa de embarazo es gratuita. Se ofrece de forma presencial en Bilbao y Erandio, y también online según la edición. ¿Quieres que comprobemos las próximas opciones?";
+      return `La charla informativa no tiene ningún coste: es gratuita. La imparten matronas y puedes acudir sola o con acompañante. ${MATERNALY_CHARLA_CTA}`;
     }
 
     if (focus === "duration") {
@@ -617,23 +664,19 @@ export class MaternalyCopyRenderer {
     }
 
     if (focus === "locations") {
-      return "La charla puede hacerse presencialmente en Maternaly Bilbao o Maternaly Erandio, y también hay ediciones online en directo. ¿Qué modalidad te encaja mejor? 💛";
+      return "Puedes elegir entre tres opciones claras: Erandio presencial a las 18:30, Bilbao presencial a las 17:00 u online en directo a las 19:00. ¿Quieres reservar tu plaza?";
     }
 
     if (focus === "schedule") {
-      const preference = location ? ` en ${location === "bilbao" ? "Bilbao" : "Erandio"}` : "";
-      return `Hay ediciones presenciales${preference || " en Bilbao y Erandio"} y ediciones online. Las fechas cambian por convocatoria, así que puedo consultar las próximas opciones reales antes de que elijas.`;
-    }
-
-    if (focus === "benefits") {
-      return "La charla te ayuda a entender qué cambios puedes esperar en las primeras 20 semanas y a resolver con matronas dudas sobre cuidados, alimentación, ejercicio, revisiones, medicación, sexualidad y emociones. Es un espacio informativo y gratuito para empezar el embarazo con más claridad. 🌸";
+      const preference = location ? ` Si prefieres ${location === "bilbao" ? "Bilbao" : "Erandio"}, puedo enseñarte primero sus fechas.` : "";
+      return `Los horarios establecidos son: Erandio presencial a las 18:30, Bilbao presencial a las 17:00 y online en directo a las 19:00.${preference} ${MATERNALY_CHARLA_CTA}`;
     }
 
     if (focus === "booking") {
       return "Puedo comprobar las próximas ediciones y preparar tu solicitud de plaza. Necesitaremos tus datos básicos, si vienes sola o acompañada y tu fecha probable de parto; la plaza solo se dará por registrada cuando el proceso real lo valide.";
     }
 
-    return "La charla informativa gratuita está dirigida a embarazadas entre la semana 1 y la 20. Las matronas abordan cambios físicos y emocionales, cuidados, alimentación, ejercicio, revisiones, medicación segura y sexualidad. Puedes asistir sola o acompañada, en Bilbao, Erandio u online según convocatoria. ¿Qué te gustaría saber: contenido, fechas o inscripción? 💛";
+    return fullExplanation;
   }
 
   private renderBlwInfo(
@@ -738,16 +781,21 @@ export class MaternalyCopyRenderer {
   private renderNormalizedRegistration(
     result: MaternalyCopyToolResult | undefined,
     service: KnowledgeService | null,
+    state?: MaternalyNormalizedFlowState,
   ): string {
     if (!result) {
       return service ? this.renderServiceInfo(service) : this.renderGeneral();
     }
 
     if (
-      result.sessions.length > 0 &&
+      (result.calendarSessions ?? result.sessions).length > 0 &&
       ["not_configured", "read_error", "sessions_available"].includes(result.status)
     ) {
-      return this.renderSessions(result, service);
+      return this.renderSessions(
+        { ...result, sessions: result.calendarSessions ?? result.sessions },
+        service,
+        state,
+      );
     }
 
     if (result.status === "not_configured" || result.status === "read_error") {
@@ -756,13 +804,35 @@ export class MaternalyCopyRenderer {
     }
 
     if (result.status === "sessions_available") {
-      return this.renderSessions(result, service);
+      return this.renderSessions(
+        { ...result, sessions: result.calendarSessions ?? result.sessions },
+        service,
+        state,
+      );
     }
 
     if (result.status === "collecting_fields") {
+      if (result.serviceKey === "charla_embarazo_1_20" && result.missingFields.includes("peopleCount")) {
+        return "Perfecto. Antes de continuar, ¿acudiréis una o dos personas?";
+      }
       const missing = result.missingFields.map(fieldLabel).join(", ");
       const selected = this.formatSession(result.selectedSession);
-      return `Perfecto 🌸 Preparo la solicitud para ${selected} con cuidado; me faltan: ${missing}.`;
+      const serviceName = service?.name ?? MATERNALY_NORMALIZED_SERVICES[result.serviceKey].label;
+      return `Perfecto 🌸 Preparo la solicitud con cuidado para ${serviceName}, ${selected}; me faltan estos datos: ${missing}. Puedes enviármelos juntos en un solo mensaje.`;
+    }
+
+    if (result.status === "manual_validation_required" && result.selectedSession) {
+      const option = resolveCharlaOption(result.selectedSession);
+      const preference = [
+        option?.location ?? result.selectedSession.location,
+        formatSpanishDate(result.selectedSession.date),
+        result.selectedSession.startTime,
+      ].filter(Boolean).join(", ");
+      return [
+        `Gracias, ya tengo tus datos y tu preferencia: ${preference}.`,
+        "Esa convocatoria figura en el calendario de Maternaly, pero aún no tiene una sesión operativa vinculada en la agenda. No he hecho una inscripción automática para evitar asignarte otra sede o fecha por error.",
+        `La solicitud queda pendiente de validación manual por el equipo. Si quieres contactar directamente, puedes escribir o llamar al ${MATERNALY_CONTACT.phone}, o escribir a ${MATERNALY_CONTACT.email}.`,
+      ].join("\n\n");
     }
 
     const writeResult = result.writeResult;
@@ -775,6 +845,10 @@ export class MaternalyCopyRenderer {
       return "Ahora mismo no puedo dejar la solicitud cerrada con seguridad. La dejo pendiente para que el equipo de Maternaly la revise con cuidado.";
     }
 
+    if (result.serviceKey === "charla_embarazo_1_20" && result.selectedSession) {
+      return this.renderCharlaRegistrationResult(result);
+    }
+
     if (writeResult?.mode === "live" && writeResult.applied) {
       return "Perfecto, dejo tu preinscripción registrada y pendiente de validación del equipo. La plaza no queda cerrada hasta que el pago o la revisión real estén validados.";
     }
@@ -782,9 +856,17 @@ export class MaternalyCopyRenderer {
     return "Perfecto, dejo tu solicitud preparada para que el equipo la revise. La plaza no queda cerrada hasta que el pago o la revisión real estén validados.";
   }
 
-  private renderSessions(result: MaternalyCopyToolResult, service: KnowledgeService | null): string {
+  private renderSessions(
+    result: MaternalyCopyToolResult,
+    service: KnowledgeService | null,
+    state?: MaternalyNormalizedFlowState,
+  ): string {
     if (result.sessions.length === 0) {
       return "Ahora mismo no veo sesiones disponibles para ese servicio. Puedo recoger tus datos y dejarlo preparado para que lo revise el equipo.";
+    }
+
+    if (result.serviceKey === "charla_embarazo_1_20") {
+      return this.renderCharlaSessions(result.sessions, state);
     }
 
     if (result.sessions.every((session) => session.full)) {
@@ -819,6 +901,64 @@ export class MaternalyCopyRenderer {
       return "la sesión elegida";
     }
 
-    return [session.date, session.startTime, session.groupName].filter(Boolean).join(" ") || session.sessionName;
+    return [session.date, session.startTime, session.location ?? session.groupName]
+      .filter(Boolean)
+      .join(" ") || session.sessionName;
+  }
+
+  private renderCharlaSessions(
+    sessions: NormalizedAvailableSession[],
+    state?: MaternalyNormalizedFlowState,
+  ): string {
+    const preferred = normalizeCopy([state?.location, state?.modality].filter(Boolean).join(" "));
+    let ordinal = 0;
+    const sections = MATERNALY_CHARLA_OPTIONS.map((option) => {
+      const matching = sessions.filter((session) => resolveCharlaOption(session)?.id === option.id);
+      const heading = `${option.location} — ${option.modality === "online" ? "online en directo" : "presencial"} — ${option.startTime}`;
+      const dates = matching.length
+        ? matching.map((session) => {
+            ordinal += 1;
+            const availability = session.source === "contract_pending_validation"
+              ? " (pendiente de validación manual)"
+              : session.full
+                ? " (sin plazas libres)"
+                : "";
+            return `${ordinal}. ${formatSpanishDate(session.date)}, ${session.startTime ?? option.startTime}${availability}`;
+          })
+        : ["Sin fecha publicada en la agenda en este momento."];
+      const marker = preferred && normalizeCopy(`${option.location} ${option.modality}`).includes(preferred)
+        ? " (tu preferencia)"
+        : "";
+      return `${heading}${marker}\n${dates.map((date) => `   ${date}`).join("\n")}`;
+    });
+
+    return [
+      "Claro. Opciones para Charla Informativa gratuita (las tres modalidades):",
+      ...sections,
+      "Dime si te encaja mejor Erandio, Bilbao u online y, si ya lo sabes, qué fecha prefieres.",
+    ].join("\n\n");
+  }
+
+  private renderCharlaRegistrationResult(result: MaternalyCopyToolResult): string {
+    const session = result.selectedSession!;
+    const option = resolveCharlaOption(session);
+    const dateAndTime = `${formatSpanishDate(session.date)} a las ${session.startTime ?? option?.startTime ?? "hora indicada"}`;
+    const liveApplied = result.writeResult?.mode === "live" && result.writeResult.applied;
+    const opening = liveApplied
+      ? "Perfecto, tu preinscripción ha quedado registrada y pendiente de validación por el equipo."
+      : "Perfecto, solicitud preparada para que el equipo la revise y valide.";
+    const contact = `Si necesitas cualquier cosa, puedes contactar con Maternaly por teléfono o WhatsApp en el ${MATERNALY_CONTACT.phone}, o escribir a ${MATERNALY_CONTACT.email}.`;
+
+    if (option?.id === "erandio") {
+      return `${opening}\n\nCharla informativa presencial en Erandio: ${dateAndTime}.\nDirección: ${option.address}\n\n${contact}`;
+    }
+    if (option?.id === "bilbao") {
+      return `${opening}\n\nCharla informativa presencial en Bilbao: ${dateAndTime}.\nDirección: ${option.address}\n\n${contact}`;
+    }
+    if (option?.id === "online") {
+      return `${opening}\n\nCharla informativa online en directo por Zoom: ${dateAndTime}. Recibirás las claves para conectarte antes del inicio.\n\n${contact}`;
+    }
+
+    return `${opening}\n\nCharla informativa: ${dateAndTime}.\n\n${contact}`;
   }
 }

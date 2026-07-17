@@ -33,6 +33,33 @@ function pilatesService() {
   };
 }
 
+function charlaSession(input: {
+  id: string;
+  groupId: string;
+  location: "Erandio" | "Bilbao" | "online";
+  modality: "presencial" | "online";
+  date: string;
+  startTime: string;
+}): MaternalyCopyToolResult["sessions"][number] {
+  return {
+    serviceKey: "charla_embarazo_1_20",
+    serviceLabel: "Charla Informativa",
+    groupId: input.groupId,
+    groupName: input.location,
+    sessionId: input.id,
+    sessionName: `Charla ${input.location}`,
+    location: input.location,
+    modality: input.modality,
+    date: input.date,
+    startTime: input.startTime,
+    capacityTotal: 14,
+    occupied: 0,
+    availableSeats: 14,
+    full: false,
+    availabilityStatus: "available",
+  };
+}
+
 describe("MaternalyCopyRenderer availability guardrails", () => {
   it("renders sessions instead of availability fallback when sessions are present", () => {
     const renderer = new MaternalyCopyRenderer();
@@ -77,10 +104,174 @@ describe("MaternalyCopyRenderer availability guardrails", () => {
     const renderer = new MaternalyCopyRenderer();
     const reply = renderer.render({ decision: { action: "greeting" } }) ?? "";
 
-    expect(reply).toMatch(/calma|ayudarte/i);
-    expect(reply).toContain("Maternaly");
+    expect(reply).toMatch(/Soy Ane, la asistente virtual de Maternaly/i);
+    expect(reply).toMatch(/Macarena.*contactar contigo personalmente/i);
+    expect(reply).toMatch(/EMBARAZO[\s\S]*POSTPARTO[\s\S]*OTROS/);
     expect(reply).not.toMatch(/robot|cl[ií]nica fría/i);
     expect(countEmojis(reply)).toBeLessThanOrEqual(2);
+  });
+
+  it("lists the pregnancy menu from the conversational contract", () => {
+    const renderer = new MaternalyCopyRenderer();
+    const reply = renderer.render({
+      decision: { action: "catalog_info", journeyStage: "embarazo" },
+      message: "Estoy embarazada",
+    }) ?? "";
+
+    expect(reply).toMatch(/Charla informativa gratuita.*semana 1.*semana 20/i);
+    expect(reply).toMatch(/Preparaci[oó]n al parto[\s\S]*M[eé]todo Maternaly/i);
+    expect(reply).toMatch(/Taller BLW.*Baby-Led Weaning/i);
+    expect(reply).toMatch(/AIPAP Agua[\s\S]*Pilates para el embarazo[\s\S]*Yoga para el embarazo/i);
+    expect(reply).toMatch(/Fisioterapia en el embarazo[\s\S]*Psicolog[ií]a perinatal/i);
+  });
+
+  it("explains the Charla completely before offering dates", () => {
+    const renderer = new MaternalyCopyRenderer();
+    const reply = renderer.render({
+      decision: {
+        action: "service_info",
+        service: getKnowledgeService("charla_embarazo_1_20"),
+        serviceQuestionFocus: "general",
+      },
+      message: "¿Qué me puedes contar de la charla?",
+    }) ?? "";
+
+    expect(reply).toMatch(/desde el comienzo del embarazo|semana 1.*20/i);
+    expect(reply).toMatch(/matronas/i);
+    expect(reply).toMatch(/cambios.*cuerpo[\s\S]*autocuidados[\s\S]*alimentaci[oó]n[\s\S]*actividad f[ií]sica/i);
+    expect(reply).toMatch(/pruebas.*ex[aá]menes[\s\S]*medicaci[oó]n.*segura/i);
+    expect(reply).toMatch(/sexualidad[\s\S]*cambios emocionales/i);
+    expect(reply).toMatch(/presencial[\s\S]*online en directo/i);
+    expect(reply).toMatch(/sola o acompa[nñ]ada/i);
+    expect(reply).toMatch(/¿Quieres reservar tu plaza\?/i);
+    expect(reply).not.toMatch(/2026-\d{2}-\d{2}|plazas disponibles/i);
+  });
+
+  it("shows Charla modalities in Erandio, Bilbao, online order with their documented times", () => {
+    const renderer = new MaternalyCopyRenderer();
+    const toolResult: MaternalyCopyToolResult = {
+      status: "sessions_available",
+      serviceKey: "charla_embarazo_1_20",
+      sessions: [
+        charlaSession({
+          id: "sesion_charla_bilbao_20261006",
+          groupId: "grupo_charla_bilbao",
+          location: "Bilbao",
+          modality: "presencial",
+          date: "2026-10-06",
+          startTime: "17:00",
+        }),
+        charlaSession({
+          id: "sesion_charla_online_20260810",
+          groupId: "grupo_charla_online",
+          location: "online",
+          modality: "online",
+          date: "2026-08-10",
+          startTime: "19:00",
+        }),
+        charlaSession({
+          id: "sesion_charla_erandio_20260820",
+          groupId: "grupo_charla_erandio",
+          location: "Erandio",
+          modality: "presencial",
+          date: "2026-08-20",
+          startTime: "18:30",
+        }),
+      ],
+      missingFields: [],
+    };
+
+    const reply = renderer.render({
+      decision: { action: "normalized_registration", serviceKey: "charla_embarazo_1_20" },
+      toolResult,
+    }) ?? "";
+
+    expect(reply).toContain("Opciones para Charla Informativa");
+    expect(reply).toContain("Erandio — presencial — 18:30");
+    expect(reply).toContain("Bilbao — presencial — 17:00");
+    expect(reply).toContain("Online — online en directo — 19:00");
+    expect(reply.indexOf("Erandio —")).toBeLessThan(reply.indexOf("Bilbao —"));
+    expect(reply.indexOf("Bilbao —")).toBeLessThan(reply.indexOf("Online —"));
+  });
+
+  it("asks Charla attendance count before any contact field", () => {
+    const renderer = new MaternalyCopyRenderer();
+    const reply = renderer.render({
+      decision: { action: "normalized_registration", serviceKey: "charla_embarazo_1_20" },
+      toolResult: {
+        status: "collecting_fields",
+        serviceKey: "charla_embarazo_1_20",
+        sessions: [],
+        selectedSession: charlaSession({
+          id: "sesion_charla_erandio_20260820",
+          groupId: "grupo_charla_erandio",
+          location: "Erandio",
+          modality: "presencial",
+          date: "2026-08-20",
+          startTime: "18:30",
+        }),
+        missingFields: ["peopleCount", "fullName", "phone", "partnerName", "fppOrDueDate"],
+      },
+    }) ?? "";
+
+    expect(reply).toMatch(/¿acudir[eé]is una o dos personas\?/i);
+    expect(reply).not.toMatch(/nombre y apellidos|tel[eé]fono|email|fecha probable de parto/i);
+  });
+
+  it("uses request-prepared wording for a dry-run Charla result", () => {
+    const renderer = new MaternalyCopyRenderer();
+    const reply = renderer.render({
+      decision: { action: "normalized_registration", serviceKey: "charla_embarazo_1_20" },
+      toolResult: {
+        status: "write_result",
+        serviceKey: "charla_embarazo_1_20",
+        sessions: [],
+        selectedSession: charlaSession({
+          id: "sesion_charla_erandio_20260820",
+          groupId: "grupo_charla_erandio",
+          location: "Erandio",
+          modality: "presencial",
+          date: "2026-08-20",
+          startTime: "18:30",
+        }),
+        missingFields: [],
+        plan: { blocked: false, blockedReasons: [] },
+        writeResult: { ok: true, mode: "dry_run", applied: false },
+      },
+    }) ?? "";
+
+    expect(reply).toMatch(/solicitud preparada/i);
+    expect(reply).not.toMatch(/preinscripci[oó]n.*registrada|plaza confirmada/i);
+    expect(reply).toMatch(/Charla informativa presencial en Erandio/i);
+    expect(reply).toMatch(/Jos[eé] Luis Goyoaga 32[\s\S]*timbre 112/i);
+  });
+
+  it("uses pending-pre-registration wording for a live Charla result", () => {
+    const renderer = new MaternalyCopyRenderer();
+    const reply = renderer.render({
+      decision: { action: "normalized_registration", serviceKey: "charla_embarazo_1_20" },
+      toolResult: {
+        status: "write_result",
+        serviceKey: "charla_embarazo_1_20",
+        sessions: [],
+        selectedSession: charlaSession({
+          id: "sesion_charla_online_20260810",
+          groupId: "grupo_charla_online",
+          location: "online",
+          modality: "online",
+          date: "2026-08-10",
+          startTime: "19:00",
+        }),
+        missingFields: [],
+        plan: { blocked: false, blockedReasons: [] },
+        writeResult: { ok: true, mode: "live", applied: true },
+      },
+    }) ?? "";
+
+    expect(reply).toMatch(/preinscripci[oó]n.*registrada.*pendiente de validaci[oó]n/i);
+    expect(reply).not.toMatch(/plaza confirmada/i);
+    expect(reply).toMatch(/online en directo por Zoom/i);
+    expect(reply).toMatch(/claves.*antes del inicio/i);
   });
 
   it("keeps reset copy technical even when the same acknowledgement was already sent", () => {

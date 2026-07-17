@@ -17,7 +17,7 @@ describe("Maternaly conversational audit matrix", () => {
       "¿Qué me aporta la charla de embarazo?",
       "charla_embarazo_1_20",
       "benefits",
-      /entender qu[eé] cambios|resolver con matronas/i,
+      /(?=.*\bmatronas\b)(?=.*cambios que se producen en tu cuerpo)/is,
     ],
     [
       "¿Qué vale ir los dos al curso de alimentación del bebé?",
@@ -76,6 +76,8 @@ describe("Maternaly conversational audit matrix", () => {
     const result = await buildMaternalyWhatsAppReply("¿y cuánto dura?");
 
     expect(result.intent.service_candidate).toBeUndefined();
-    expect(result.reply).toMatch(/Pilates|AIPAP|suelo p[eé]lvico|lactancia/i);
+    expect(result.reply).toMatch(
+      /(?=.*\bAne\b)(?=.*\bEMBARAZO\b)(?=.*\bPOSTPARTO\b)(?=.*\bOTROS\b)/is,
+    );
   });
 });

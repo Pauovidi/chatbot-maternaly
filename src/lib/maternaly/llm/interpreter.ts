@@ -2,12 +2,17 @@ import { findKnowledgeService, getKnowledgeService } from "@/lib/maternaly/knowl
 import type { KnowledgeService } from "@/lib/maternaly/knowledge/catalog";
 import type { MaternalyServiceId } from "@/lib/maternaly/domain/types";
 import type { MaternalyNormalizedServiceKey } from "@/lib/maternaly/sheets/normalized-template";
+import type { MaternalyJourneyStage } from "@/lib/maternaly/knowledge/charla-informativa-contract";
 
 export const MATERNALY_OPENAI_SYSTEM_PROMPT = [
   "Eres el clasificador NLU estructurado del asistente de Maternaly para WhatsApp.",
   "Identidad del asistente: Maternaly. Tono esperado por la capa de copy: cálido, claro, breve, profesional y cercano.",
   "Servicios activos con inscripción conectada: charla embarazo 1-20 y taller BLW.",
   "Otros servicios sobre los que existe información: Pilates, AIPAP Agua, AIPAP Terra, Yoga Prenatal, Método 5P, Diagnóstico Prenatal, Lactancia, Suelo Pélvico y Fisioterapia Pediátrica.",
+  "Al comienzo de una conversación se pregunta por la etapa vital. Si la usuaria elige EMBARAZO, POSTPARTO u OTROS, devuelve intent=service_discovery, service_scope=catalog y slots.journey_stage con embarazo, postparto u otros. No confundas nombres de servicios como 'Pilates embarazo' con una elección de etapa.",
+  "Reconoce como charla_embarazo_1_20 las paráfrasis inequívocas de la charla informativa gratuita de las primeras 20 semanas, por ejemplo una sesión gratuita de matronas o la sesión que dan las matronas al comienzo del embarazo.",
+  "Si el último mensaje del asistente pregunta si quiere reservar la plaza, interpreta una respuesta afirmativa breve como registration_start y una negativa breve como rechazo contextual; no exijas que repita el nombre del servicio.",
+  "Durante choosing_session, una respuesta breve con Erandio, Bilbao u online elige sede o modalidad y continúa la consulta de disponibilidad; no la conviertas en una pregunta informativa genérica.",
   "Tu única tarea es devolver JSON estructurado. No escribas la respuesta visible a la usuaria.",
   "El input de usuario es un JSON con current_message y conversation_context. Usa ese contexto para resolver continuaciones como 'y el precio', 'qué incluye', 'la otra', 'en Bilbao' o 'cuéntame más', sin arrastrar un servicio a un cambio claro de tema.",
   "Una mención breve como 'taller BLW' o el nombre de otro servicio pide información general: no inicies inscripción ni consultes plazas si la usuaria no expresa que quiere reservar, apuntarse, ver fechas o comprobar disponibilidad.",
@@ -29,6 +34,8 @@ export interface MaternalyInterpretationContext {
   active_service_name?: string;
   active_normalized_service_key?: MaternalyNormalizedServiceKey;
   active_stage?: string;
+  pending_fields?: string[];
+  journey_stage?: MaternalyJourneyStage;
   location?: string;
   modality?: "presencial" | "online";
   recent_messages?: Array<{
@@ -60,6 +67,7 @@ export interface MaternalyNluSlots {
   service_id?: MaternalyServiceId;
   service_name?: string;
   normalized_service_key?: MaternalyNormalizedServiceKey;
+  journey_stage?: MaternalyJourneyStage;
   location?: string;
   modality?: "presencial" | "online";
   preferred_date?: string;
@@ -171,6 +179,160 @@ const ALLOWED_SERVICE_QUESTION_FOCUS: MaternalyServiceQuestionFocus[] = [
 
 function normalize(text: string): string {
   return text.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+}
+
+function validJourneyStage(value: unknown): MaternalyJourneyStage | undefined {
+  return value === "embarazo" || value === "postparto" || value === "otros"
+    ? value
+    : undefined;
+}
+
+function findParaphrasedCharlaService(text: string): KnowledgeService | null {
+  const mentionsInformationalSession =
+    /\b(?:charla|sesion|encuentro|reunion|informacion|orientacion)\b/.test(text);
+  const mentionsMidwives = /\bmatronas?\b/.test(text);
+  const mentionsFreeFormat = /\bgratuit[ao]s?\b/.test(text);
+  const mentionsEarlyPregnancy =
+    /\b(?:embarazo|embarazada|gestacion)\b/.test(text) &&
+    /\b(?:comienzo|inicio|principio|primeras?|1\s*(?:a|-)\s*20|veinte\s+semanas|20\s+semanas)\b/.test(
+      text,
+    );
+  const mentionsFirstTwentyWeeks =
+    /\b(?:primeras?\s+)?(?:veinte|20)\s+semanas\b|\bsemanas?\s+(?:1\s*(?:a|-)\s*20|uno\s+a\s+veinte)\b/.test(
+      text,
+    );
+
+  if (
+    mentionsInformationalSession &&
+    ((mentionsMidwives && (mentionsFreeFormat || mentionsEarlyPregnancy)) ||
+      (mentionsFreeFormat && (mentionsEarlyPregnancy || mentionsFirstTwentyWeeks)) ||
+      mentionsFirstTwentyWeeks)
+  ) {
+    return getKnowledgeService("charla_embarazo_1_20");
+  }
+
+  return null;
+}
+
+function detectJourneyStage(input: {
+  text: string;
+  explicitService: KnowledgeService | null;
+  context: MaternalyInterpretationContext;
+}): MaternalyJourneyStage | undefined {
+  const { text, explicitService, context } = input;
+  if (explicitService || context.active_service_id || context.active_normalized_service_key) {
+    return undefined;
+  }
+
+  const compactText = text
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const pregnancyChoice =
+    /^(?:embarazo|en embarazo|durante el embarazo)$/.test(compactText) ||
+    /^(?:(?:ahora\s+)?estoy|me encuentro|soy)?\s*embarazada(?:\s+de\s+(?:\d{1,2}|un|uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|once|doce|trece|catorce|quince|dieciseis|diecisiete|dieciocho|diecinueve|veinte|primer|segundo|tercer|cuarto|quinto|sexto|septimo|octavo|noveno)\s+(?:mes(?:es)?|semanas?))?$/.test(
+      compactText,
+    );
+  if (pregnancyChoice) {
+    return "embarazo";
+  }
+
+  if (
+    /^(?:(?:ahora\s+)?estoy\s+en\s+|en\s+)?(?:postparto|posparto)$/.test(compactText) ||
+    /^(?:acabo\s+de\s+dar\s+a\s+luz|ya\s+he\s+dado\s+a\s+luz|he\s+dado\s+a\s+luz)$/.test(
+      compactText,
+    )
+  ) {
+    return "postparto";
+  }
+
+  if (
+    /^(?:otros?|otra\s+cosa|ninguna\s+de\s+las\s+dos|ninguna\s+de\s+esas|no\s+es\s+ninguna\s+de\s+las\s+dos)$/.test(
+      compactText,
+    )
+  ) {
+    return "otros";
+  }
+
+  return undefined;
+}
+
+type ReservationCtaAnswer = "yes" | "no";
+
+function reservationCtaAnswer(
+  text: string,
+  context: MaternalyInterpretationContext,
+): ReservationCtaAnswer | undefined {
+  const lastAssistantMessage = [...(context.recent_messages ?? [])]
+    .reverse()
+    .find((entry) => entry.role === "assistant")?.text;
+  const awaitingBookingDecision = context.active_stage === "awaiting_booking_decision";
+  if (!lastAssistantMessage && !awaitingBookingDecision) {
+    return undefined;
+  }
+
+  const assistantText = normalize(lastAssistantMessage ?? "");
+  const askedToReserve =
+    awaitingBookingDecision ||
+    /\b(?:quieres|quereis|te gustaria|os gustaria|deseas|deseais)\b[^.!?]{0,55}\b(?:reservar|apuntarte|apuntaros|inscribirte|inscribiros)\b/.test(
+      assistantText,
+    ) ||
+    /\b(?:reservamos|te apunto|os apunto|preparamos la reserva)\b/.test(assistantText);
+  if (!askedToReserve) {
+    return undefined;
+  }
+
+  const compactText = text
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (
+    /^(?:no|no gracias|ahora no|todavia no|de momento no|por ahora no|prefiero que no|mejor no)$/.test(
+      compactText,
+    )
+  ) {
+    return "no";
+  }
+
+  if (
+    /^(?:si|si gracias|si por favor|claro|claro que si|vale|de acuerdo|perfecto|por supuesto|adelante|quiero|quiero reservar|me quiero apuntar|me gustaria reservar)$/.test(
+      compactText,
+    )
+  ) {
+    return "yes";
+  }
+
+  return undefined;
+}
+
+function defersBookingForInformation(text: string): boolean {
+  return (
+    /\bno\s+(?:quiero|deseo|necesito|voy\s+a)\s+(?:reservar|apuntarme|apuntarnos|inscribirme|inscribirnos)(?:\s+(?:aun|todavia|ahora|de\s+momento|por\s+ahora))?\b/.test(
+      text,
+    ) ||
+    /\bantes\s+de\s+(?:reservar|apuntarme|apuntarnos|inscribirme|inscribirnos)\b[^.!?]{0,100}\b(?:explic|cuent|inform|saber|conocer|duda)/.test(
+      text,
+    ) ||
+    /\b(?:primero|antes)\b[^.!?]{0,80}\b(?:explic|cuent|inform|saber|conocer)\b/.test(text)
+  );
+}
+
+function isAvailabilityPreferenceContinuation(
+  text: string,
+  context: MaternalyInterpretationContext,
+): boolean {
+  if (context.active_stage !== "choosing_session" || !detectModality(text)) {
+    return false;
+  }
+
+  const compactText = text
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .replace(/\bpor favor\b/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return /^(?:(?:yo\s+)?(?:prefiero|elijo|escojo|quiero|mejor)\s+|me\s+viene\s+mejor\s+|me\s+quedo\s+con\s+)?(?:la\s+)?(?:opcion\s+)?(?:de\s+|en\s+|para\s+)?(?:bilbao|erandio|online|presencial)(?:\s+presencial)?$/.test(
+    compactText,
+  );
 }
 
 function asksForGeneralOverview(text: string): boolean {
@@ -624,15 +786,47 @@ function extractPartnerName(message: string): string | undefined {
 }
 
 function inferPeopleCount(text: string): number | undefined {
-  if (/\bpareja\b|\bdos\b|\b2\s*(personas|plazas|asistentes)?\b/.test(text)) {
+  if (
+    /\ben\s+pareja\b|\b(?:somos|iremos|vamos|acudiremos|vendremos|seremos)\s+(?:los\s+)?dos\b|\b(?:dos|2)\s*(?:personas?|asistentes?)\b/.test(
+      text,
+    )
+  ) {
     return 2;
   }
 
-  if (/\buna\b|\b1\s*(persona|plaza|asistente)?\b/.test(text)) {
+  if (
+    /\b(?:una|1)\s*(?:persona|asistente)\b|\b(?:voy|ire|vengo|acudire|asistire|ira)\s+(?:yo\s+)?sol[ao]\b/.test(
+      text,
+    )
+  ) {
     return 1;
   }
 
   return extractNumber(text, /\b(\d{1,2})\s*(personas|plazas|asistentes)\b/);
+}
+
+function contextualPendingPeopleCount(
+  text: string,
+  context: MaternalyInterpretationContext,
+): number | undefined {
+  if (
+    context.active_stage !== "collecting_contact" ||
+    !context.pending_fields?.includes("peopleCount")
+  ) {
+    return undefined;
+  }
+
+  const compactText = text
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (/^(?:1|una|uno)$/.test(compactText)) {
+    return 1;
+  }
+  if (/^(?:2|dos)$/.test(compactText)) {
+    return 2;
+  }
+  return undefined;
 }
 
 function validateSlots(value: unknown): MaternalyNluSlots {
@@ -651,6 +845,7 @@ function validateSlots(value: unknown): MaternalyNluSlots {
     service_id: service?.id,
     service_name: compact(raw.service_name) ?? service?.name,
     normalized_service_key: normalizedServiceKey,
+    journey_stage: validJourneyStage(raw.journey_stage),
     location: compact(raw.location),
     modality: raw.modality === "online" || raw.modality === "presencial" ? raw.modality : undefined,
     preferred_date: compact(raw.preferred_date),
@@ -747,7 +942,16 @@ export class LlmIntentClassifier {
     context: MaternalyInterpretationContext = {},
   ): StructuredIntent {
     const text = normalize(message);
-    const explicitService = findKnowledgeService(text);
+    const explicitService = findKnowledgeService(text) ?? findParaphrasedCharlaService(text);
+    const journeyStage = detectJourneyStage({ text, explicitService, context });
+    const contextualReservationAnswer = reservationCtaAnswer(text, context);
+    const pendingPeopleCount = contextualPendingPeopleCount(text, context);
+    const activeContextService = getKnowledgeService(
+      context.active_service_id ?? context.active_normalized_service_key,
+    );
+    const location = detectLocation(text);
+    const modality = detectModality(text);
+    const availabilityPreferenceContinuation = isAvailabilityPreferenceContinuation(text, context);
     const alternativeCatalogQuery = asksForAlternativeCatalog(text, explicitService);
     const catalogFilterContinuation =
       context.active_stage === "collecting_service" &&
@@ -759,25 +963,34 @@ export class LlmIntentClassifier {
       (!explicitService || alternativeCatalogQuery);
     const pureGreeting = isPureGreeting(text);
     const asksForOtherActiveService = /\b(?:la|el)\s+otr[ao]\b/.test(text);
+    const compactSessionChoice = text.replace(/[¿?¡!.,;:]/g, " ").replace(/\s+/g, " ").trim();
     const selectedSession =
-      /\b(?:opci[oó]n\s*)?([1-9])\b/.test(text) || Boolean(extractDateLike(message));
+      pendingPeopleCount === undefined &&
+      (/\bopci[oó]n\s*([1-9])\b/.test(text) ||
+        /^[1-9]$/.test(compactSessionChoice) ||
+        Boolean(extractDateLike(message)) ||
+        /\b\d{1,2}\s+(?:de\s+)?(?:enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre)(?:\s+de\s+\d{4})?\b/.test(
+          text,
+        ));
     const selectsActiveSession = context.active_stage === "choosing_session" && selectedSession;
     const contextualService =
-      catalogModalityQuery || pureGreeting
+      catalogModalityQuery || pureGreeting || journeyStage
         ? null
         : asksForOtherActiveService
         ? alternateActiveService(context.active_service_id)
-        : selectsActiveSession ||
+        : contextualReservationAnswer ||
+            selectsActiveSession ||
+            availabilityPreferenceContinuation ||
             isContextualContinuation(text) ||
             asksForGeneralOverview(text) ||
             correctsAnAvailabilityAnswer(text) ||
             /\b(?:cu[aá]nto dura|duraci[oó]n|cu[aá]ntas horas|qu[eé] incluye|qu[eé] se ve|de qu[eé] va|contenidos?|temas?|para qui[eé]n|es para m[ií]|puedo ir|requisitos?|precio|precios|tarifa|tarifas|qu[eé] vale|cu[aá]nto sale|coste|horarios?|fechas?|plazas?|disponibilidad|d[ií]as|pr[oó]xim[ao]s?|ediciones?|beneficios?|d[oó]nde|sede|bilbao|erandio|online)\b/.test(
               text,
             )
-          ? getKnowledgeService(context.active_service_id)
+          ? activeContextService
           : null;
-    const service = catalogModalityQuery ? null : explicitService ?? contextualService;
-    const serviceScope: MaternalyServiceScope = catalogModalityQuery
+    const service = catalogModalityQuery || journeyStage ? null : explicitService ?? contextualService;
+    const serviceScope: MaternalyServiceScope = catalogModalityQuery || journeyStage
       ? "catalog"
       : explicitService
         ? "explicit"
@@ -789,33 +1002,37 @@ export class LlmIntentClassifier {
       /(horarios?|plazas?|disponibilidad|hay hueco|hueco|fechas?|qu[eé] d[ií]as|cu[aá]ndo es|pr[oó]xima|pr[oó]ximo|siguiente)/.test(
         text,
       );
-    const wantsRegistration =
+    const explicitlyWantsRegistration =
       /(reserv|apunt|inscrib|preinscrib|plaza|me interesa|quiero ir|quiero asistir|me gustar[ií]a asistir|gu[aá]rdame)/.test(
         text,
       );
-    const wantsBookingFocus =
-      /(reserv|apunt|inscrib|preinscrib|plaza|quiero ir|quiero asistir|me gustar[ií]a asistir|gu[aá]rdame)/.test(
-        text,
-      );
+    const wantsRegistration =
+      explicitlyWantsRegistration || contextualReservationAnswer === "yes";
+    const wantsBookingFocus = wantsRegistration;
     const wantsPayment = /\b(pago|pagar|link|enlace)\b/.test(text);
     const wantsInvoice = /(factura|justificante)/.test(text);
     const cancelOrReschedule =
       /(cancel|anular|darme de baja|darse de baja|\bbaja\b|cambiar(?:\s+de|\s+la)?\s+fecha|cambio(?:\s+de|\s+la)?\s+fecha|reagend|mover(?:\s+la)?\s+cita|no puedo ir|cambiar(?:\s+de|\s+la)?\s+sede)/.test(text);
     const paymentOrInvoiceHandoff = /(devolucion|devolución|factura|justificante|\bpago\b|pagar|link de pago|enlace de pago)/.test(text);
     const stopRequest = /\b(?:stop|parar|no\s+seguir|no\s+me\s+escrib|no\s+quiero\s+mensajes|baja\s+comunicaciones)\b/.test(text);
+    const explicitHumanRequest =
+      /\bhablar\s+con\b|\b(?:quiero|necesito|prefiero|puedo|podria)\b[^.!?]{0,55}\b(?:persona\s+humana|human[oa]|equipo|matrona|profesional|alguien)\b|\b(?:llamadme|llamame|que\s+me\s+llame|que\s+me\s+llamen)\b/.test(
+        text,
+      );
     const handoff =
       cancelOrReschedule ||
       paymentOrInvoiceHandoff ||
       stopRequest ||
-      /(hablar con|persona humana|humano|humana|llamad|equipo|matrona|profesional)/.test(text);
+      explicitHumanRequest;
     const reset = isMaternalyResetRequest(text);
     const privacy = /(privacidad|datos|proteccion de datos|protección de datos|rgpd|consentimiento)/.test(text);
-    const location = detectLocation(text);
     const asksAboutCompanionEligibility =
       /\b(?:puedo ir con|puede venir|puedo acudir con|admit[ií]s|acept[aá]is)\b.*\b(?:pareja|acompa[nñ]ante)\b/.test(
         text,
       );
-    const peopleCount = asksAboutCompanionEligibility ? undefined : inferPeopleCount(text);
+    const peopleCount = asksAboutCompanionEligibility
+      ? undefined
+      : pendingPeopleCount ?? inferPeopleCount(text);
     const pregnancyWeek = extractNumber(text, /\b(\d{1,2})\s*(semanas|semana)\b/);
     const pregnancyMonth = extractPregnancyMonth(text);
     const fullName = extractFullName(message);
@@ -845,17 +1062,22 @@ export class LlmIntentClassifier {
     );
     const explicitOverview = asksForGeneralOverview(text);
     const correctionTurn = correctsAnAvailabilityAnswer(text);
+    const bookingDeferredForInformation = defersBookingForInformation(text);
     const bareServiceMention = isBareServiceMention(text, explicitService);
     const shouldAnswerWithServiceInformation =
-      correctionTurn || explicitOverview || bareServiceMention;
+      correctionTurn || explicitOverview || bareServiceMention || bookingDeferredForInformation;
     const shouldStartRegistration = Boolean(
       serviceKey &&
         !shouldAnswerWithServiceInformation &&
-        (wantsAvailability || wantsRegistration),
+        (wantsAvailability || wantsRegistration || availabilityPreferenceContinuation),
     );
-    const stabilizedQuestionFocus = catalogModalityQuery
+    const stabilizedQuestionFocus = journeyStage
+      ? "general"
+      : availabilityPreferenceContinuation
+        ? "schedule"
+        : catalogModalityQuery
       ? "locations"
-      : correctionTurn || explicitOverview
+      : correctionTurn || explicitOverview || bookingDeferredForInformation
         ? "general"
         : serviceQuestionFocus;
 
@@ -863,8 +1085,9 @@ export class LlmIntentClassifier {
       service_id: service?.id,
       service_name: service?.name,
       normalized_service_key: serviceKey,
+      journey_stage: journeyStage,
       location,
-      modality: detectModality(text) ?? (contextualService ? context.modality : undefined),
+      modality: modality ?? (contextualService ? context.modality : undefined),
       preferred_date: extractDateLike(message),
       preferred_time: text.includes("mañana") || text.includes("manana")
         ? "morning"
@@ -883,6 +1106,18 @@ export class LlmIntentClassifier {
       observations: text.includes("prueba_bot_codex_no_cliente_real")
         ? "PRUEBA_BOT_CODEX_NO_CLIENTE_REAL"
         : undefined,
+      consent:
+        contextualReservationAnswer === "yes"
+          ? true
+          : contextualReservationAnswer === "no"
+            ? false
+            : undefined,
+      last_question_answered:
+        contextualReservationAnswer === "yes"
+          ? "reservation_accepted"
+          : contextualReservationAnswer === "no"
+            ? "reservation_declined"
+            : undefined,
     };
     return validateStructuredIntent({
       intent: reset
@@ -899,8 +1134,12 @@ export class LlmIntentClassifier {
               ? "invoice_question"
               : wantsPayment && !wantsRegistration
                 ? "payment_question"
+                : journeyStage
+                  ? "service_discovery"
                 : selectedSession && serviceKey
                   ? "registration_slot_selected"
+                  : availabilityPreferenceContinuation && serviceKey
+                    ? "availability_request"
                   : hasContactData
                     ? "registration_data_provided"
                     : catalogModalityQuery
@@ -930,9 +1169,14 @@ export class LlmIntentClassifier {
       needs_availability_lookup: Boolean(
         serviceKey &&
           !shouldAnswerWithServiceInformation &&
-          (wantsAvailability || wantsRegistration || selectedSession),
+          (wantsAvailability ||
+            wantsRegistration ||
+            selectedSession ||
+            availabilityPreferenceContinuation),
       ),
-      confidence: catalogModalityQuery
+      confidence: journeyStage || contextualReservationAnswer || availabilityPreferenceContinuation
+        ? 0.96
+        : catalogModalityQuery
         ? 0.92
         : service || reset || privacy || handoff
           ? 0.82
@@ -1017,6 +1261,12 @@ export class LlmIntentClassifier {
         deterministic.intent === "greeting" ||
         deterministic.intent === "service_discovery" ||
         deterministic.intent === "registration_slot_selected" ||
+        deterministic.slots.journey_stage !== undefined ||
+        reservationCtaAnswer(normalizedMessage, context) !== undefined ||
+        contextualPendingPeopleCount(normalizedMessage, context) !== undefined ||
+        isAvailabilityPreferenceContinuation(normalizedMessage, context) ||
+        findParaphrasedCharlaService(normalizedMessage) !== null ||
+        defersBookingForInformation(normalizedMessage) ||
         deterministic.service_scope === "catalog" ||
         correctsAnAvailabilityAnswer(normalizedMessage) ||
         isGestationalContextDisclosure(normalizedMessage) ||

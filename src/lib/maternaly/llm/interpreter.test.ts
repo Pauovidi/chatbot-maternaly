@@ -214,6 +214,127 @@ describe("Maternaly LLM interpreter", () => {
     });
   });
 
+  it.each([
+    ["embarazo", "embarazo"],
+    ["estoy embarazada de cinco meses", "embarazo"],
+    ["postparto", "postparto"],
+    ["he dado a luz", "postparto"],
+    ["otros", "otros"],
+    ["otra cosa", "otros"],
+  ])("understands the journey-stage answer '%s' without needing a service phrase", async (
+    message,
+    journeyStage,
+  ) => {
+    const result = await new LlmIntentClassifier().classify(message, {
+      active_stage: "choosing_journey_stage",
+    });
+
+    expect(result).toMatchObject({
+      intent: "service_discovery",
+      service_scope: "catalog",
+      slots: expect.objectContaining({ journey_stage: journeyStage }),
+      needs_availability_lookup: false,
+    });
+    expect(result.service_candidate).toBeUndefined();
+  });
+
+  it("does not mistake a pregnancy service name for a journey-stage choice", async () => {
+    const result = await new LlmIntentClassifier().classify("Pilates embarazo", {
+      active_stage: "choosing_journey_stage",
+    });
+
+    expect(result).toMatchObject({
+      intent: "service_question",
+      service_scope: "explicit",
+      service_candidate: "pilates",
+    });
+    expect(result.slots.journey_stage).toBeUndefined();
+  });
+
+  it.each([
+    "sesión gratuita de matronas",
+    "Antes de apuntarme, explícame bien la sesión que dan las matronas al comienzo del embarazo",
+    "Cuéntame la información para las primeras veinte semanas",
+  ])("maps the charla paraphrase '%s' to the informational service before booking", async (message) => {
+    const result = await new LlmIntentClassifier().classify(message);
+
+    expect(result).toMatchObject({
+      intent: "service_question",
+      service_scope: "explicit",
+      service_candidate: "charla_embarazo_1_20",
+      needs_availability_lookup: false,
+    });
+    expect(result.should_handoff).toBe(false);
+  });
+
+  it("understands a brief yes after the charla booking CTA", async () => {
+    const result = await new LlmIntentClassifier().classify("sí, por favor", {
+      active_normalized_service_key: "charla_embarazo_1_20",
+      active_stage: "awaiting_booking_decision",
+      recent_messages: [
+        { role: "assistant", text: "¿Quieres reservar tu plaza?" },
+      ],
+    });
+
+    expect(result).toMatchObject({
+      intent: "registration_start",
+      service_scope: "contextual",
+      service_candidate: "charla_embarazo_1_20",
+      needs_availability_lookup: true,
+      slots: expect.objectContaining({
+        normalized_service_key: "charla_embarazo_1_20",
+        consent: true,
+        last_question_answered: "reservation_accepted",
+      }),
+    });
+  });
+
+  it("understands a brief no after the charla booking CTA without opening availability", async () => {
+    const result = await new LlmIntentClassifier().classify("no, gracias", {
+      active_service_id: "charla_embarazo_1_20",
+      active_stage: "awaiting_booking_decision",
+      recent_messages: [
+        { role: "assistant", text: "¿Quieres reservar tu plaza?" },
+      ],
+    });
+
+    expect(result).toMatchObject({
+      intent: "service_question",
+      service_scope: "contextual",
+      service_candidate: "charla_embarazo_1_20",
+      needs_availability_lookup: false,
+      slots: expect.objectContaining({
+        consent: false,
+        last_question_answered: "reservation_declined",
+      }),
+    });
+  });
+
+  it.each([
+    ["Erandio", "erandio", "presencial"],
+    ["prefiero Bilbao", "bilbao", "presencial"],
+    ["la opción online", "online", "online"],
+  ])("uses '%s' as an availability continuation while choosing a charla session", async (
+    message,
+    location,
+    modality,
+  ) => {
+    const result = await new LlmIntentClassifier().classify(message, {
+      active_service_id: "charla_embarazo_1_20",
+      active_normalized_service_key: "charla_embarazo_1_20",
+      active_stage: "choosing_session",
+    });
+
+    expect(result).toMatchObject({
+      intent: "availability_request",
+      service_scope: "contextual",
+      service_candidate: "charla_embarazo_1_20",
+      service_question_focus: "schedule",
+      needs_availability_lookup: true,
+      slots: expect.objectContaining({ location, modality }),
+    });
+  });
+
   it("does not drag service context into a clear unrelated message", async () => {
     const classifier = new LlmIntentClassifier();
 
@@ -616,5 +737,124 @@ describe("Maternaly LLM interpreter", () => {
       slots: expect.objectContaining({ pregnancy_month: 5 }),
       needs_availability_lookup: false,
     });
+  });
+
+  it("keeps an explicit booking refusal informational even when the same sentence mentions reservar", async () => {
+    await expect(
+      new LlmIntentClassifier().classify(
+        "¿En qué consiste la charla de las primeras veinte semanas? No quiero reservar aún",
+      ),
+    ).resolves.toMatchObject({
+      intent: "service_question",
+      service_candidate: "charla_embarazo_1_20",
+      service_question_focus: "general",
+      needs_availability_lookup: false,
+    });
+  });
+
+  it("recognizes a Spanish natural date as a session choice in the active Charla flow", async () => {
+    await expect(
+      new LlmIntentClassifier().classify("Online, 10 de agosto", {
+        active_service_id: "charla_embarazo_1_20",
+        active_normalized_service_key: "charla_embarazo_1_20",
+        active_stage: "choosing_session",
+      }),
+    ).resolves.toMatchObject({
+      intent: "registration_slot_selected",
+      service_candidate: "charla_embarazo_1_20",
+      slots: expect.objectContaining({ location: "online", modality: "online" }),
+      needs_availability_lookup: true,
+    });
+  });
+
+  it("does not treat 'guárdame una plaza' as an explicit one-person answer", async () => {
+    const result = await new LlmIntentClassifier().classify(
+      "Sí, me encaja; adelante, guárdame una plaza",
+      {
+        active_service_id: "charla_embarazo_1_20",
+        active_normalized_service_key: "charla_embarazo_1_20",
+        active_stage: "awaiting_booking_decision",
+        recent_messages: [
+          { role: "assistant", text: "¿Quieres reservar tu plaza?" },
+        ],
+      },
+    );
+
+    expect(result).toMatchObject({
+      intent: "registration_start",
+      needs_availability_lookup: true,
+    });
+    expect(result.slots.people_count).toBeUndefined();
+  });
+
+  it.each([
+    ["1", 1],
+    ["una", 1],
+    ["uno", 1],
+    ["2", 2],
+    ["dos", 2],
+  ])(
+    "interprets the brief pending-attendee answer %s as %i person(s)",
+    async (message, expectedPeopleCount) => {
+      const result = await new LlmIntentClassifier().classify(message, {
+        active_service_id: "charla_embarazo_1_20",
+        active_normalized_service_key: "charla_embarazo_1_20",
+        active_stage: "collecting_contact",
+        pending_fields: ["peopleCount", "fullName", "fppOrDueDate"],
+        recent_messages: [
+          { role: "assistant", text: "Perfecto. Antes de continuar, ¿acudiréis una o dos personas?" },
+        ],
+      });
+
+      expect(result).toMatchObject({
+        intent: "registration_data_provided",
+        slots: expect.objectContaining({ people_count: expectedPeopleCount }),
+        people_count: expectedPeopleCount,
+        needs_availability_lookup: false,
+      });
+    },
+  );
+
+  it.each(["1", "una", "uno", "2", "dos"])(
+    "does not infer the brief attendee answer %s outside a pending people-count field",
+    async (message) => {
+      const result = await new LlmIntentClassifier().classify(message, {
+        active_service_id: "charla_embarazo_1_20",
+        active_normalized_service_key: "charla_embarazo_1_20",
+        active_stage: "collecting_contact",
+        pending_fields: ["fullName", "fppOrDueDate"],
+      });
+
+      expect(result.slots.people_count).toBeUndefined();
+      expect(result.people_count).toBeUndefined();
+    },
+  );
+
+  it("keeps a bare number as a session option while choosing a session", async () => {
+    const result = await new LlmIntentClassifier().classify("2", {
+      active_service_id: "charla_embarazo_1_20",
+      active_normalized_service_key: "charla_embarazo_1_20",
+      active_stage: "choosing_session",
+      pending_fields: [],
+    });
+
+    expect(result).toMatchObject({
+      intent: "registration_slot_selected",
+      service_candidate: "charla_embarazo_1_20",
+      needs_availability_lookup: true,
+    });
+    expect(result.slots.people_count).toBeUndefined();
+  });
+
+  it("does not confuse a day of month with the pending people count", async () => {
+    const result = await new LlmIntentClassifier().classify("2 de octubre", {
+      active_service_id: "charla_embarazo_1_20",
+      active_normalized_service_key: "charla_embarazo_1_20",
+      active_stage: "collecting_contact",
+      pending_fields: ["peopleCount", "fppOrDueDate"],
+    });
+
+    expect(result.slots.people_count).toBeUndefined();
+    expect(result.people_count).toBeUndefined();
   });
 });

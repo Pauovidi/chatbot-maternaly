@@ -119,6 +119,8 @@ export function createNormalizedWorkbook(options: NormalizedWorkbookOptions = {}
   const extraSessionId = isCharla ? "sesion_charla_erandio_20260924" : "sesion_blw_erandio_20260902";
   const extraSessionName = isCharla ? "Charla Erandio 24 septiembre" : "BLW Erandio 2 septiembre";
   const extraDate = isCharla ? "2026-09-24" : "2026-09-02";
+  const extraTime = isCharla ? "18:30" : time;
+  const extraEndTime = isCharla ? "20:00" : endTime;
   const capacity = options.sessionCapacity ?? "3";
   const extraCapacity = options.sessionCapacity ?? "4";
   const withVisualRows = (tab: string, rows: unknown[][]) =>
@@ -144,7 +146,7 @@ export function createNormalizedWorkbook(options: NormalizedWorkbookOptions = {}
         ...REAL_TEMPLATE_TEST_HEADERS.Sesiones,
         [sessionId, groupId, serviceKey, date, time, endTime, center, "Presencial", "Activa", capacity, "0", capacity, "sí", "sí", ""],
         ...(options.multiSession
-          ? [[extraSessionId, extraGroupId, serviceKey, extraDate, time, endTime, extraCenter, "Presencial", "Activa", extraCapacity, "0", extraCapacity, "sí", "sí", ""]]
+          ? [[extraSessionId, extraGroupId, serviceKey, extraDate, extraTime, extraEndTime, extraCenter, "Presencial", "Activa", extraCapacity, "0", extraCapacity, "sí", "sí", ""]]
           : []),
       ]),
       Inscripciones: withVisualRows("Inscripciones", [
@@ -172,7 +174,7 @@ export function createNormalizedWorkbook(options: NormalizedWorkbookOptions = {}
       ...NORMALIZED_TEST_HEADERS.Sesiones,
       [sessionId, groupId, sessionName, date, time, endTime, "", "Activa"],
       ...(options.multiSession
-        ? [[extraSessionId, extraGroupId, extraSessionName, extraDate, time, endTime, "", "Activa"]]
+        ? [[extraSessionId, extraGroupId, extraSessionName, extraDate, extraTime, extraEndTime, "", "Activa"]]
         : []),
     ]),
     Inscripciones: withVisualRows("Inscripciones", [

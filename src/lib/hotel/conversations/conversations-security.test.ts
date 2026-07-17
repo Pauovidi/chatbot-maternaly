@@ -358,7 +358,7 @@ describe("conversations security", () => {
     expect(text).not.toMatch(legacyHotelResponsePattern);
   });
 
-  it("answers prenatal diagnosis questions through the Maternaly core state", async () => {
+  it("answers Detesex questions through the Maternaly core state", async () => {
     tempDir = mkdtempSync(path.join(os.tmpdir(), "maternaly-twilio-test-adn-"));
     process.env.HOTEL_CONVERSATIONS_STORE_DIR = tempDir;
     process.env.TWILIO_WEBHOOK_AUTH_TOKEN = "expected-token";
@@ -386,9 +386,8 @@ describe("conversations security", () => {
 
     expect(response.status).toBe(200);
     expect(text).toContain("Detesex");
-    expect(text).toContain("Diagnóstico Prenatal");
     expect(text).not.toMatch(/reserva confirmada|pago confirmado|factura enviada|plaza confirmada/i);
-    expect(conversation.serviceDetected).toBe("Diagnóstico Prenatal");
+    expect(conversation.serviceDetected).toBe("Detesex");
     expect(conversation.events).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ eventType: "maternaly_nlu_interpreted" }),

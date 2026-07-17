@@ -1,3 +1,5 @@
+import type { MaternalyJourneyStage as ContractJourneyStage } from "@/lib/maternaly/knowledge/charla-informativa-contract";
+
 export type ConversationMode = "bot" | "human";
 export type ConversationSourceType =
   | "whatsapp"
@@ -12,6 +14,7 @@ export type MessageSenderType = "user" | "bot" | "human" | "system";
 export type MessageTransport = "whatsapp";
 export type ConversationClientStatus = "known" | "unknown" | "ambiguous" | "blocked";
 export type ConversationClientConfidence = "strong" | "medium" | "weak" | "none";
+export type MaternalyJourneyStage = ContractJourneyStage;
 
 export interface PendingReservationProposal {
   proposalId: string;
@@ -50,12 +53,16 @@ export interface PendingReservationContext {
 
 export interface MaternalyNormalizedFlowState {
   serviceKey?: "charla_embarazo_1_20" | "taller_blw";
+  journeyStage?: MaternalyJourneyStage;
   stage?:
     | "greeting"
+    | "choosing_journey_stage"
     | "collecting_service"
+    | "awaiting_booking_decision"
     | "choosing_session"
     | "collecting_contact"
     | "write_planned"
+    | "confirmed"
     | "blocked"
     | "handoff";
   selectedSessionId?: string;

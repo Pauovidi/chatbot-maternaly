@@ -552,7 +552,7 @@ describe("Maternaly conversation authority", () => {
     expect(result.state?.pregnancyWeek).toBeUndefined();
   });
 
-  it("accepts pregnancy week when it is relevant to an active Charla registration", async () => {
+  it("records pregnancy week but keeps FPP pending in an active Charla registration", async () => {
     const client = new InMemoryNormalizedSheetsClient(
       createRealTemplateWorkbook({ serviceKey: "charla_embarazo_1_20" }),
     );
@@ -590,8 +590,10 @@ describe("Maternaly conversation authority", () => {
     expect(result.state).toMatchObject({
       serviceKey: "charla_embarazo_1_20",
       pregnancyWeek: 20,
-      stage: "write_planned",
+      stage: "collecting_contact",
+      pendingFields: ["fppOrDueDate"],
     });
+    expect(result.state?.fppOrDueDate).toBeUndefined();
   });
 
   it.each([

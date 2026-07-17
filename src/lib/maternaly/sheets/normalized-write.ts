@@ -12,6 +12,7 @@ import {
   hasColumn,
   normalizeSheetText,
   normalizePhoneForMatch,
+  rowsToObjects,
   type MaternalyNormalizedServiceKey,
   type NormalizedColumnKey,
 } from "@/lib/maternaly/sheets/normalized-template";
@@ -135,6 +136,54 @@ function hasExistingRegistration(
   });
 }
 
+async function hasExistingRegistrationInSheet(input: {
+  client: NormalizedSheetsClient;
+  sheetId: string;
+  idempotencyKey: string;
+}): Promise<boolean> {
+  const parsed = rowsToObjects(
+    await input.client.readTabRows(input.sheetId, "Inscripciones"),
+    { tab: "Inscripciones" },
+  );
+  if (parsed.parseError) {
+    throw new Error(`idempotency_recheck_failed:${parsed.parseError}`);
+  }
+
+  const registrationId = buildSyntheticIds(input.idempotencyKey).registrationId;
+  return parsed.rows.some((row) => {
+    const notes = getCell(row, "notes");
+    return (
+      getCell(row, "idempotencyKey") === input.idempotencyKey ||
+      getCell(row, "registrationId") === registrationId ||
+      notes.includes(input.idempotencyKey) ||
+      notes.includes(registrationId)
+    );
+  });
+}
+
+// This queue serializes one Node.js process. The Sheets recheck makes retries in
+// that process idempotent, but it is not a distributed lock across replicas.
+const registrationWriteQueues = new Map<string, Promise<void>>();
+
+async function withRegistrationWriteLock<T>(key: string, task: () => Promise<T>): Promise<T> {
+  const previous = registrationWriteQueues.get(key) ?? Promise.resolve();
+  let release: () => void = () => undefined;
+  const current = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  registrationWriteQueues.set(key, current);
+
+  await previous.catch(() => undefined);
+  try {
+    return await task();
+  } finally {
+    release();
+    if (registrationWriteQueues.get(key) === current) {
+      registrationWriteQueues.delete(key);
+    }
+  }
+}
+
 interface ColumnRequirement {
   label: string;
   alternatives: NormalizedColumnKey[];
@@ -253,6 +302,9 @@ function baseValues(input: {
   ].filter(Boolean).join(" | ");
   const source = "whatsapp";
   const price = priceForService(input.draft.serviceKey, input.draft.peopleCount);
+  const paymentStatus = input.draft.serviceKey === "charla_embarazo_1_20"
+    ? "no_aplica"
+    : "pendiente";
 
   return {
     serviceId: input.draft.serviceKey,
@@ -277,7 +329,7 @@ function baseValues(input: {
     partnerName: input.draft.partnerName,
     source,
     status: "preinscrita",
-    paymentStatus: "pendiente",
+    paymentStatus,
     price,
     notes,
     createdAt: input.createdAt,
@@ -312,7 +364,7 @@ function baseValues(input: {
     estado: "Preinscrita",
     estado_cliente: "lead",
     estado_inscripcion: "preinscrita",
-    estado_pago: "pendiente",
+    estado_pago: paymentStatus,
     precio_acordado: price,
     observaciones: notes,
     notas_privadas: notes,
@@ -484,39 +536,62 @@ export async function applyRegistrationWritePlan(input: {
     };
   }
 
-  const updatedRanges: string[] = [];
-  const formattedRanges: string[] = [];
-  const formatWarnings: string[] = [];
-  for (const operation of input.plan.operations) {
-    if (operation.operation !== "append") {
-      continue;
+  const lockKey = `${input.plan.sheetId}:${input.plan.idempotencyKey}`;
+  return withRegistrationWriteLock<NormalizedRegistrationWriteResult>(lockKey, async () => {
+    if (
+      await hasExistingRegistrationInSheet({
+        client: input.client,
+        sheetId: input.plan.sheetId,
+        idempotencyKey: input.plan.idempotencyKey,
+      })
+    ) {
+      return {
+        ok: true,
+        applied: false,
+        mode: "live",
+        blockedReason: "duplicate_idempotency_key",
+        plan: input.plan,
+        updatedRanges: [],
+        formattedRanges: [],
+        formatApplied: false,
+        formatWarnings: [],
+      };
     }
 
-    const headers = input.snapshot.tabs[operation.tab].headers;
-    const result = await input.client.appendRow(
-      input.plan.sheetId,
-      operation.tab,
-      valuesForHeaders(headers, operation.values),
-    );
-    if (result.updatedRange) {
-      updatedRanges.push(result.updatedRange);
-    }
-    if (result.formattedRange) {
-      formattedRanges.push(result.formattedRange);
-    }
-    if (result.formatWarning) {
-      formatWarnings.push(`${operation.tab}:${result.formatWarning}`);
-    }
-  }
+    const updatedRanges: string[] = [];
+    const formattedRanges: string[] = [];
+    const formatWarnings: string[] = [];
+    for (const operation of input.plan.operations) {
+      if (operation.operation !== "append") {
+        continue;
+      }
 
-  return {
-    ok: true,
-    applied: updatedRanges.length > 0,
-    mode: "live",
-    plan: input.plan,
-    updatedRanges,
-    formattedRanges,
-    formatApplied: updatedRanges.length > 0 && formattedRanges.length === updatedRanges.length,
-    formatWarnings,
-  };
+      const headers = input.snapshot.tabs[operation.tab].headers;
+      const result = await input.client.appendRow(
+        input.plan.sheetId,
+        operation.tab,
+        valuesForHeaders(headers, operation.values),
+      );
+      if (result.updatedRange) {
+        updatedRanges.push(result.updatedRange);
+      }
+      if (result.formattedRange) {
+        formattedRanges.push(result.formattedRange);
+      }
+      if (result.formatWarning) {
+        formatWarnings.push(`${operation.tab}:${result.formatWarning}`);
+      }
+    }
+
+    return {
+      ok: true,
+      applied: updatedRanges.length > 0,
+      mode: "live",
+      plan: input.plan,
+      updatedRanges,
+      formattedRanges,
+      formatApplied: updatedRanges.length > 0 && formattedRanges.length === updatedRanges.length,
+      formatWarnings,
+    };
+  });
 }

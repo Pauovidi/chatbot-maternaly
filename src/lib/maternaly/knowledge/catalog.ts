@@ -1,4 +1,8 @@
 import type { MaternalyServiceId } from "@/lib/maternaly/domain/types";
+import {
+  MATERNALY_CHARLA_FACTS,
+  MATERNALY_CHARLA_SESSIONS,
+} from "@/lib/maternaly/knowledge/charla-informativa-contract";
 import type { MaternalyNormalizedServiceKey } from "@/lib/maternaly/sheets/normalized-template";
 
 export interface KnowledgeSession {
@@ -28,7 +32,7 @@ export interface KnowledgeService {
   nextQuestion: string;
 }
 
-export const MATERNALY_KNOWLEDGE_VERSION = "maternaly_kb_2026_07_16_conversational_audit_v1";
+export const MATERNALY_KNOWLEDGE_VERSION = "maternaly_kb_2026_07_17_word_pregnancy_menu_v2";
 
 export const MATERNALY_KNOWLEDGE_SERVICES: KnowledgeService[] = [
   {
@@ -45,11 +49,10 @@ export const MATERNALY_KNOWLEDGE_SERVICES: KnowledgeService[] = [
       "embarazadas 1 a 20",
     ],
     category: "reservable",
-    summary:
-      "Charla gratuita para embarazadas entre la semana 1 y la 20, disponible en Erandio, Bilbao y online.",
+    summary: `${MATERNALY_CHARLA_FACTS.name}, disponible en Erandio, Bilbao y online.`,
     details: [
-      "Trata cambios corporales, cuidados, alimentación, actividad física, exámenes, medicación segura, sexualidad y cambios emocionales.",
-      "La charla la imparten matronas y se puede acudir sola o con pareja o acompañante.",
+      `Trata ${MATERNALY_CHARLA_FACTS.topics.join(", ")}.`,
+      `La charla la imparten ${MATERNALY_CHARLA_FACTS.deliveredBy}. ${MATERNALY_CHARLA_FACTS.companionPolicy}`,
       "Las plazas deben comprobarse en el Sheet normalizado si está disponible.",
     ],
     requiredData: [
@@ -59,20 +62,14 @@ export const MATERNALY_KNOWLEDGE_SERVICES: KnowledgeService[] = [
       "nombre de pareja o acompañante si acuden 2",
       "fecha probable de parto",
     ],
-    sessions: [
-      { location: "Erandio", modality: "presencial", date: "2026-06-25", startTime: "18:30" },
-      { location: "Erandio", modality: "presencial", date: "2026-07-16", startTime: "18:30" },
-      { location: "Erandio", modality: "presencial", date: "2026-08-20", startTime: "18:30" },
-      { location: "Erandio", modality: "presencial", date: "2026-09-24", startTime: "18:30" },
-      { location: "Erandio", modality: "presencial", date: "2026-10-08", startTime: "18:30" },
-      { location: "Bilbao", modality: "presencial", date: "2026-06-16", startTime: "17:00" },
-      { location: "Bilbao", modality: "presencial", date: "2026-10-06", startTime: "17:00" },
-      { location: "Bilbao", modality: "presencial", date: "2026-12-15", startTime: "17:00" },
-      { modality: "online", date: "2026-07-20", startTime: "19:00" },
-      { modality: "online", date: "2026-08-10", startTime: "19:00" },
-      { modality: "online", date: "2026-09-07", startTime: "19:00" },
-      { modality: "online", date: "2026-10-05", startTime: "19:00" },
-    ],
+    sessions: MATERNALY_CHARLA_SESSIONS.map(
+      ({ location, modality, date, startTime }) => ({
+        location,
+        modality,
+        date,
+        startTime,
+      }),
+    ),
     safetyNotes: [
       "No confirmar plaza si el Sheet no devuelve disponibilidad fiable.",
       "Si falla Sheets, recoger datos y derivar la solicitud.",
@@ -129,6 +126,140 @@ export const MATERNALY_KNOWLEDGE_SERVICES: KnowledgeService[] = [
     nextQuestion: "¿Te interesa Bilbao o Erandio?",
   },
   {
+    id: "test_adn_fetal",
+    name: "Test ADN fetal",
+    aliases: [
+      "test adn fetal",
+      "test de adn fetal",
+      "test adn",
+      "prueba adn fetal",
+      "adn fetal",
+      "adn prenatal",
+      "test prenatal no invasivo",
+      "everli",
+    ],
+    category: "sensitive",
+    summary:
+      "Prueba prenatal no invasiva que analiza ADN fetal para detectar las trisomías 21, 18 y 13.",
+    details: [
+      "La información validada del servicio EVERLI indica una precisión superior al 99 % y resultados en 3-6 días laborables.",
+      "Puede realizarse en embarazo gemelar desde la semana 12 y también en casos de ovodonación.",
+    ],
+    requiredData: ["semana de embarazo", "tipo de prueba", "teléfono de contacto"],
+    clinicalEscalation: true,
+    safetyNotes: [
+      "No interpretar resultados ni dar diagnóstico por WhatsApp.",
+      "El equipo debe confirmar disponibilidad, condiciones y tarifa antes de cerrar una cita.",
+    ],
+    nextQuestion:
+      "¿Quieres información general sobre la prueba o prefieres que el equipo confirme cómo gestionarla?",
+  },
+  {
+    id: "detesex",
+    name: "Detesex",
+    aliases: [
+      "detesex",
+      "dete sex",
+      "test detesex",
+      "test de sexo fetal",
+      "sexo fetal por sangre",
+      "sexo del bebe por sangre",
+      "sexo del bebé por sangre",
+      "analisis para saber el sexo del bebe",
+      "análisis para saber el sexo del bebé",
+      "sexo del bebe mediante analisis de sangre",
+      "sexo del bebé mediante análisis de sangre",
+    ],
+    category: "sensitive",
+    summary:
+      "Análisis de sangre para conocer de forma temprana el sexo del bebé mediante la detección del cromosoma Y.",
+    details: ["La información disponible indica que puede realizarse desde la semana 5."],
+    requiredData: ["semana de embarazo", "teléfono de contacto"],
+    clinicalEscalation: true,
+    safetyNotes: [
+      "No interpretar resultados por WhatsApp.",
+      "El equipo debe confirmar disponibilidad, condiciones y tarifa antes de cerrar una cita.",
+    ],
+    nextQuestion:
+      "¿Quieres que te cuente en qué consiste o prefieres que el equipo confirme las opciones para realizarlo?",
+  },
+  {
+    id: "preparacion_parto",
+    name: "Preparación al parto",
+    aliases: [
+      "preparacion al parto",
+      "preparación al parto",
+      "curso preparacion al parto",
+      "curso de preparacion al parto",
+      "curso de preparación al parto",
+      "preparacion parto",
+      "preparación parto",
+      "curso preparto",
+      "clases preparto",
+    ],
+    category: "informational",
+    summary:
+      "Servicio de preparación al parto de Maternaly, disponible por seguro o de forma privada.",
+    details: [
+      "Antes de cerrar una opción, el equipo confirma la cobertura y si hace falta una entrevista previa.",
+    ],
+    requiredData: ["seguro o privado", "semana de embarazo"],
+    requiresInterview: true,
+    safetyNotes: [
+      "No inventar horarios, tarifas, cobertura ni dar una plaza por confirmada.",
+    ],
+    nextQuestion: "¿Lo buscas por seguro o de forma privada?",
+  },
+  {
+    id: "metodo_maternaly",
+    name: "Método Maternaly",
+    aliases: [
+      "metodo maternaly",
+      "método maternaly",
+      "programa maternaly",
+    ],
+    category: "informational",
+    summary:
+      "Es una de las opciones de embarazo de Maternaly y puede consultarse por seguro o de forma privada.",
+    details: [
+      "El equipo confirma de forma personalizada las condiciones, el contenido y la disponibilidad antes de ofrecer una cita.",
+    ],
+    requiredData: ["seguro o privado", "motivo de consulta"],
+    safetyNotes: [
+      "No inventar contenido, horarios, tarifas, cobertura ni disponibilidad.",
+    ],
+    nextQuestion: "¿Lo buscas por seguro o de forma privada?",
+  },
+  {
+    id: "ecografia_5d",
+    name: "Ecografía 5D",
+    aliases: [
+      "ecografia 5d",
+      "ecografía 5d",
+      "eco 5d",
+      "eco emocional",
+      "ecografia emocional 5d",
+      "ecografía emocional 5d",
+      "5d",
+      "8k",
+    ],
+    category: "sensitive",
+    summary:
+      "Ecografía emocional 5D/8K, no diagnóstica, orientada a ver al bebé durante el embarazo.",
+    details: [
+      "La franja indicada como más adecuada es entre las semanas 24 y 30.",
+      "Si el bebé no se deja ver, la información disponible contempla hasta tres repeticiones sin coste.",
+    ],
+    requiredData: ["semana de embarazo", "teléfono de contacto"],
+    clinicalEscalation: true,
+    safetyNotes: [
+      "No presentarla como prueba diagnóstica ni interpretar hallazgos.",
+      "El equipo debe confirmar disponibilidad, condiciones y tarifa.",
+    ],
+    nextQuestion:
+      "¿De cuántas semanas estás para que el equipo pueda orientarte sobre esta ecografía?",
+  },
+  {
     id: "pilates",
     name: "Pilates Embarazo",
     aliases: ["pilates", "pilates embarazo", "pilates embarazadas", "pilates prenatal"],
@@ -178,7 +309,19 @@ export const MATERNALY_KNOWLEDGE_SERVICES: KnowledgeService[] = [
   {
     id: "aipap_agua",
     name: "AIPAP Agua",
-    aliases: ["aipap agua", "agua", "piscina", "hydra", "hidra", "beup", "up&you", "up and you"],
+    aliases: [
+      "aipap agua",
+      "aipap",
+      "aipap embarazo",
+      "aipap para el embarazo",
+      "agua",
+      "piscina",
+      "hydra",
+      "hidra",
+      "beup",
+      "up&you",
+      "up and you",
+    ],
     category: "informational",
     summary:
       "Método en piscina para preparar físicamente el parto; no hace falta saber nadar porque se trabaja donde se hace pie.",
@@ -201,7 +344,13 @@ export const MATERNALY_KNOWLEDGE_SERVICES: KnowledgeService[] = [
   {
     id: "yoga_prenatal",
     name: "Yoga Prenatal",
-    aliases: ["yoga", "yoga prenatal"],
+    aliases: [
+      "yoga",
+      "yoga prenatal",
+      "yoga embarazo",
+      "yoga para el embarazo",
+      "yoga embarazadas",
+    ],
     category: "informational",
     summary: "Actividad prenatal informativa; aparece Bilbao miércoles 11:15-12:15 en documentos.",
     details: ["Precio orientativo: 59 €/mes 1 clase/semana."],
@@ -227,9 +376,89 @@ export const MATERNALY_KNOWLEDGE_SERVICES: KnowledgeService[] = [
     nextQuestion: "¿Lo buscas durante embarazo o postparto?",
   },
   {
+    id: "entrenamiento_funcional_embarazo",
+    name: "Entrenamiento funcional para el embarazo",
+    aliases: [
+      "entrenamiento funcional embarazo",
+      "entrenamiento funcional para el embarazo",
+      "entrenamiento funcional",
+      "entrenamiento para embarazadas",
+      "entrenamiento embarazadas",
+    ],
+    category: "informational",
+    summary:
+      "Actividad de entrenamiento funcional incluida entre las opciones de embarazo de Maternaly.",
+    details: [
+      "El equipo debe confirmar el grupo activo, la adecuación, los horarios y las condiciones antes de ofrecer una plaza.",
+    ],
+    requiredData: ["semana de embarazo", "preferencia de sede u horario"],
+    safetyNotes: [
+      "No inventar horarios, tarifas o disponibilidad.",
+      "Si se mencionan síntomas o una contraindicación, derivar al equipo profesional.",
+    ],
+    nextQuestion:
+      "¿Quieres que el equipo confirme qué grupo y horario pueden encajarte?",
+  },
+  {
+    id: "fisioterapia_embarazo",
+    name: "Unidad de Fisioterapia en el embarazo",
+    aliases: [
+      "fisioterapia embarazo",
+      "fisioterapia en el embarazo",
+      "fisio embarazo",
+      "fisioterapia para embarazadas",
+      "fisio para embarazadas",
+      "unidad fisioterapia embarazo",
+      "unidad de fisioterapia en el embarazo",
+    ],
+    category: "sensitive",
+    summary:
+      "Unidad de fisioterapia para consultas durante el embarazo, como ciática, pubalgia o dolor lumbar.",
+    details: [
+      "También consta atención de drenaje linfático para piernas hinchadas o túnel carpiano y masaje perineal desde la semana 32.",
+    ],
+    requiredData: ["motivo de consulta", "semana de embarazo", "teléfono de contacto"],
+    clinicalEscalation: true,
+    safetyNotes: [
+      "No dar diagnóstico ni pautas clínicas personalizadas por WhatsApp.",
+      "El equipo profesional debe valorar el caso y confirmar disponibilidad.",
+    ],
+    nextQuestion:
+      "¿Quieres contarme brevemente el motivo para que el equipo profesional pueda orientarte?",
+  },
+  {
+    id: "psicologia_perinatal",
+    name: "Unidad de Psicología perinatal",
+    aliases: [
+      "psicologia perinatal",
+      "psicología perinatal",
+      "unidad psicologia perinatal",
+      "unidad de psicologia perinatal",
+      "unidad de psicología perinatal",
+      "psicologa perinatal",
+      "psicóloga perinatal",
+      "psicologo perinatal",
+      "psicólogo perinatal",
+    ],
+    category: "sensitive",
+    summary:
+      "Unidad de Psicología perinatal de Maternaly para consultas vinculadas a esta etapa.",
+    details: [
+      "El equipo profesional revisa cada consulta y confirma la forma de atención y la disponibilidad.",
+    ],
+    requiredData: ["motivo de consulta", "teléfono de contacto"],
+    clinicalEscalation: true,
+    safetyNotes: [
+      "No realizar valoración clínica ni inventar horarios, tarifas o disponibilidad.",
+      "Si existe riesgo inmediato o una crisis, indicar atención urgente y derivar a una profesional.",
+    ],
+    nextQuestion:
+      "¿Quieres contarme brevemente qué necesitas para que una profesional pueda orientarte?",
+  },
+  {
     id: "diagnostico_prenatal",
     name: "Diagnóstico Prenatal",
-    aliases: ["diagnostico prenatal", "diagnóstico prenatal", "everli", "detesex", "ecografía", "ecografia", "5d", "8k", "sexo fetal"],
+    aliases: ["diagnostico prenatal", "diagnóstico prenatal", "ecografía", "ecografia", "sexo fetal"],
     category: "sensitive",
     summary: "Incluye EVERLI, Detesex y ecografía emocional 5D/8K.",
     details: [

@@ -407,30 +407,54 @@ describe("normalized Maternaly WhatsApp flow", () => {
     await handleInboundMaternalyWhatsApp(
       {
         from: "whatsapp:+34999000113",
-        body: "opción 1",
+        body: "Erandio, 24 de septiembre",
         messageSid: "SM_CONTEXTUAL_CHARLA_2",
       },
       store,
       { normalizedSheetsClient: client, normalizedEnv: env },
     );
 
-    const result = await handleInboundMaternalyWhatsApp(
+    await handleInboundMaternalyWhatsApp(
       {
         from: "whatsapp:+34999000113",
-        body: "LAURA PRUEBAS, charla.prueba@example.test, somos dos, pareja Acompañante Prueba, fecha 31/12/2026",
+        body: "Dos personas",
         messageSid: "SM_CONTEXTUAL_CHARLA_3",
       },
       store,
       { normalizedSheetsClient: client, normalizedEnv: env },
     );
 
-    expect(result.botReply?.body).toMatch(/solicitud preparada|pendiente de validación/i);
-    expect(result.conversation.maternalyNormalizedFlow?.fppOrDueDate).toBe("2026-12-31");
-    expect(result.conversation.maternalyNormalizedFlow?.babyBirthDate).toBeUndefined();
-    expect(lastPayload(result.conversation.events, "maternaly_registration_slots_enriched")).toMatchObject({
+    const details = await handleInboundMaternalyWhatsApp(
+      {
+        from: "whatsapp:+34999000113",
+        body: "Soy Laura Ruiz, fecha 31/12/2026",
+        messageSid: "SM_CONTEXTUAL_CHARLA_4",
+      },
+      store,
+      { normalizedSheetsClient: client, normalizedEnv: env },
+    );
+
+    expect(details.botReply?.body).toMatch(/nombre de la pareja|nombre del acompa[nñ]ante/i);
+    expect(details.conversation.maternalyNormalizedFlow?.fppOrDueDate).toBe("2026-12-31");
+    expect(details.conversation.maternalyNormalizedFlow?.babyBirthDate).toBeUndefined();
+    expect(lastPayload(details.conversation.events, "maternaly_registration_slots_enriched")).toMatchObject({
       dateMappedTo: "fppOrDueDate",
-      missingFieldsAfter: [],
+      missingFieldsAfter: ["partnerName"],
     });
+
+    const result = await handleInboundMaternalyWhatsApp(
+      {
+        from: "whatsapp:+34999000113",
+        body: "Marta López",
+        messageSid: "SM_CONTEXTUAL_CHARLA_5",
+      },
+      store,
+      { normalizedSheetsClient: client, normalizedEnv: env },
+    );
+
+    expect(result.botReply?.body).toMatch(/solicitud preparada/i);
+    expect(result.conversation.maternalyNormalizedFlow?.email).toBeUndefined();
+    expect(result.conversation.maternalyNormalizedFlow?.partnerName).toBe("Marta López");
   });
 
   it.each([
@@ -866,19 +890,21 @@ describe("normalized Maternaly WhatsApp flow", () => {
     );
     const env = normalizedTestEnv();
 
-    await handleInboundMaternalyWhatsApp(
+    const first = await handleInboundMaternalyWhatsApp(
       {
         from: "+34600111223",
-        body: "Quiero apuntarme a la charla de embarazo",
+        body: "Quiero apuntarme a la charla de embarazo en Bilbao el 6 de octubre",
         messageSid: "SM_CHARLA_1",
       },
       store,
       { normalizedSheetsClient: client, normalizedEnv: env },
     );
+    expect(first.botReply?.body).toMatch(/acudir[eé]is una o dos personas/i);
+
     await handleInboundMaternalyWhatsApp(
       {
         from: "+34600111223",
-        body: "Opción 1",
+        body: "Dos personas",
         messageSid: "SM_CHARLA_2",
       },
       store,
@@ -887,7 +913,7 @@ describe("normalized Maternaly WhatsApp flow", () => {
     const result = await handleInboundMaternalyWhatsApp(
       {
         from: "+34600111223",
-        body: "Soy Laura Ruiz, telefono +34 600 111 223, email laura@example.test, somos 2 personas, pareja Acompañante Prueba, FPP 2026-11-30",
+        body: "Soy Laura Ruiz, mi pareja es Marta López, FPP 2026-11-30",
         messageSid: "SM_CHARLA_3",
       },
       store,
@@ -898,9 +924,11 @@ describe("normalized Maternaly WhatsApp flow", () => {
     expect(result.botReply?.body).not.toMatch(/plaza confirmada/i);
     expect(client.appended).toHaveLength(0);
     expect(result.conversation.maternalyNormalizedFlow?.stage).toBe("write_planned");
+    expect(result.conversation.maternalyNormalizedFlow?.email).toBeUndefined();
+    expect(result.conversation.maternalyNormalizedFlow?.partnerName).toBe("Marta López");
   });
 
-  it("closes Charla with two attendees without blocking on partner name", async () => {
+  it("keeps Charla blocked for two attendees until the companion name is provided", async () => {
     const store = makeStore();
     const client = new InMemoryNormalizedSheetsClient(
       createRealTemplateWorkbook({ serviceKey: "charla_embarazo_1_20", multiSession: true }),
@@ -929,48 +957,77 @@ describe("normalized Maternaly WhatsApp flow", () => {
     );
     expect(first.botReply?.body).toMatch(/Opciones para Charla/i);
     expect(first.conversation.maternalyNormalizedFlow?.selectedSessionId).toBeUndefined();
+    const firstReply = first.botReply?.body ?? "";
+    expect(firstReply.indexOf("Erandio")).toBeLessThan(firstReply.indexOf("Bilbao"));
+    expect(firstReply.indexOf("Bilbao")).toBeLessThan(firstReply.toLocaleLowerCase("es").lastIndexOf("online"));
 
     const second = await handleInboundMaternalyWhatsApp(
       {
         from,
-        body: "opción 2",
+        body: "Erandio, 24 de septiembre",
         messageSid: "SM_CHARLA_OPTIONS_2",
       },
       store,
       { normalizedSheetsClient: client, normalizedEnv: env },
     );
-    expect(second.botReply?.body).toMatch(/fecha probable de parto/i);
+    expect(second.botReply?.body).toMatch(/acudir[eé]is una o dos personas/i);
 
-    const third = await handleInboundMaternalyWhatsApp(
+    await handleInboundMaternalyWhatsApp(
       {
         from,
-        body: "PAU PRUEBAS, prueba.bot@example.test, voy en pareja, FPP 31/12/2026",
+        body: "Dos personas",
         messageSid: "SM_CHARLA_OPTIONS_3",
       },
       store,
       { normalizedSheetsClient: client, normalizedEnv: env },
     );
-    const reply = third.botReply?.body ?? "";
-    expect(reply).toMatch(/solicitud preparada|pendiente de validación/i);
-    expect(reply).not.toMatch(/necesito:.*pareja|nombre de la pareja|nombre del acompañante/i);
-    expect(third.conversation.maternalyNormalizedFlow).toMatchObject({
-      stage: "write_planned",
+
+    const blocked = await handleInboundMaternalyWhatsApp(
+      {
+        from,
+        body: "Soy Paula Ortega, FPP 31/12/2026",
+        messageSid: "SM_CHARLA_OPTIONS_4",
+      },
+      store,
+      { normalizedSheetsClient: client, normalizedEnv: env },
+    );
+    expect(blocked.botReply?.body).toMatch(/nombre de la pareja|nombre del acompa[nñ]ante/i);
+    expect(blocked.botReply?.body).not.toMatch(/solicitud preparada|preinscripci[oó]n.*pendiente/i);
+    expect(blocked.conversation.maternalyNormalizedFlow).toMatchObject({
+      stage: "collecting_contact",
       selectedSessionId: "sesion_charla_erandio_20260924",
       phone: "+34999000131",
-      fullName: "PAU PRUEBAS",
-      email: "prueba.bot@example.test",
+      fullName: "Paula Ortega",
       peopleCount: 2,
       fppOrDueDate: "31/12/2026",
     });
-    expect(third.conversation.maternalyNormalizedFlow?.partnerName).toBeUndefined();
-    expect(lastPayload(third.conversation.events, "maternaly_registration_soft_field_skipped")).toMatchObject({
-      serviceKey: "charla_embarazo_1_20",
-      field: "partnerName",
-      reason: "optional_not_blocking",
+    expect(blocked.conversation.maternalyNormalizedFlow?.email).toBeUndefined();
+    expect(blocked.conversation.maternalyNormalizedFlow?.partnerName).toBeUndefined();
+    expect(client.appended).toHaveLength(0);
+
+    const completed = await handleInboundMaternalyWhatsApp(
+      {
+        from,
+        body: "Mi pareja se llama Marcos Gómez",
+        messageSid: "SM_CHARLA_OPTIONS_5",
+      },
+      store,
+      { normalizedSheetsClient: client, normalizedEnv: env },
+    );
+    expect(completed.botReply?.body).toMatch(/solicitud preparada/i);
+    expect(completed.botReply?.body).not.toMatch(/plaza confirmada|preinscripci[oó]n.*pendiente/i);
+    expect(completed.conversation.maternalyNormalizedFlow).toMatchObject({
+      stage: "write_planned",
+      selectedSessionId: "sesion_charla_erandio_20260924",
+      phone: "+34999000131",
+      fullName: "Paula Ortega",
+      peopleCount: 2,
+      fppOrDueDate: "31/12/2026",
+      partnerName: "Marcos Gómez",
     });
   });
 
-  it.each(["Tono", "Antonio"])("accepts a short contextual Charla partner name after closing: %s", async (partnerName) => {
+  it.each(["Tono", "Antonio"])("accepts a short contextual Charla partner name when that field is pending: %s", async (partnerName) => {
     const store = makeStore();
     const client = new InMemoryNormalizedSheetsClient(
       createRealTemplateWorkbook({ serviceKey: "charla_embarazo_1_20", multiSession: true }),
@@ -990,7 +1047,7 @@ describe("normalized Maternaly WhatsApp flow", () => {
     await handleInboundMaternalyWhatsApp(
       {
         from,
-        body: "2",
+        body: "Erandio, 24 de septiembre",
         messageSid: `SM_CHARLA_SHORT_${partnerName}_2`,
       },
       store,
@@ -999,7 +1056,7 @@ describe("normalized Maternaly WhatsApp flow", () => {
     await handleInboundMaternalyWhatsApp(
       {
         from,
-        body: "PAU PRUEBAS, prueba.bot@example.test, voy en pareja, FPP 31/12/2026",
+        body: "Soy Paula Ortega, voy en pareja, FPP 31/12/2026",
         messageSid: `SM_CHARLA_SHORT_${partnerName}_3`,
       },
       store,
@@ -1025,7 +1082,7 @@ describe("normalized Maternaly WhatsApp flow", () => {
     });
   });
 
-  it("continues Charla with a pending companion observation when partner name is unknown", async () => {
+  it("keeps Charla pending when the companion name is unknown", async () => {
     const store = makeStore();
     const client = new InMemoryNormalizedSheetsClient(
       createRealTemplateWorkbook({ serviceKey: "charla_embarazo_1_20", multiSession: true }),
@@ -1045,7 +1102,7 @@ describe("normalized Maternaly WhatsApp flow", () => {
     await handleInboundMaternalyWhatsApp(
       {
         from,
-        body: "2",
+        body: "Erandio, 24 de septiembre",
         messageSid: "SM_CHARLA_PENDING_2",
       },
       store,
@@ -1054,7 +1111,7 @@ describe("normalized Maternaly WhatsApp flow", () => {
     await handleInboundMaternalyWhatsApp(
       {
         from,
-        body: "PAU PRUEBAS, prueba.bot@example.test, voy en pareja, FPP 31/12/2026",
+        body: "Soy Paula Ortega, voy en pareja, FPP 31/12/2026",
         messageSid: "SM_CHARLA_PENDING_3",
       },
       store,
@@ -1071,16 +1128,19 @@ describe("normalized Maternaly WhatsApp flow", () => {
       { normalizedSheetsClient: client, normalizedEnv: env },
     );
 
-    expect(result.botReply?.body).toMatch(/solicitud preparada|pendiente de validación/i);
+    expect(result.botReply?.body).toMatch(/nombre de la pareja|nombre del acompa[nñ]ante/i);
+    expect(result.botReply?.body).not.toMatch(/solicitud preparada|preinscripci[oó]n.*pendiente/i);
+    expect(result.conversation.maternalyNormalizedFlow?.stage).toBe("collecting_contact");
     expect(result.conversation.maternalyNormalizedFlow?.partnerName).toBeUndefined();
     expect(result.conversation.maternalyNormalizedFlow?.observations).toContain("acompañante pendiente");
     expect(lastPayload(result.conversation.events, "maternaly_registration_slots_enriched")).toMatchObject({
       partnerNameSkipped: true,
-      missingFieldsAfter: [],
+      missingFieldsAfter: ["partnerName"],
     });
+    expect(client.appended).toHaveLength(0);
   });
 
-  it("does not ask for partner name when Charla people count is one", async () => {
+  it("accepts a bare 1 for Charla people count and does not ask for partner name", async () => {
     const store = makeStore();
     const client = new InMemoryNormalizedSheetsClient(
       createRealTemplateWorkbook({ serviceKey: "charla_embarazo_1_20", multiSession: true }),
@@ -1100,26 +1160,40 @@ describe("normalized Maternaly WhatsApp flow", () => {
     await handleInboundMaternalyWhatsApp(
       {
         from,
-        body: "2",
+        body: "Erandio, 24 de septiembre",
         messageSid: "SM_CHARLA_SINGLE_2",
       },
       store,
       { normalizedSheetsClient: client, normalizedEnv: env },
     );
 
-    const result = await handleInboundMaternalyWhatsApp(
+    const peopleCount = await handleInboundMaternalyWhatsApp(
       {
         from,
-        body: "PAU PRUEBAS, prueba.bot@example.test, voy sola, FPP 31/12/2026",
+        body: "1",
         messageSid: "SM_CHARLA_SINGLE_3",
       },
       store,
       { normalizedSheetsClient: client, normalizedEnv: env },
     );
+    expect(peopleCount.botReply?.body).toMatch(/nombre y apellidos|fecha probable de parto/i);
+    expect(peopleCount.botReply?.body).not.toMatch(/email/i);
 
-    expect(result.botReply?.body).toMatch(/solicitud preparada|pendiente de validación/i);
+    const result = await handleInboundMaternalyWhatsApp(
+      {
+        from,
+        body: "Soy Paula Ortega, FPP 31/12/2026",
+        messageSid: "SM_CHARLA_SINGLE_4",
+      },
+      store,
+      { normalizedSheetsClient: client, normalizedEnv: env },
+    );
+
+    expect(result.botReply?.body).toMatch(/solicitud preparada/i);
+    expect(result.botReply?.body).not.toMatch(/preinscripci[oó]n.*pendiente/i);
     expect(result.botReply?.body).not.toMatch(/nombre de la pareja|acompañante.*necesito/i);
     expect(result.conversation.maternalyNormalizedFlow?.peopleCount).toBe(1);
+    expect(result.conversation.maternalyNormalizedFlow?.email).toBeUndefined();
   });
 
   it("derives cancellations, date changes and invoices to human without writing", async () => {

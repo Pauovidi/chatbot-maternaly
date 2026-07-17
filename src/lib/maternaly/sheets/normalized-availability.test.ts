@@ -100,12 +100,16 @@ describe("normalized Maternaly availability", () => {
       startTime: "17:00",
       endTime: "20:00",
       groupName: "Taller BLW Bilbao",
+      location: "Bilbao",
+      modality: "presencial",
       capacityTotal: 14,
       availableSeats: 14,
     });
     expect(sessions[1]).toMatchObject({
       date: "2026-09-02",
       groupName: "Taller BLW Erandio",
+      location: "Erandio",
+      modality: "presencial",
       availableSeats: 14,
     });
   });
@@ -126,14 +130,144 @@ describe("normalized Maternaly availability", () => {
       startTime: "17:00",
       endTime: "20:00",
       groupName: "Bilbao",
+      location: "Bilbao",
+      modality: "presencial",
       capacityTotal: 14,
       availableSeats: 14,
     });
     expect(sessions[1]).toMatchObject({
       date: "2026-09-02",
       groupName: "Erandio",
+      location: "Erandio",
+      modality: "presencial",
       availableSeats: 14,
     });
+  });
+
+  it("keeps only future Charla sessions documented with the correct venue, modality and time", async () => {
+    const workbook = createRealTemplateWorkbook({
+      serviceKey: "charla_embarazo_1_20",
+      multiSession: true,
+      visualHeaderRows: false,
+    });
+    workbook.Grupos_Ediciones.push([
+      "grupo_charla_online",
+      "charla_embarazo_1_20",
+      "Charla informativa online",
+      "Online",
+      "Online",
+      "40",
+      "Activa",
+      "sí",
+      "sí",
+    ]);
+    workbook.Sesiones.push(
+      [
+        "sesion_charla_online_20260810",
+        "grupo_charla_online",
+        "charla_embarazo_1_20",
+        "2026-08-10",
+        "19:00",
+        "20:30",
+        "Online",
+        "Online",
+        "Activa",
+        "40",
+        "0",
+        "40",
+        "sí",
+        "sí",
+        "",
+      ],
+      [
+        "sesion_charla_erandio_wrong_time",
+        "grupo_charla_erandio",
+        "charla_embarazo_1_20",
+        "2026-08-20",
+        "17:00",
+        "18:30",
+        "Erandio",
+        "Presencial",
+        "Activa",
+        "20",
+        "0",
+        "20",
+        "sí",
+        "sí",
+        "",
+      ],
+      [
+        "sesion_charla_online_undocumented",
+        "grupo_charla_online",
+        "charla_embarazo_1_20",
+        "2026-11-02",
+        "19:00",
+        "20:30",
+        "Online",
+        "Online",
+        "Activa",
+        "40",
+        "0",
+        "40",
+        "sí",
+        "sí",
+        "",
+      ],
+      [
+        "sesion_charla_historical_example",
+        "grupo_charla_erandio",
+        "charla_embarazo_1_20",
+        "2026-07-16",
+        "18:30",
+        "20:00",
+        "Erandio",
+        "Presencial",
+        "Activa",
+        "20",
+        "0",
+        "20",
+        "sí",
+        "sí",
+        "",
+      ],
+    );
+
+    const client = new InMemoryNormalizedSheetsClient(workbook);
+    const snapshot = await readNormalizedServiceSheet(
+      "charla_embarazo_1_20",
+      client,
+      normalizedTestEnv(),
+    );
+    const sessions = listAvailableSessionsFromSnapshot(snapshot, {
+      now: new Date(2026, 6, 17, 12),
+    });
+
+    expect(sessions.map((session) => session.sessionId)).toEqual([
+      "sesion_charla_erandio_20260924",
+      "sesion_charla_bilbao_20261006",
+      "sesion_charla_online_20260810",
+    ]);
+    expect(sessions.map(({ location, modality, startTime }) => ({
+      location,
+      modality,
+      startTime,
+    }))).toEqual([
+      { location: "Erandio", modality: "presencial", startTime: "18:30" },
+      { location: "Bilbao", modality: "presencial", startTime: "17:00" },
+      { location: "Online", modality: "online", startTime: "19:00" },
+    ]);
+  });
+
+  it("removes past rows without reordering other normalized services", async () => {
+    const client = new InMemoryNormalizedSheetsClient(
+      createNormalizedWorkbook({ multiSession: true }),
+    );
+    const snapshot = await readNormalizedServiceSheet("taller_blw", client, normalizedTestEnv());
+    const sessions = listAvailableSessionsFromSnapshot(snapshot, {
+      now: new Date(2026, 8, 10, 12),
+    });
+
+    expect(sessions.map((session) => session.date)).toEqual(["2026-09-25"]);
   });
 
   it("subtracts active and pending registrations from capacity", async () => {

@@ -14,6 +14,25 @@ describe("Maternaly knowledge catalog", () => {
     expect(getKnowledgeServiceByNormalizedKey(undefined)).toBeNull();
   });
 
+  it("publishes only the eight current Charla sessions from the Word contract", () => {
+    const sessions = getKnowledgeServiceByNormalizedKey("charla_embarazo_1_20")?.sessions ?? [];
+
+    expect(sessions).toHaveLength(8);
+    expect(sessions.map(({ date }) => date)).toEqual([
+      "2026-08-20",
+      "2026-09-24",
+      "2026-10-08",
+      "2026-10-06",
+      "2026-12-15",
+      "2026-08-10",
+      "2026-09-07",
+      "2026-10-05",
+    ]);
+    expect(sessions.map(({ date }) => date)).not.toEqual(
+      expect.arrayContaining(["2026-06-16", "2026-06-25", "2026-07-16", "2026-07-20"]),
+    );
+  });
+
   it("includes the enriched Pilates embarazo knowledge without making it a normalized Sheet flow", () => {
     const service = findKnowledgeService("qué beneficios tiene pilates embarazo");
 

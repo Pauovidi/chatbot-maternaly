@@ -20,11 +20,13 @@ import {
 } from "@/lib/maternaly/llm/interpreter";
 import {
   GoogleNormalizedSheetsClient,
-  readNormalizedServiceSheet,
   type NormalizedSheetsClient,
   type NormalizedServiceSheetSnapshot,
 } from "@/lib/maternaly/sheets/normalized-client";
-import type { NormalizedAvailableSession } from "@/lib/maternaly/sheets/normalized-availability";
+import {
+  projectCharlaContractCalendar,
+  type NormalizedAvailableSession,
+} from "@/lib/maternaly/sheets/normalized-availability";
 import {
   getNormalizedServiceAvailability,
   type NormalizedServiceAvailabilityResult,
@@ -146,6 +148,7 @@ type PolicyAction =
   | "privacy"
   | "payment"
   | "invoice"
+  | "booking_declined"
   | "normalized_registration"
   | "catalog_info"
   | "service_info"
@@ -159,6 +162,7 @@ interface PolicyDecision {
   serviceQuestionFocus?: StructuredIntent["service_question_focus"];
   locationPreference?: string;
   modalityPreference?: "presencial" | "online";
+  journeyStage?: MaternalyNluSlots["journey_stage"];
   reason?: string;
 }
 
@@ -168,10 +172,12 @@ interface NormalizedToolResult {
     | "read_error"
     | "sessions_available"
     | "collecting_fields"
+    | "manual_validation_required"
     | "write_result";
   serviceKey: MaternalyNormalizedServiceKey;
   snapshot?: NormalizedServiceSheetSnapshot;
   sessions: NormalizedAvailableSession[];
+  calendarSessions?: NormalizedAvailableSession[];
   selectedSession?: NormalizedAvailableSession;
   missingFields: string[];
   plan?: NormalizedRegistrationWritePlan;
@@ -237,6 +243,7 @@ function redactPhone(value: string | undefined): string {
 
 function summarizeState(state: MaternalyNormalizedFlowState | undefined) {
   return {
+    journeyStage: state?.journeyStage,
     serviceKey: state?.serviceKey,
     stage: state?.stage,
     selectedSessionId: state?.selectedSessionId ? "[session-selected]" : undefined,
@@ -515,7 +522,13 @@ function isSessionSelectionReply(message: string, previous?: MaternalyNormalized
   }
 
   const text = normalize(message).trim();
-  return /^(?:opcion\s*)?[1-9]$/.test(text) ||
+  if (inferContextualPeopleCount(message)) {
+    return false;
+  }
+  return /\bopcion\s*[1-9]\b/.test(text) ||
+    /\b(?:bilbao|erandio|online)\b/.test(text) ||
+    /\b\d{1,2}\s+(?:de\s+)?(?:enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre)\b/.test(text) ||
+    /^(?:opcion\s*)?[1-9]$/.test(text) ||
     /^(?:la\s+)?(?:primera|segunda|tercera|cuarta|quinta|sexta|septima|octava|novena)$/.test(text);
 }
 
@@ -577,7 +590,7 @@ function normalizePartnerNameCandidate(
 function extractContextualPartnerName(message: string): string | undefined {
   const explicit = extractPersonSegmentAfterPrefix(
     message,
-    /\b(?:(?:mi\s+)?(?:pareja|acompa[nñ]ante)\s+(?:se\s+llama|es)|se\s+llama)\s+/i,
+    /\b(?:(?:mi\s+)?(?:pareja|acompa[nñ]ante)(?:\s+(?:se\s+llama|es))?\s*:?|se\s+llama)\s+/i,
   );
   const explicitCandidate = normalizePartnerNameCandidate(explicit);
   if (explicitCandidate) {
@@ -855,6 +868,7 @@ function stateBaseAfterServiceSwitch(
   // data, but discards the old service's session, group, clinical/service
   // fields, observations, pending fields and idempotency context.
   return {
+    journeyStage: previous.journeyStage,
     fullName: previous.fullName,
     phone: previous.phone,
     email: previous.email,
@@ -914,6 +928,8 @@ function hasRelevantRegistrationDataChange(
     "email",
     "peopleCount",
     "observations",
+    "location",
+    "modality",
   ];
   const serviceFields: Array<keyof MaternalyNormalizedFlowState> =
     before.serviceKey === "charla_embarazo_1_20"
@@ -1024,6 +1040,8 @@ function buildInterpretationContext(
     active_service_name: service?.name,
     active_normalized_service_key: service?.normalizedServiceKey ?? state?.serviceKey,
     active_stage: state?.stage,
+    pending_fields: state?.pendingFields ?? [],
+    journey_stage: state?.journeyStage,
     location: state?.location,
     modality: state?.modality,
     recent_messages: contextualMessages
@@ -1125,60 +1143,194 @@ function chooseSession(
   state: MaternalyNormalizedFlowState,
   sessions: NormalizedAvailableSession[],
 ): NormalizedAvailableSession | undefined {
-  if (state.selectedSessionId) {
-    const previous = sessions.find((session) => session.sessionId === state.selectedSessionId);
+  const availableSessions = sessions.filter((session) => !session.full);
+  const normalized = normalize(message);
+  const trimmed = normalized.trim();
+  const asksToChangeSession =
+    /\b(?:prefiero|mejor|otra|otro|en\s+vez|he\s+cambiado\s+de\s+idea|cambiar(?:me)?\s+(?:a|al|de|la|el|fecha|sesion|sede|modalidad)|cambio\s+(?:a|al|de|la|el|fecha|sesion|sede|modalidad))\b/.test(
+      normalized,
+    );
+  const containsRegistrationPayload =
+    state.stage === "collecting_contact" &&
+    /\b(?:soy|me\s+llamo|mi\s+nombre|tel[eé]fono|fpp|fecha\s+(?:probable\s+)?(?:de\s+)?parto|pareja|acompa[nñ]ante)\b/.test(
+      normalized,
+    );
+  const ignorePreferenceWordsInsideRegistrationData =
+    containsRegistrationPayload && !asksToChangeSession;
+  const explicitLocation = ignorePreferenceWordsInsideRegistrationData
+    ? undefined
+    : /\berandio\b/.test(normalized)
+    ? "erandio"
+    : /\bbilbao\b/.test(normalized)
+      ? "bilbao"
+      : /\bon\s*line\b|\bonline\b|\ba distancia\b/.test(normalized)
+        ? "online"
+        : undefined;
+  const explicitModality = ignorePreferenceWordsInsideRegistrationData
+    ? undefined
+    : /\bon\s*line\b|\bonline\b|\ba distancia\b/.test(normalized)
+    ? "online"
+    : /\bpresencial\b/.test(normalized)
+      ? "presencial"
+      : undefined;
+  const location = explicitLocation ?? state.location;
+  const modality = explicitModality ?? state.modality;
+  const matchesCurrentPreference = (session: NormalizedAvailableSession) => {
+    const sessionLocation = normalize(
+      [session.location, session.groupName, session.sessionName].filter(Boolean).join(" "),
+    );
+    const sessionModality = normalize(session.modality ?? "");
+    const locationMatches = !location || sessionLocation.includes(normalize(location));
+    const modalityMatches = !modality || sessionModality === normalize(modality);
+    return locationMatches && modalityMatches;
+  };
+  let candidates = availableSessions.filter(matchesCurrentPreference);
+
+  const answersPendingPeopleCount =
+    state.stage === "collecting_contact" &&
+    state.pendingFields?.includes("peopleCount") &&
+    /^(?:1|una|uno|2|dos)$/.test(trimmed);
+  const ordinal = answersPendingPeopleCount
+    ? undefined
+    : trimmed.match(/^(?:opcion\s*)?([1-9])$/)?.[1] ??
+      normalized.match(/\bopcion\s*([1-9])\b/)?.[1] ??
+      (
+        /\b(?:la\s+)?primera\b|\bopcion\s+uno\b/.test(normalized)
+          ? "1"
+          : /\b(?:la\s+)?segunda\b|\bopcion\s+dos\b/.test(normalized)
+            ? "2"
+            : /\b(?:la\s+)?tercera\b|\bopcion\s+tres\b/.test(normalized)
+              ? "3"
+              : /\b(?:la\s+)?cuarta\b|\bopcion\s+cuatro\b/.test(normalized)
+                ? "4"
+                : /\b(?:la\s+)?quinta\b|\bopcion\s+cinco\b/.test(normalized)
+                  ? "5"
+                  : /\b(?:la\s+)?sexta\b|\bopcion\s+seis\b/.test(normalized)
+                    ? "6"
+                    : /\b(?:la\s+)?septima\b|\bopcion\s+siete\b/.test(normalized)
+                      ? "7"
+                      : /\b(?:la\s+)?octava\b|\bopcion\s+ocho\b/.test(normalized)
+                        ? "8"
+                        : undefined
+      );
+  const isoDate = message.match(/\b\d{4}-\d{2}-\d{2}\b/)?.[0];
+  const numericDate = message.match(/\b(\d{1,2})[/-](\d{1,2})(?:[/-](\d{2,4}))?\b/);
+  const spanishDate = normalized.match(
+    /\b(\d{1,2})\s+(?:de\s+)?(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre)(?:\s+de\s+(\d{4}))?\b/,
+  );
+  const dateAnswersRegistrationField =
+    state.stage === "collecting_contact" &&
+    !asksToChangeSession &&
+    (
+      state.pendingFields?.some((field) =>
+        field === "fppOrDueDate" || field === "babyBirthDate"
+      ) ||
+      /\b(?:fpp|fecha\s+(?:probable\s+)?(?:de\s+)?parto|salgo\s+de\s+cuentas|fecha\s+(?:de\s+)?nacimiento|naci[oó]\s+(?:el\s+)?beb[eé])\b/.test(normalized)
+    );
+  let matchedExplicitDate = false;
+  if (!dateAnswersRegistrationField && (isoDate || numericDate || spanishDate)) {
+    const months: Record<string, number> = {
+      enero: 1,
+      febrero: 2,
+      marzo: 3,
+      abril: 4,
+      mayo: 5,
+      junio: 6,
+      julio: 7,
+      agosto: 8,
+      septiembre: 9,
+      setiembre: 9,
+      octubre: 10,
+      noviembre: 11,
+      diciembre: 12,
+    };
+    const expected = isoDate
+      ? { iso: isoDate }
+      : numericDate
+        ? {
+            day: Number.parseInt(numericDate[1], 10),
+            month: Number.parseInt(numericDate[2], 10),
+            year: numericDate[3]
+              ? Number.parseInt(numericDate[3].length === 2 ? `20${numericDate[3]}` : numericDate[3], 10)
+              : undefined,
+          }
+        : {
+            day: Number.parseInt(spanishDate?.[1] ?? "0", 10),
+            month: months[spanishDate?.[2] ?? ""],
+            year: spanishDate?.[3] ? Number.parseInt(spanishDate[3], 10) : undefined,
+          };
+    const dateMatches = candidates.filter((session) => {
+      if ("iso" in expected) {
+        return session.date === expected.iso;
+      }
+      const match = session.date?.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      if (!match) {
+        return false;
+      }
+      return (
+        Number.parseInt(match[3], 10) === expected.day &&
+        Number.parseInt(match[2], 10) === expected.month &&
+        (!expected.year || Number.parseInt(match[1], 10) === expected.year)
+      );
+    });
+    if (dateMatches.length === 1) {
+      return dateMatches[0];
+    }
+    if (dateMatches.length > 1) {
+      candidates = dateMatches;
+      matchedExplicitDate = true;
+    }
+  }
+
+  if (ordinal) {
+    const index = Number.parseInt(ordinal, 10) - 1;
+    // El renderer numera la Charla sobre el calendario contractual global
+    // (Erandio 1-3, Bilbao 4-5 y online 6-8), incluidas las sesiones llenas.
+    // Resolver sobre otra lista filtrada desplazaría los números visibles. Si
+    // el mensaje también trae una fecha inequívoca, esa fecha ya ha prevalecido.
+    const selected = state.serviceKey === "charla_embarazo_1_20"
+      ? sessions[index]
+      : candidates[index];
+    return selected && !selected.full ? selected : undefined;
+  }
+
+  const dateMention = Boolean(isoDate || numericDate || spanishDate);
+  const unmatchedDateIsSessionChoice =
+    !dateAnswersRegistrationField &&
+    dateMention &&
+    (state.stage !== "collecting_contact" || asksToChangeSession);
+  const hasExplicitChoice = Boolean(
+    explicitLocation ||
+    explicitModality ||
+    ordinal ||
+    matchedExplicitDate ||
+    unmatchedDateIsSessionChoice,
+  );
+  if (!hasExplicitChoice && state.selectedSessionId) {
+    // Una selección anterior solo se puede reutilizar si continúa siendo
+    // compatible con la sede/modalidad vigentes. Esto impide volver a Bilbao
+    // después de que la usuaria haya cambiado su preferencia a online.
+    const previous = candidates.find(
+      (session) => session.sessionId === state.selectedSessionId,
+    );
     if (previous) {
       return previous;
     }
   }
 
-  const availableSessions = sessions.filter((session) => !session.full);
+  // La Charla tiene ocho convocatorias contractuales. Nunca se elige una por
+  // ser la única fila que haya quedado en Sheets: la persona debe señalar una
+  // fecha concreta para evitar registrar otra sede por error.
+  if (state.serviceKey === "charla_embarazo_1_20") {
+    return undefined;
+  }
+
+  if (candidates.length === 1) {
+    return candidates[0];
+  }
+
   if (availableSessions.length === 1) {
     return availableSessions[0];
-  }
-
-  const normalized = normalize(message);
-  const trimmed = normalized.trim();
-  const ordinal =
-    trimmed.match(/^(?:opcion\s*)?([1-9])$/)?.[1] ??
-    normalized.match(/\bopcion\s*([1-9])\b/)?.[1] ??
-    (
-      /\b(?:la\s+)?primera\b|\bopcion\s+uno\b/.test(normalized)
-        ? "1"
-        : /\b(?:la\s+)?segunda\b|\bopcion\s+dos\b/.test(normalized)
-          ? "2"
-          : /\b(?:la\s+)?tercera\b|\bopcion\s+tres\b/.test(normalized)
-            ? "3"
-            : /\b(?:la\s+)?cuarta\b|\bopcion\s+cuatro\b/.test(normalized)
-              ? "4"
-              : undefined
-    );
-  if (ordinal) {
-    return availableSessions[Number.parseInt(ordinal, 10) - 1];
-  }
-
-  const dateLike = message.match(/\b\d{4}-\d{2}-\d{2}\b/)?.[0] ?? message.match(/\b\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?\b/)?.[0];
-  if (dateLike) {
-    const dateMatches = availableSessions.filter((session) => normalize(session.date ?? "").includes(normalize(dateLike)));
-    if (dateMatches.length === 1) {
-      return dateMatches[0];
-    }
-  }
-
-  const locationMatches = availableSessions.filter((session) => {
-    const haystack = normalize([session.groupName, session.sessionName, session.date, session.startTime].filter(Boolean).join(" "));
-    return state.location && haystack.includes(normalize(state.location));
-  });
-  if (locationMatches.length === 1) {
-    return locationMatches[0];
-  }
-
-  const modalityMatches = availableSessions.filter((session) => {
-    const haystack = normalize([session.groupName, session.sessionName, session.date, session.startTime].filter(Boolean).join(" "));
-    return state.modality && haystack.includes(normalize(state.modality));
-  });
-  if (modalityMatches.length === 1) {
-    return modalityMatches[0];
   }
 
   return undefined;
@@ -1188,20 +1340,23 @@ function requiredFieldsForService(
   serviceKey: MaternalyNormalizedServiceKey,
   state: MaternalyNormalizedFlowState,
 ): string[] {
-  const common = [
+  if (serviceKey === "charla_embarazo_1_20") {
+    return [
+      !state.peopleCount ? "peopleCount" : "",
+      !state.fullName ? "fullName" : "",
+      !state.phone ? "phone" : "",
+      (state.peopleCount ?? 0) > 1 && !state.partnerName ? "partnerName" : "",
+      !state.fppOrDueDate ? "fppOrDueDate" : "",
+    ].filter(Boolean);
+  }
+
+  return [
     !state.fullName ? "fullName" : "",
     !state.phone ? "phone" : "",
     !state.email ? "email" : "",
     !state.peopleCount ? "peopleCount" : "",
-  ];
-  const serviceSpecific =
-    serviceKey === "charla_embarazo_1_20"
-      ? [
-          !state.fppOrDueDate && !state.pregnancyWeek ? "fppOrDueDate" : "",
-        ]
-      : [!state.babyBirthDate ? "babyBirthDate" : ""];
-
-  return [...common, ...serviceSpecific].filter(Boolean);
+    !state.babyBirthDate ? "babyBirthDate" : "",
+  ].filter(Boolean);
 }
 
 function notesFromState(state: MaternalyNormalizedFlowState) {
@@ -1210,9 +1365,6 @@ function notesFromState(state: MaternalyNormalizedFlowState) {
     state.fppOrDueDate ? `FPP/fecha relevante: ${state.fppOrDueDate}` : "",
     state.babyBirthDate ? `Fecha nacimiento bebé: ${state.babyBirthDate}` : "",
     state.partnerName ? `Pareja/acompañante: ${state.partnerName}` : "",
-    state.serviceKey === "charla_embarazo_1_20" && state.peopleCount && state.peopleCount > 1 && !state.partnerName
-      ? "Acompañante: pendiente/no indicado"
-      : "",
     state.location ? `Sede/modalidad preferida: ${state.location}` : "",
   ].filter(Boolean).join(" | ");
 }
@@ -1260,10 +1412,12 @@ export class MaternalyStateReducer {
       contextual.slots.observations,
     );
 
+    const journeyStage = input.intent.slots.journey_stage ?? previous?.journeyStage;
     const state =
       input.intent.intent === "service_discovery" || input.intent.service_scope === "catalog"
         ? {
             ...(previous ?? { updatedAt: nowIso() }),
+            journeyStage,
             mode: input.conversation.mode,
             updatedAt: nowIso(),
           }
@@ -1271,6 +1425,7 @@ export class MaternalyStateReducer {
             ...(previous ?? { updatedAt: nowIso() }),
             ...definedEntries({
               serviceKey,
+              journeyStage,
               fullName: registrationSlots.full_name ?? contextual.slots.fullName ?? previous?.fullName,
               phone: contextual.slots.phone ?? registrationSlots.phone ?? previous?.phone,
               email: registrationSlots.email ?? contextual.slots.email ?? previous?.email,
@@ -1341,6 +1496,14 @@ export class MaternalyConversationPolicy {
       return { action: "greeting" };
     }
 
+    if (
+      conversation.maternalyNormalizedFlow?.stage === "awaiting_booking_decision" &&
+      intent.slots.consent === false &&
+      intent.slots.last_question_answered === "reservation_declined"
+    ) {
+      return { action: "booking_declined", reason: "reservation_declined" };
+    }
+
     if (intent.intent === "service_discovery" || intent.service_scope === "catalog") {
       const catalogMatches = getKnowledgeServicesByModality(intent.slots.modality);
       return {
@@ -1348,10 +1511,20 @@ export class MaternalyConversationPolicy {
         reason: "catalog_scope",
         service: catalogMatches.length === 1 ? catalogMatches[0] : null,
         modalityPreference: intent.slots.modality,
+        journeyStage: intent.slots.journey_stage ?? state.journeyStage,
       };
     }
 
     const service = getKnowledgeService(intent.service_candidate);
+    const previousRegistration = conversation.maternalyNormalizedFlow;
+    const changesActiveSessionPreference = Boolean(
+      previousRegistration &&
+      isActiveRegistrationStage(previousRegistration.stage) &&
+      (
+        registrationFieldChanged(previousRegistration, state, "location") ||
+        registrationFieldChanged(previousRegistration, state, "modality")
+      ),
+    );
     const continuesRegistration =
       isRegistrationRequestTurn(intent) ||
       hasRelevantRegistrationDataChange(conversation.maternalyNormalizedFlow, state);
@@ -1360,6 +1533,7 @@ export class MaternalyConversationPolicy {
       intent.service_question_focus !== "booking";
     if (
       service &&
+      !changesActiveSessionPreference &&
       !intent.needs_availability_lookup &&
       (!hasRegistrationDataSlots(intent.slots) || isInformationalServiceQuestion) &&
       ["general_info", "service_question"].includes(intent.intent)
@@ -1432,7 +1606,9 @@ export class MaternalyToolExecutor {
       env,
     });
 
-    if (!availability.ok) {
+    const canShowContractCalendar = input.serviceKey === "charla_embarazo_1_20";
+
+    if (!availability.ok && !canShowContractCalendar) {
       const status =
         availability.reason === "missing_sheet_id"
           ? "not_configured"
@@ -1445,21 +1621,26 @@ export class MaternalyToolExecutor {
         serviceKey: input.serviceKey,
         snapshot: availability.snapshot,
         sessions: availability.sessions,
+        calendarSessions: availability.sessions,
         missingFields: [],
         availability,
         error: availability.diagnostics.errorType ?? availability.reason,
       };
     }
 
-    const snapshot = availability.snapshot as NormalizedServiceSheetSnapshot;
+    const snapshot = availability.snapshot;
     const sessions = availability.sessions;
-    const selectedSession = chooseSession(input.message, input.state, sessions);
+    const calendarSessions = input.serviceKey === "charla_embarazo_1_20"
+      ? projectCharlaContractCalendar(sessions)
+      : sessions;
+    const selectedSession = chooseSession(input.message, input.state, calendarSessions);
     if (!selectedSession) {
       return {
         status: "sessions_available",
         serviceKey: input.serviceKey,
         snapshot,
         sessions,
+        calendarSessions,
         missingFields: [],
         availability,
       };
@@ -1469,6 +1650,8 @@ export class MaternalyToolExecutor {
       ...input.state,
       selectedSessionId: selectedSession.sessionId,
       selectedGroupId: selectedSession.groupId,
+      location: selectedSession.location ?? input.state.location,
+      modality: selectedSession.modality ?? input.state.modality,
     };
     const missingFields = requiredFieldsForService(input.serviceKey, stateWithSelection);
     if (missingFields.length > 0) {
@@ -1477,21 +1660,116 @@ export class MaternalyToolExecutor {
         serviceKey: input.serviceKey,
         snapshot,
         sessions,
+        calendarSessions,
         selectedSession,
         missingFields,
         availability,
       };
     }
 
-    let writeSnapshot: NormalizedServiceSheetSnapshot;
+    const draft = {
+      serviceKey: input.serviceKey,
+      fullName: stateWithSelection.fullName,
+      phone: stateWithSelection.phone,
+      email: stateWithSelection.email,
+      peopleCount: stateWithSelection.peopleCount ?? 1,
+      pregnancyWeek: stateWithSelection.pregnancyWeek,
+      babyBirthDate: stateWithSelection.babyBirthDate,
+      fppOrDueDate: stateWithSelection.fppOrDueDate,
+      partnerName: stateWithSelection.partnerName,
+      notes: notesFromState(stateWithSelection),
+    };
+
+    const manualValidationResult = (manualInput: {
+      snapshot?: NormalizedServiceSheetSnapshot;
+      sessions: NormalizedAvailableSession[];
+      calendarSessions: NormalizedAvailableSession[];
+      selectedSession: NormalizedAvailableSession;
+      availability: NormalizedServiceAvailabilityResult;
+    }): NormalizedToolResult => {
+      if (!manualInput.snapshot) {
+        return {
+          status: "manual_validation_required",
+          serviceKey: input.serviceKey,
+          sessions: manualInput.sessions,
+          calendarSessions: manualInput.calendarSessions,
+          selectedSession: manualInput.selectedSession,
+          missingFields: [],
+          availability: manualInput.availability,
+          error: manualInput.availability.diagnostics.errorType ?? manualInput.availability.reason,
+        };
+      }
+
+      const preparedPlan = buildRegistrationWritePlan({
+        snapshot: manualInput.snapshot,
+        session: manualInput.selectedSession,
+        draft,
+        env,
+      });
+      const blockedReasons = Array.from(new Set([
+        ...preparedPlan.blockedReasons,
+        "contract_session_requires_manual_review",
+      ]));
+      const plan: NormalizedRegistrationWritePlan = {
+        ...preparedPlan,
+        allowedLive: false,
+        blocked: true,
+        blockedReasons,
+        operations: preparedPlan.operations.map((operation) => ({
+          ...operation,
+          operation: "noop" as const,
+        })),
+      };
+      const writeResult: NormalizedRegistrationWriteResult = {
+        ok: false,
+        applied: false,
+        mode: plan.mode,
+        blockedReason: blockedReasons.join(" | "),
+        plan,
+        updatedRanges: [],
+        formattedRanges: [],
+        formatApplied: false,
+        formatWarnings: [],
+      };
+
+      return {
+        status: "manual_validation_required",
+        serviceKey: input.serviceKey,
+        snapshot: manualInput.snapshot,
+        sessions: manualInput.sessions,
+        calendarSessions: manualInput.calendarSessions,
+        selectedSession: manualInput.selectedSession,
+        missingFields: [],
+        plan,
+        writeResult,
+        availability: manualInput.availability,
+      };
+    };
+
+    if (selectedSession.source === "contract_pending_validation") {
+      return manualValidationResult({
+        snapshot,
+        sessions,
+        calendarSessions,
+        selectedSession,
+        availability,
+      });
+    }
+
+    let writeAvailability: NormalizedServiceAvailabilityResult;
     try {
-      writeSnapshot = await readNormalizedServiceSheet(input.serviceKey, this.client, env);
+      writeAvailability = await getNormalizedServiceAvailability({
+        serviceKey: input.serviceKey,
+        client: this.client,
+        env,
+      });
     } catch (error) {
       return {
         status: "read_error",
         serviceKey: input.serviceKey,
         snapshot,
         sessions,
+        calendarSessions,
         selectedSession,
         missingFields: [],
         availability,
@@ -1499,21 +1777,65 @@ export class MaternalyToolExecutor {
       };
     }
 
+    if (!writeAvailability.ok || !writeAvailability.snapshot) {
+      return {
+        status: "read_error",
+        serviceKey: input.serviceKey,
+        snapshot: writeAvailability.snapshot ?? snapshot,
+        sessions: writeAvailability.sessions,
+        calendarSessions: input.serviceKey === "charla_embarazo_1_20"
+          ? projectCharlaContractCalendar(writeAvailability.sessions)
+          : writeAvailability.sessions,
+        selectedSession,
+        missingFields: [],
+        availability: writeAvailability,
+        error: writeAvailability.diagnostics.errorType ?? writeAvailability.reason,
+      };
+    }
+
+    const writeSnapshot = writeAvailability.snapshot;
+    const writeSessions = writeAvailability.sessions;
+    const writeCalendarSessions = input.serviceKey === "charla_embarazo_1_20"
+      ? projectCharlaContractCalendar(writeSessions)
+      : writeSessions;
+    const revalidatedSession =
+      writeCalendarSessions.find((candidate) => candidate.sessionId === selectedSession.sessionId) ??
+      writeCalendarSessions.find(
+        (candidate) =>
+          candidate.date === selectedSession.date &&
+          candidate.startTime === selectedSession.startTime &&
+          normalize(candidate.location ?? "") === normalize(selectedSession.location ?? "") &&
+          candidate.modality === selectedSession.modality,
+      );
+
+    if (!revalidatedSession) {
+      return {
+        status: "read_error",
+        serviceKey: input.serviceKey,
+        snapshot: writeSnapshot,
+        sessions: writeSessions,
+        calendarSessions: writeCalendarSessions,
+        selectedSession,
+        missingFields: [],
+        availability: writeAvailability,
+        error: "selected_session_not_available_on_revalidation",
+      };
+    }
+
+    if (revalidatedSession.source === "contract_pending_validation") {
+      return manualValidationResult({
+        snapshot: writeSnapshot,
+        sessions: writeSessions,
+        calendarSessions: writeCalendarSessions,
+        selectedSession: revalidatedSession,
+        availability: writeAvailability,
+      });
+    }
+
     const plan = buildRegistrationWritePlan({
       snapshot: writeSnapshot,
-      session: selectedSession,
-      draft: {
-        serviceKey: input.serviceKey,
-        fullName: stateWithSelection.fullName,
-        phone: stateWithSelection.phone,
-        email: stateWithSelection.email,
-        peopleCount: stateWithSelection.peopleCount ?? 1,
-        pregnancyWeek: stateWithSelection.pregnancyWeek,
-        babyBirthDate: stateWithSelection.babyBirthDate,
-        fppOrDueDate: stateWithSelection.fppOrDueDate,
-        partnerName: stateWithSelection.partnerName,
-        notes: notesFromState(stateWithSelection),
-      },
+      session: revalidatedSession,
+      draft,
       env,
     });
     const writeResult = await applyRegistrationWritePlan({ snapshot: writeSnapshot, client: this.client, plan });
@@ -1522,12 +1844,13 @@ export class MaternalyToolExecutor {
       status: "write_result",
       serviceKey: input.serviceKey,
       snapshot: writeSnapshot,
-      sessions,
-      selectedSession,
+      sessions: writeSessions,
+      calendarSessions: writeCalendarSessions,
+      selectedSession: revalidatedSession,
       missingFields: [],
       plan,
       writeResult,
-      availability,
+      availability: writeAvailability,
     };
   }
 }
@@ -1557,6 +1880,7 @@ function buildAvailabilityCheckedPayload(
         toolResult.status !== "read_error" &&
         sessionsCount > 0),
     sessionsCount,
+    calendarSessionsCount: toolResult.calendarSessions?.length ?? sessionsCount,
     reason,
     headersDetected: availability?.diagnostics.headersDetected ?? Boolean(toolResult.snapshot),
     selectedSource: availability?.diagnostics.selectedSource ?? "normalized_sheets",
@@ -1682,22 +2006,41 @@ export class MaternalyCoreAdapter {
     let nextState: MaternalyNormalizedFlowState | undefined =
       decision.action === "reset"
         ? undefined
+        : decision.action === "booking_declined"
+          ? {
+              ...toPersistedState(state),
+              serviceKey: undefined,
+              stage: "collecting_service",
+              selectedSessionId: undefined,
+              selectedGroupId: undefined,
+              location: undefined,
+              modality: undefined,
+              pendingFields: [],
+              updatedAt: nowIso(),
+            }
         : decision.action === "catalog_info"
-          ? decision.service?.normalizedServiceKey
-            ? {
-                serviceKey: decision.service.normalizedServiceKey,
-                stage: "collecting_service",
-                modality: decision.modalityPreference,
-                updatedAt: nowIso(),
-              }
-            : undefined
+          ? {
+              ...toPersistedState(state),
+              serviceKey: decision.service?.normalizedServiceKey,
+              journeyStage: decision.journeyStage ?? state.journeyStage,
+              stage: "collecting_service",
+              modality: decision.modalityPreference ?? state.modality,
+              pendingFields: [],
+              updatedAt: nowIso(),
+            }
         : {
             ...toPersistedState(state),
             stage:
               decision.action === "handoff"
                 ? "handoff"
+                : decision.action === "greeting"
+                  ? "choosing_journey_stage"
                 : decision.action === "normalized_registration" && state.serviceKey
                   ? "choosing_session"
+                  : decision.action === "service_info" &&
+                      decision.service?.id === "charla_embarazo_1_20" &&
+                      !isActiveRegistrationStage(stateBefore?.stage)
+                    ? "awaiting_booking_decision"
                   : decision.action === "service_info" && (!stateBefore?.stage || replacesServiceFlow)
                     ? "collecting_service"
                   : state.stage,
@@ -1715,13 +2058,24 @@ export class MaternalyCoreAdapter {
         env: input.env,
       });
       toolsMs = elapsedSince(toolsStartedAt);
+      const clearUnresolvedCharlaSelection =
+        serviceKey === "charla_embarazo_1_20" &&
+        toolResult.status === "sessions_available";
       nextState = {
         ...toPersistedState(state),
         serviceKey,
-        selectedSessionId: toolResult.selectedSession?.sessionId ?? state.selectedSessionId,
-        selectedGroupId: toolResult.selectedSession?.groupId ?? state.selectedGroupId,
+        selectedSessionId:
+          toolResult.selectedSession?.sessionId ??
+          (clearUnresolvedCharlaSelection ? undefined : state.selectedSessionId),
+        selectedGroupId:
+          toolResult.selectedSession?.groupId ??
+          (clearUnresolvedCharlaSelection ? undefined : state.selectedGroupId),
+        location: toolResult.selectedSession?.location ?? state.location,
+        modality: toolResult.selectedSession?.modality ?? state.modality,
         stage:
-          toolResult.status === "write_result"
+          toolResult.status === "manual_validation_required"
+            ? "blocked"
+            : toolResult.status === "write_result"
             ? toolResult.plan?.blocked || !toolResult.writeResult?.ok
               ? "blocked"
               : "write_planned"
@@ -1749,21 +2103,6 @@ export class MaternalyCoreAdapter {
             dateMappedTo: reduced.diagnostics.dateMappedTo,
             missingFieldsAfter: toolResult.missingFields,
           }),
-        });
-      }
-      if (
-        serviceKey === "charla_embarazo_1_20" &&
-        toolResult.status === "write_result" &&
-        (state.peopleCount ?? 0) > 1 &&
-        !state.partnerName
-      ) {
-        events.push({
-          eventType: "maternaly_registration_soft_field_skipped",
-          payload: {
-            serviceKey,
-            field: "partnerName",
-            reason: "optional_not_blocking",
-          },
         });
       }
       events.push({
@@ -1880,6 +2219,7 @@ export class MaternalyCoreAdapter {
     const service = serviceFromDecision(decision, nextState);
     const needsHuman =
       decision.action === "handoff" ||
+      toolResult?.status === "manual_validation_required" ||
       (toolResult?.status === "write_result" && Boolean(toolResult.plan?.blocked || !toolResult.writeResult?.ok));
     const resetPreservesManualReview =
       decision.action === "reset" &&
@@ -2035,6 +2375,8 @@ export class MaternalyCoreAdapter {
             ? hasConfirmedServiceMilestone
               ? input.conversation.serviceDetected
               : undefined
+            : decision.action === "booking_declined"
+              ? undefined
             : decision.action === "catalog_info"
               ? hasTrackedServiceMilestone
                 ? input.conversation.serviceDetected

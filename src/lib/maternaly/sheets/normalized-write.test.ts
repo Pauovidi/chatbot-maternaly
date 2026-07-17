@@ -299,6 +299,8 @@ describe("normalized Maternaly write plan", () => {
     const registration = plan.operations.find((operation) => operation.tab === "Inscripciones");
     expect(plan.blocked).toBe(false);
     expect(registration?.values.pareja_nombre).toBe("Tono");
+    expect(registration?.values.precio_acordado).toBe("0 €");
+    expect(registration?.values.estado_pago).toBe("no_aplica");
   });
 
   it("keeps Charla write plan unblocked when companion name is pending", async () => {
@@ -369,5 +371,40 @@ describe("normalized Maternaly write plan", () => {
     });
 
     expect(secondPlan.blockedReasons).toContain("duplicate_idempotency_key");
+  });
+
+  it("serializes concurrent live writes with the same idempotency key", async () => {
+    const { client, snapshot, session } = await buildFixture();
+    const draft = {
+      serviceKey: "taller_blw" as const,
+      fullName: "Marta Lopez",
+      phone: "+34600111222",
+      email: "marta@example.test",
+      peopleCount: 1,
+    };
+    const env = normalizedTestEnv({
+      MATERNALY_NORMALIZED_SHEETS_WRITE_MODE: "live",
+      GOOGLE_SHEETS_ACCESS_MODE: "live",
+      BOT_SHEETS_LIVE_WRITE_ENABLED: "true",
+    });
+    const firstPlan = buildRegistrationWritePlan({ snapshot, session, draft, env });
+    const secondPlan = buildRegistrationWritePlan({ snapshot, session, draft, env });
+
+    expect(firstPlan.idempotencyKey).toBe(secondPlan.idempotencyKey);
+
+    const results = await Promise.all([
+      applyRegistrationWritePlan({ snapshot, client, plan: firstPlan }),
+      applyRegistrationWritePlan({ snapshot, client, plan: secondPlan }),
+    ]);
+
+    expect(results.filter((result) => result.applied)).toHaveLength(1);
+    expect(results.filter((result) => !result.applied)).toHaveLength(1);
+    expect(results.find((result) => !result.applied)?.blockedReason).toBe("duplicate_idempotency_key");
+    expect(client.appended).toHaveLength(3);
+    expect(client.appended.map((item) => item.tabTitle)).toEqual([
+      "Clientes_Local",
+      "Inscripciones",
+      "Interacciones_Chatbot",
+    ]);
   });
 });
