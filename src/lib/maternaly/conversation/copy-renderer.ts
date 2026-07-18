@@ -38,6 +38,7 @@ export type MaternalyCopyAction =
   | "payment"
   | "invoice"
   | "booking_declined"
+  | "booking_service_selection"
   | "normalized_registration"
   | "catalog_info"
   | "service_info"
@@ -179,7 +180,7 @@ function capitalizeFirst(value: string): string {
   return value ? `${value.charAt(0).toLocaleUpperCase("es")}${value.slice(1)}` : value;
 }
 
-function rephraseRepeatedSentence(sentence: string, index: number): string {
+function rephraseRepeatedSentence(sentence: string): string {
   const rewritten = sentence
     .replace(/^El taller BLW cuesta\s+/i, "Para el taller BLW, el precio es de ")
     .replace(/^El taller BLW dura\s+/i, "La duración del taller BLW es de ")
@@ -217,15 +218,7 @@ function rephraseRepeatedSentence(sentence: string, index: number): string {
     }
   }
 
-  const connectors = [
-    "En concreto,",
-    "Además,",
-    "También conviene saber que",
-    "Por otro lado,",
-    "Para terminar,",
-  ];
-  const connector = connectors[index % connectors.length];
-  return `${connector} ${sentence.charAt(0).toLocaleLowerCase("es")}${sentence.slice(1)}`;
+  return sentence;
 }
 
 function contentPreservingAlternatives(reply: string): string[] {
@@ -237,12 +230,13 @@ function contentPreservingAlternatives(reply: string): string[] {
   const questions = reframed.filter((item) => /\?$/.test(item));
   const facts = reframed.filter((item) => !/\?$/.test(item));
   const ordered = [...facts, ...questions];
+  const reframedText = reframed.join(" ");
+  const reorderedText = ordered.join(" ");
 
-  return [
-    `Puntos clave:\n\n${ordered.map((item) => `• ${item}`).join("\n")}`,
-    `${questions.join(" ")}${questions.length ? "\n\n" : ""}${[...facts].reverse().join(" ")}`,
-    `Datos concretos:\n\n${ordered.map((item, index) => `${index + 1}. ${item}`).join("\n")}`,
-  ].filter((item) => item.trim());
+  return [reframedText, reorderedText].filter(
+    (item, index, alternatives) =>
+      item.trim() && alternatives.findIndex((candidate) => normalizeCopy(candidate) === normalizeCopy(item)) === index,
+  );
 }
 
 export function ensureDistinctMaternalyReply(input: {
@@ -293,10 +287,10 @@ export function ensureDistinctMaternalyReply(input: {
     }
   }
 
-  const focusOptions = ["el contenido", "la duración", "el precio", "la modalidad", "las sedes", "las fechas"];
-  const focus = focusOptions[duplicateCount % focusOptions.length];
-  const candidate = `Dime qué necesitas resolver ahora y voy directa a ello. Si te ayuda, podemos empezar por ${focus} y después vemos el resto con calma.`;
-  return { reply: candidate, changed: true, duplicateCount };
+  // Si ya se han usado también las redacciones alternativas, repetir la
+  // respuesta concreta conserva mejor el contexto que sustituirla por un
+  // comodín genérico que obligue a la usuaria a explicar de nuevo qué quería.
+  return { reply: input.reply, changed: false, duplicateCount };
 }
 
 export class MaternalyCopyRenderer {
@@ -322,6 +316,7 @@ export class MaternalyCopyRenderer {
 
     const mustStayDeterministic =
       input.decision.action === "catalog_info" ||
+      input.decision.action === "booking_service_selection" ||
       service?.category === "sensitive" ||
       input.decision.serviceQuestionFocus === "clinical_risk";
 
@@ -369,6 +364,8 @@ export class MaternalyCopyRenderer {
         return "Puedo dejar anotada la solicitud de factura o justificante. El equipo la revisará con el pago validado antes de emitir nada.";
       case "booking_declined":
         return "Claro, no reservo nada 😊 Cuando quieras, puedo ayudarte a explorar otros servicios de embarazo o resolver cualquier otra duda. ¿Qué te apetece mirar?";
+      case "booking_service_selection":
+        return this.renderBookingServiceSelection(input.decision.journeyStage);
       case "greeting":
         return this.renderGreeting(input.message);
       case "catalog_info":
@@ -391,6 +388,12 @@ export class MaternalyCopyRenderer {
 
   renderAlternatives(input: MaternalyCopyRenderInput): string[] {
     const service = serviceFromDecision(input.decision, input.state);
+    if (input.decision.action === "booking_service_selection") {
+      return [
+        "Entendido: quieres pedir una cita. Para buscar un hueco real necesito el nombre del servicio; después comprobaré sus opciones de sede y fecha. La Charla Informativa y el Taller BLW tienen inscripción conectada, y para el resto dejaré tu preferencia preparada para que el equipo confirme la agenda. ¿Qué servicio necesitas?",
+      ];
+    }
+
     if (input.decision.action === "catalog_info") {
       if (input.decision.modalityPreference === "online") {
         return [
@@ -524,6 +527,13 @@ export class MaternalyCopyRenderer {
 
   private renderGeneral(): string {
     return "Soy Ane, la asistente virtual de Maternaly. Puedo darte información precisa sobre nuestros servicios y ayudarte a preparar una reserva. Para orientarte sin dar nada por supuesto, dime primero en qué etapa estás: EMBARAZO, POSTPARTO u OTROS. 💛";
+  }
+
+  private renderBookingServiceSelection(journeyStage?: MaternalyJourneyStage): string {
+    const context = journeyStage === "embarazo"
+      ? "Como ya estamos viendo los servicios para el embarazo,"
+      : "Para consultar huecos reales,";
+    return `Claro, vamos a agendarla. ${context} necesito que me digas el servicio concreto. La disponibilidad se comprueba por servicio, sede y fecha: puedo tramitar directamente las próximas convocatorias de la Charla Informativa y el Taller BLW; para los demás servicios recogeré tu preferencia para que el equipo confirme la agenda. ¿Qué servicio quieres agendar?`;
   }
 
   private renderCatalogOverview(): string {

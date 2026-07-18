@@ -48,6 +48,20 @@ export function buildMaternalyReplyFromIntent(intent: StructuredIntent): string 
     return ensureMaternalySafeReply(renderer.render({ decision: { action: "reset" } }));
   }
 
+  if (
+    ["availability_request", "registration_start"].includes(intent.intent) &&
+    !getKnowledgeService(intent.service_candidate)
+  ) {
+    return ensureMaternalySafeReply(
+      renderer.render({
+        decision: {
+          action: "booking_service_selection",
+          journeyStage: intent.slots.journey_stage,
+        },
+      }),
+    );
+  }
+
   if (intent.intent === "service_discovery" || intent.service_scope === "catalog") {
     return ensureMaternalySafeReply(
       renderer.render({

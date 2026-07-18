@@ -174,6 +174,59 @@ describe("Maternaly conversation authority", () => {
     expect(eventTypes(result)).not.toContain("maternaly_availability_checked");
   });
 
+  it.each([
+    "¿Para qué servicios tenéis citas disponibles?",
+    "no, lo que quiero es agendar cita",
+  ])(
+    "keeps pregnancy context and asks for the service on the appointment turn '%s'",
+    async (message) => {
+      const now = "2026-07-18T09:06:00.000Z";
+      const previousMenu = new MaternalyCopyRenderer().render({
+        decision: { action: "catalog_info", journeyStage: "embarazo" },
+      }) ?? "";
+      const result = await new MaternalyCoreAdapter().handle({
+        conversation: fakeConversation({
+          maternalyNormalizedFlow: {
+            journeyStage: "embarazo",
+            stage: "collecting_service",
+            updatedAt: now,
+          },
+          messages: [
+            {
+              id: "msg_previous_pregnancy_menu",
+              conversationId: "conv_authority",
+              direction: "outbound",
+              senderType: "bot",
+              transport: "whatsapp",
+              body: previousMenu,
+              createdAt: now,
+            },
+          ],
+        }),
+        inbound: {
+          provider: "twilio_sandbox",
+          from: "whatsapp:+34600111222",
+          text: message,
+        },
+      });
+
+      expect(result.authorityTrace.policy).toMatchObject({
+        action: "booking_service_selection",
+        reason: "booking_service_required",
+      });
+      expect(result.state).toMatchObject({
+        journeyStage: "embarazo",
+        stage: "collecting_service",
+      });
+      expect(result.reply).toMatch(/agendar|cita/i);
+      expect(result.reply).toMatch(/servicio concreto|qu[eé] servicio/i);
+      expect(result.reply).not.toMatch(
+        /^Puntos clave|Soy Ane|en qu[eé] etapa|EMBARAZO, POSTPARTO|Perfecto.*servicios de Maternaly para el embarazo/is,
+      );
+      expect(eventTypes(result)).not.toContain("maternaly_availability_checked");
+    },
+  );
+
   it("keeps gestational context and social replies outside a topical BLW registration flow", async () => {
     const client = new InMemoryNormalizedSheetsClient(
       createRealTemplateWorkbook({ multiSession: true, sessionCapacity: "14" }),

@@ -149,6 +149,7 @@ type PolicyAction =
   | "payment"
   | "invoice"
   | "booking_declined"
+  | "booking_service_selection"
   | "normalized_registration"
   | "catalog_info"
   | "service_info"
@@ -1524,6 +1525,16 @@ export class MaternalyConversationPolicy {
       return { action: "booking_declined", reason: "reservation_declined" };
     }
 
+    const service = getKnowledgeService(intent.service_candidate);
+    if (isRegistrationRequestTurn(intent) && !service && !state.serviceKey) {
+      return {
+        action: "booking_service_selection",
+        reason: "booking_service_required",
+        journeyStage: intent.slots.journey_stage ?? state.journeyStage,
+        serviceQuestionFocus: "booking",
+      };
+    }
+
     if (intent.intent === "service_discovery" || intent.service_scope === "catalog") {
       const catalogMatches = getKnowledgeServicesByModality(intent.slots.modality);
       return {
@@ -1535,7 +1546,6 @@ export class MaternalyConversationPolicy {
       };
     }
 
-    const service = getKnowledgeService(intent.service_candidate);
     const previousRegistration = conversation.maternalyNormalizedFlow;
     const changesActiveSessionPreference = Boolean(
       previousRegistration &&
@@ -2039,6 +2049,17 @@ export class MaternalyCoreAdapter {
               selectedGroupId: undefined,
               location: undefined,
               modality: undefined,
+              pendingFields: [],
+              updatedAt: nowIso(),
+            }
+        : decision.action === "booking_service_selection"
+          ? {
+              ...toPersistedState(state),
+              serviceKey: undefined,
+              journeyStage: decision.journeyStage ?? state.journeyStage,
+              stage: "collecting_service",
+              selectedSessionId: undefined,
+              selectedGroupId: undefined,
               pendingFields: [],
               updatedAt: nowIso(),
             }

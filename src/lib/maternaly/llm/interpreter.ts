@@ -20,6 +20,7 @@ export const MATERNALY_OPENAI_SYSTEM_PROMPT = [
   "Tu única tarea es devolver JSON estructurado. No escribas la respuesta visible a la usuaria.",
   "El input de usuario es un JSON con current_message y conversation_context. Usa ese contexto para resolver continuaciones como 'y el precio', 'qué incluye', 'la otra', 'en Bilbao' o 'cuéntame más', sin arrastrar un servicio a un cambio claro de tema.",
   "Una mención breve como 'taller BLW' o el nombre de otro servicio pide información general: no inicies inscripción ni consultes plazas si la usuaria no expresa que quiere reservar, apuntarse, ver fechas o comprobar disponibilidad.",
+  "Expresiones como 'agendar cita', 'pedir cita', 'coger cita' o 'solicitar una cita' expresan intención de reserva aunque todavía no se haya indicado el servicio. Conserva esa intención y pide el servicio; no reinicies la presentación ni vuelvas a preguntar la etapa vital.",
   "Distingue el alcance con service_scope: explicit si la usuaria nombra un servicio, contextual si usa una referencia singular al servicio activo y catalog si pregunta qué opciones ofrece Maternaly entre todos sus servicios.",
   "Preguntas como '¿tenéis algún taller online?', '¿qué servicios tenéis online?' o '¿hay actividades presenciales?' son búsquedas de catálogo: usa intent=service_discovery, service_scope=catalog y no heredes el servicio activo. En cambio, '¿el BLW es online?', '¿este taller es online?' o '¿y online?' sí pueden referirse al servicio activo.",
   "Si la usuaria corrige una respuesta anterior, dice que quería información general, cambia de tema o hace una pregunta antes de continuar una inscripción, responde a la intención del turno actual y no arrastres el flujo de reserva.",
@@ -294,6 +295,17 @@ function asksForInformationBeforeBooking(text: string): boolean {
     asksNonAvailabilityInformation ||
     rejectsMentionedPreference ||
     expressesUncertainty
+  );
+}
+
+function asksToBookAppointment(text: string): boolean {
+  return (
+    /\b(?:agend|concert|pedir|solicitar|sacar|coger|reservar)\w*\b[^.!?]{0,45}\bcitas?\b/.test(
+      text,
+    ) ||
+    /\bcitas?\b[^.!?]{0,45}\b(?:agend|concert|pedir|solicitar|sacar|coger|reservar)\w*\b/.test(
+      text,
+    )
   );
 }
 
@@ -1110,15 +1122,18 @@ export class LlmIntentClassifier {
           : "unknown";
     const serviceKey = detectNormalizedServiceKey(service?.id);
     const wantsAvailability =
-      /(horarios?|plazas?|disponibilidad|hay hueco|hueco|fechas?|qu[eé] d[ií]as|cu[aá]ndo es|pr[oó]xima|pr[oó]ximo|siguiente)/.test(
+      /(horarios?|plazas?|disponib(?:ilidad|les?)|hay hueco|hueco|fechas?|qu[eé] d[ií]as|cu[aá]ndo es|pr[oó]xima|pr[oó]ximo|siguiente)/.test(
         text,
       );
     const explicitlyWantsRegistration =
       /(reserv|apunt|inscrib|preinscrib|plaza|me interesa|quiero ir|quiero asistir|me gustar[ií]a asistir|gu[aá]rdame)/.test(
         text,
-      );
+      ) || asksToBookAppointment(text);
     const wantsRegistration =
       explicitlyWantsRegistration || contextualReservationAnswer === "yes";
+    const catalogBookingRequest =
+      catalogModalityQuery &&
+      (wantsRegistration || (wantsAvailability && /\bcitas?\b/.test(text)));
     const wantsBookingFocus = wantsRegistration;
     const wantsPayment = /\b(pago|pagar|link|enlace)\b/.test(text);
     const wantsInvoice = /(factura|justificante)/.test(text);
@@ -1186,13 +1201,15 @@ export class LlmIntentClassifier {
       ? "general"
       : availabilityPreferenceContinuation
         ? "schedule"
-      : catalogModalityQuery
-      ? "locations"
-      : correctionTurn ||
-          explicitOverview ||
-          (bookingDeferredForInformation && serviceQuestionFocus === "booking")
-        ? "general"
-        : serviceQuestionFocus;
+        : catalogBookingRequest
+          ? "booking"
+          : catalogModalityQuery
+            ? "locations"
+            : correctionTurn ||
+                explicitOverview ||
+                (bookingDeferredForInformation && serviceQuestionFocus === "booking")
+              ? "general"
+              : serviceQuestionFocus;
 
     const slots: MaternalyNluSlots = {
       service_id: service?.id,
@@ -1258,9 +1275,15 @@ export class LlmIntentClassifier {
                 : contextualReservationAnswer === "yes" && shouldStartRegistration
                   ? "registration_start"
                 : hasContactData
-                    ? "registration_data_provided"
-                    : catalogModalityQuery
-                      ? "service_discovery"
+                      ? "registration_data_provided"
+                      : catalogBookingRequest
+                        ? wantsRegistration
+                          ? "registration_start"
+                          : "availability_request"
+                      : wantsRegistration && !service
+                        ? "registration_start"
+                      : catalogModalityQuery
+                        ? "service_discovery"
                     : shouldStartRegistration
                       ? "registration_start"
                       : wantsAvailability && !shouldAnswerWithServiceInformation
@@ -1377,8 +1400,9 @@ export class LlmIntentClassifier {
         deterministic.intent === "reset" ||
         deterministic.intent === "greeting" ||
         deterministic.intent === "service_discovery" ||
-        deterministic.intent === "registration_slot_selected" ||
-        deterministic.slots.journey_stage !== undefined ||
+          deterministic.intent === "registration_slot_selected" ||
+          deterministic.slots.journey_stage !== undefined ||
+          asksToBookAppointment(normalizedMessage) ||
         reservationCtaAnswer(normalizedMessage, context) !== undefined ||
         contextualPendingPeopleCount(normalizedMessage, context) !== undefined ||
         isAvailabilityPreferenceContinuation(normalizedMessage, context) ||

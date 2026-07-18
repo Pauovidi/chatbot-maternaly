@@ -8,7 +8,7 @@ export function PublicSiteHeader() {
       <div className="mx-auto grid min-h-[4.75rem] max-w-[1200px] grid-cols-[auto_1fr_auto] items-center gap-6 px-5 py-3 sm:px-6 lg:px-8">
         <Link href="/" className="flex items-center" aria-label="Maternaly">
           <Image
-            src="/brand/maternaly-logo-fondo-transparente.png"
+            src="/brand/maternaly-logo.png"
             alt="Maternaly"
             width={275}
             height={69}

@@ -286,6 +286,47 @@ describe("MaternalyCopyRenderer availability guardrails", () => {
     expect(distinct.reply).not.toMatch(/repetitiva|otra manera|otro [aá]ngulo/i);
   });
 
+  it("asks for the service when the user wants an appointment without restarting the greeting", () => {
+    const renderer = new MaternalyCopyRenderer();
+    const reply = renderer.render({
+      decision: {
+        action: "booking_service_selection",
+        journeyStage: "embarazo",
+      },
+      message: "no, lo que quiero es agendar cita",
+    }) ?? "";
+
+    expect(reply).toMatch(/vamos a agendarla|quieres agendar/i);
+    expect(reply).toMatch(/servicio concreto|qu[eé] servicio/i);
+    expect(reply).toMatch(/Charla Informativa.*Taller BLW/is);
+    expect(reply).not.toMatch(/soy Ane|en qu[eé] etapa|EMBARAZO, POSTPARTO|Puntos clave/i);
+  });
+
+  it("does not use structural labels to disguise a repeated reply", () => {
+    const reply = "El taller BLW es presencial y dura tres horas.";
+    const distinct = ensureDistinctMaternalyReply({
+      reply,
+      recentAssistantReplies: [reply],
+      action: "service_info",
+    });
+
+    expect(distinct.reply).not.toMatch(/^Puntos clave|^Datos concretos|^En concreto,/i);
+  });
+
+  it("repeats the concrete answer instead of losing context when every alternative was used", () => {
+    const reply = "El taller BLW es presencial y dura tres horas.";
+    const naturalAlternative = "El taller BLW se realiza de forma presencial y dura tres horas.";
+    const distinct = ensureDistinctMaternalyReply({
+      reply,
+      recentAssistantReplies: [reply, naturalAlternative],
+      action: "service_info",
+    });
+
+    expect(distinct).toEqual({ reply, changed: false, duplicateCount: 1 });
+    expect(distinct.reply).toMatch(/BLW.*presencial.*tres horas/i);
+    expect(distinct.reply).not.toMatch(/Dime qu[eé] necesitas resolver|Puntos clave/i);
+  });
+
   it("never hides a word-for-word duplicate behind a new opening", () => {
     const reply = "El taller BLW es presencial y dura tres horas.";
     const distinct = ensureDistinctMaternalyReply({

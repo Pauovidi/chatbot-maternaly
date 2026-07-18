@@ -143,6 +143,36 @@ describe("Maternaly LLM interpreter", () => {
     });
   });
 
+  it.each([
+    "quiero agendar cita",
+    "quiero pedir una cita",
+    "necesito coger cita",
+  ])("keeps the booking intent when '%s' omits the service", async (message) => {
+    const classifier = new LlmIntentClassifier();
+
+    await expect(classifier.classify(message)).resolves.toMatchObject({
+      intent: "registration_start",
+      service_scope: "unknown",
+      service_candidate: undefined,
+      service_question_focus: "booking",
+      needs_availability_lookup: false,
+    });
+  });
+
+  it("recognizes a catalog-wide appointment availability question as service selection", async () => {
+    const classifier = new LlmIntentClassifier();
+
+    await expect(
+      classifier.classify("¿Para qué servicios tenéis citas disponibles?"),
+    ).resolves.toMatchObject({
+      intent: "availability_request",
+      service_scope: "catalog",
+      service_candidate: undefined,
+      service_question_focus: "booking",
+      needs_availability_lookup: false,
+    });
+  });
+
   it("marks cancellations, rescheduling and invoice/payment requests for human handoff", async () => {
     const classifier = new LlmIntentClassifier();
 
