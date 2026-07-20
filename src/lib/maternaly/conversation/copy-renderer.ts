@@ -365,24 +365,30 @@ export class MaternalyCopyRenderer {
       case "booking_declined":
         return "Claro, no reservo nada 😊 Cuando quieras, puedo ayudarte a explorar otros servicios de embarazo o resolver cualquier otra duda. ¿Qué te apetece mirar?";
       case "booking_service_selection":
-        return this.renderBookingServiceSelection(input.decision.journeyStage);
+        return this.renderBookingServiceSelection(
+          input.decision.journeyStage ?? input.state?.journeyStage,
+          input.state?.pregnancyMonth,
+          input.state?.pregnancyWeek,
+        );
       case "greeting":
-        return this.renderGreeting(input.message);
+        return this.renderGreeting(input.message, input.state);
       case "catalog_info":
         return this.renderCatalogInfo(
           input.decision.journeyStage ?? input.state?.journeyStage,
           input.decision.modalityPreference,
           input.message,
+          input.state?.pregnancyMonth,
+          input.state?.pregnancyWeek,
         );
       case "service_info":
         return service
           ? this.renderServiceInfo(service, input.decision, input.message)
-          : this.renderGeneral();
+          : this.renderGeneral(input.state);
       case "normalized_registration":
         return this.renderNormalizedRegistration(input.toolResult, service, input.state);
       case "general":
       default:
-        return this.renderGeneral();
+        return this.renderGeneral(input.state);
     }
   }
 
@@ -390,7 +396,7 @@ export class MaternalyCopyRenderer {
     const service = serviceFromDecision(input.decision, input.state);
     if (input.decision.action === "booking_service_selection") {
       return [
-        "Entendido: quieres pedir una cita. Para buscar un hueco real necesito el nombre del servicio; después comprobaré sus opciones de sede y fecha. La Charla Informativa y el Taller BLW tienen inscripción conectada, y para el resto dejaré tu preferencia preparada para que el equipo confirme la agenda. ¿Qué servicio necesitas?",
+        "Entendido, seguimos con la cita. Dime qué servicio necesitas. Si eliges la Charla Informativa o el Taller BLW, consultaré directamente su agenda vinculada y te mostraré sus fechas y plazas reales.",
       ];
     }
 
@@ -525,15 +531,37 @@ export class MaternalyCopyRenderer {
     return parts.join(" ");
   }
 
-  private renderGeneral(): string {
+  private renderGeneral(state?: MaternalyNormalizedFlowState): string {
+    if (state?.journeyStage === "embarazo") {
+      const detail = state.pregnancyMonth
+        ? `de ${state.pregnancyMonth} meses`
+        : state.pregnancyWeek
+          ? `de ${state.pregnancyWeek} semanas`
+          : "";
+      return `Te sigo 😊 Ya tengo en cuenta que estás embarazada${detail ? ` ${detail}` : ""}. Dime qué quieres resolver ahora: elegir un servicio, consultar su agenda o continuar con una cita.`;
+    }
+    if (state?.journeyStage === "postparto") {
+      return "Te sigo 😊 Ya tengo en cuenta que estás en el posparto. Dime qué necesitas ahora y continuamos desde ese contexto.";
+    }
+    if (state?.journeyStage === "otros") {
+      return "Te sigo 😊 Ya tengo en cuenta que tu consulta no es de embarazo ni posparto. Cuéntame qué necesitas y seguimos desde ahí.";
+    }
     return "Soy Ane, la asistente virtual de Maternaly. Puedo darte información precisa sobre nuestros servicios y ayudarte a preparar una reserva. Para orientarte sin dar nada por supuesto, dime primero en qué etapa estás: EMBARAZO, POSTPARTO u OTROS. 💛";
   }
 
-  private renderBookingServiceSelection(journeyStage?: MaternalyJourneyStage): string {
-    const context = journeyStage === "embarazo"
-      ? "Como ya estamos viendo los servicios para el embarazo,"
-      : "Para consultar huecos reales,";
-    return `Claro, vamos a agendarla. ${context} necesito que me digas el servicio concreto. La disponibilidad se comprueba por servicio, sede y fecha: puedo tramitar directamente las próximas convocatorias de la Charla Informativa y el Taller BLW; para los demás servicios recogeré tu preferencia para que el equipo confirme la agenda. ¿Qué servicio quieres agendar?`;
+  private renderBookingServiceSelection(
+    journeyStage?: MaternalyJourneyStage,
+    pregnancyMonth?: number,
+    pregnancyWeek?: number,
+  ): string {
+    const pregnancyContext = pregnancyMonth
+      ? `Ya tengo en cuenta que estás embarazada de ${pregnancyMonth} meses. `
+      : pregnancyWeek
+        ? `Ya tengo en cuenta que estás de ${pregnancyWeek} semanas. `
+        : journeyStage === "embarazo"
+          ? "Ya tengo en cuenta que estás embarazada. "
+          : "";
+    return `Claro, seguimos con la cita. ${pregnancyContext}Dime qué servicio quieres agendar. Si es la Charla Informativa o el Taller BLW, consultaré directamente su agenda vinculada y te mostraré fechas y plazas reales.`;
   }
 
   private renderCatalogOverview(): string {
@@ -541,7 +569,7 @@ export class MaternalyCopyRenderer {
     return `Claro 😊 En Maternaly acompañamos distintas etapas del embarazo, el posparto y los primeros meses del bebé. Estos son los servicios sobre los que puedo orientarte ahora mismo:\n\n${serviceNames}\n\nNo hace falta que sepas cuál elegir: si me cuentas en qué momento estás o qué te preocupa, te ayudo a comparar los que mejor encajen contigo.`;
   }
 
-  private renderGreeting(message?: string): string {
+  private renderGreeting(message?: string, state?: MaternalyNormalizedFlowState): string {
     const normalized = normalizeCopy(message ?? "");
     const salutation = normalized.includes("buenos dias")
       ? "¡Buenos días!"
@@ -550,6 +578,18 @@ export class MaternalyCopyRenderer {
         : normalized.includes("buenas tardes")
           ? "¡Buenas tardes!"
           : "¡Hola!";
+    if (state?.journeyStage) {
+      const context = state.journeyStage === "embarazo"
+        ? state.pregnancyMonth
+          ? `que estás embarazada de ${state.pregnancyMonth} meses`
+          : state.pregnancyWeek
+            ? `que estás de ${state.pregnancyWeek} semanas`
+            : "que estás embarazada"
+        : state.journeyStage === "postparto"
+          ? "que estás en el posparto"
+          : "el contexto que ya me has contado";
+      return `${salutation} 😊 Sí, te sigo; ya tengo en cuenta ${context}. ¿Qué necesitas ahora?`;
+    }
     const options = MATERNALY_JOURNEY_STAGE_OPTIONS.map((option) => `• ${option.label}`).join("\n");
     return `${salutation} 😊 Soy Ane, la asistente virtual de Maternaly. Estoy aquí para darte información precisa sobre nuestros servicios y ayudarte a reservar. Si alguna cuestión no queda resuelta, Macarena podrá contactar contigo personalmente.\n\nPara empezar, ¿en qué momento o etapa estás?\n${options}`;
   }
@@ -558,6 +598,8 @@ export class MaternalyCopyRenderer {
     journeyStage?: MaternalyJourneyStage,
     modalityPreference?: "presencial" | "online",
     message?: string,
+    pregnancyMonth?: number,
+    pregnancyWeek?: number,
   ): string {
     if (journeyStage === "embarazo") {
       const services = MATERNALY_PREGNANCY_SERVICE_MENU.filter((item) => item.group === "servicio")
@@ -569,7 +611,12 @@ export class MaternalyCopyRenderer {
       const units = MATERNALY_PREGNANCY_SERVICE_MENU.filter((item) => item.group === "unidad")
         .map((item) => `• ${item.label}`)
         .join("\n");
-      return `Perfecto 😊 Estos son los servicios de Maternaly para el embarazo:\n\n${services}\n\nActividades físicas durante el embarazo:\n${activities}\n\n${units}\n\nDime cuál te interesa y te lo cuento de uno en uno, con calma.`;
+      const context = pregnancyMonth
+        ? `Como estás embarazada de ${pregnancyMonth} meses, no hace falta que me repitas la etapa. `
+        : pregnancyWeek
+          ? `Como estás de ${pregnancyWeek} semanas, no hace falta que me repitas la etapa. `
+          : "";
+      return `Perfecto 😊 ${context}Estos son los servicios de Maternaly para el embarazo:\n\n${services}\n\nActividades físicas durante el embarazo:\n${activities}\n\n${units}\n\nDime cuál te interesa y seguimos desde ahí.`;
     }
 
     if (modalityPreference === "presencial") {
@@ -637,6 +684,10 @@ export class MaternalyCopyRenderer {
         decision?.serviceQuestionFocus ?? "general",
         decision?.locationPreference,
       );
+    }
+
+    if (decision?.serviceQuestionFocus === "booking") {
+      return `${service.name} no tiene una agenda de plazas vinculada al bot. Como ya me has dicho que quieres pedir cita, no te lo volveré a preguntar: dime qué sede, fecha o franja prefieres y dejaré esa solicitud concreta para que el equipo compruebe la disponibilidad.`;
     }
 
     const parts = [

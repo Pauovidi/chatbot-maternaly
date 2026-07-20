@@ -111,6 +111,22 @@ describe("MaternalyCopyRenderer availability guardrails", () => {
     expect(countEmojis(reply)).toBeLessThanOrEqual(2);
   });
 
+  it("does not ask for the journey stage again on a later greeting", () => {
+    const reply = new MaternalyCopyRenderer().render({
+      decision: { action: "greeting" },
+      state: {
+        journeyStage: "embarazo",
+        pregnancyMonth: 5,
+        stage: "collecting_service",
+        updatedAt: "2026-07-20T10:00:00.000Z",
+      },
+      message: "buenas tardes",
+    }) ?? "";
+
+    expect(reply).toMatch(/embarazada de 5 meses/i);
+    expect(reply).not.toMatch(/en qu[eé] momento|EMBARAZO[\s\S]*POSTPARTO/i);
+  });
+
   it("lists the pregnancy menu from the conversational contract", () => {
     const renderer = new MaternalyCopyRenderer();
     const reply = renderer.render({
@@ -123,6 +139,22 @@ describe("MaternalyCopyRenderer availability guardrails", () => {
     expect(reply).toMatch(/Taller BLW.*Baby-Led Weaning/i);
     expect(reply).toMatch(/AIPAP Agua[\s\S]*Pilates para el embarazo[\s\S]*Yoga para el embarazo/i);
     expect(reply).toMatch(/Fisioterapia en el embarazo[\s\S]*Psicolog[ií]a perinatal/i);
+  });
+
+  it("acknowledges the known pregnancy month instead of asking for the stage again", () => {
+    const reply = new MaternalyCopyRenderer().render({
+      decision: { action: "catalog_info", journeyStage: "embarazo" },
+      state: {
+        journeyStage: "embarazo",
+        pregnancyMonth: 5,
+        stage: "collecting_service",
+        updatedAt: "2026-07-20T10:00:00.000Z",
+      },
+      message: "Estoy embarazada de 5 meses y necesito saber qué servicios ofrecéis",
+    }) ?? "";
+
+    expect(reply).toMatch(/embarazada de 5 meses/i);
+    expect(reply).not.toMatch(/en qu[eé] momento est[aá]s|en qu[eé] etapa est[aá]s/i);
   });
 
   it("explains the Charla completely before offering dates", () => {
@@ -299,6 +331,8 @@ describe("MaternalyCopyRenderer availability guardrails", () => {
     expect(reply).toMatch(/vamos a agendarla|quieres agendar/i);
     expect(reply).toMatch(/servicio concreto|qu[eé] servicio/i);
     expect(reply).toMatch(/Charla Informativa.*Taller BLW/is);
+    expect(reply).toMatch(/agenda vinculada|fechas y plazas reales/i);
+    expect(reply).not.toMatch(/equipo confirme la agenda/i);
     expect(reply).not.toMatch(/soy Ane|en qu[eé] etapa|EMBARAZO, POSTPARTO|Puntos clave/i);
   });
 

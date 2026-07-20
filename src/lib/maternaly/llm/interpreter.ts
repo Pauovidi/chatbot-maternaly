@@ -225,6 +225,21 @@ function detectJourneyStage(input: {
   context: MaternalyInterpretationContext;
 }): MaternalyJourneyStage | undefined {
   const { text, explicitService, context } = input;
+  const explicitPregnancyIdentity =
+    /\b(?:estoy|soy|me encuentro)\s+embarazada\b/.test(text);
+  const gestationalTimingAnswer =
+    /\b(?:estoy|voy)\s+(?:de|en|por el|por la)\s+(?:\d{1,2}|un|uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|primer|segundo|tercer|cuarto|quinto|sexto|septimo|octavo|noveno)\s+(?:mes(?:es)?|semanas?)\b/.test(
+      text,
+    );
+  const explicitPregnancyDisclosure =
+    explicitPregnancyIdentity ||
+    (gestationalTimingAnswer &&
+      context.active_stage === "choosing_journey_stage" &&
+      !explicitService);
+  if (explicitPregnancyDisclosure) {
+    return "embarazo";
+  }
+
   if (explicitService || context.active_service_id || context.active_normalized_service_key) {
     return undefined;
   }
@@ -605,7 +620,7 @@ function validPregnancyMonth(value: unknown): number | undefined {
 function extractPregnancyMonth(text: string): number | undefined {
   const numeric = extractNumber(
     text,
-    /\b(?:estoy|embarazad[ao]|embarazo|gestacion|gestando|voy)\b[^.!?]{0,40}\b(?:de|en|por el|por la)?\s*(\d)\s*(?:º|°)?\s*mes\b/,
+    /\b(?:estoy|embarazad[ao]|embarazo|gestacion|gestando|voy)\b[^.!?]{0,40}\b(?:de|en|por el|por la)?\s*(\d)\s*(?:º|°)?\s*mes(?:es)?\b/,
   );
   if (numeric) {
     return validPregnancyMonth(numeric);
@@ -1129,8 +1144,14 @@ export class LlmIntentClassifier {
       /(reserv|apunt|inscrib|preinscrib|plaza|me interesa|quiero ir|quiero asistir|me gustar[ií]a asistir|gu[aá]rdame)/.test(
         text,
       ) || asksToBookAppointment(text);
+    const selectsServiceForPendingBooking = Boolean(
+      context.active_stage === "choosing_booking_service" &&
+        explicitService,
+    );
     const wantsRegistration =
-      explicitlyWantsRegistration || contextualReservationAnswer === "yes";
+      explicitlyWantsRegistration ||
+      contextualReservationAnswer === "yes" ||
+      selectsServiceForPendingBooking;
     const catalogBookingRequest =
       catalogModalityQuery &&
       (wantsRegistration || (wantsAvailability && /\bcitas?\b/.test(text)));
@@ -1191,7 +1212,8 @@ export class LlmIntentClassifier {
     const bookingDeferredForInformation = defersBookingForInformation(text);
     const bareServiceMention = isBareServiceMention(text, explicitService);
     const shouldAnswerWithServiceInformation =
-      correctionTurn || explicitOverview || bareServiceMention || bookingDeferredForInformation;
+      !selectsServiceForPendingBooking &&
+      (correctionTurn || explicitOverview || bareServiceMention || bookingDeferredForInformation);
     const shouldStartRegistration = Boolean(
       serviceKey &&
         !shouldAnswerWithServiceInformation &&
@@ -1401,6 +1423,8 @@ export class LlmIntentClassifier {
         deterministic.intent === "greeting" ||
         deterministic.intent === "service_discovery" ||
           deterministic.intent === "registration_slot_selected" ||
+          (context.active_stage === "choosing_booking_service" &&
+            deterministic.service_candidate !== undefined) ||
           deterministic.slots.journey_stage !== undefined ||
           asksToBookAppointment(normalizedMessage) ||
         reservationCtaAnswer(normalizedMessage, context) !== undefined ||

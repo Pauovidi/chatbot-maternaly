@@ -216,7 +216,7 @@ describe("Maternaly conversation authority", () => {
       });
       expect(result.state).toMatchObject({
         journeyStage: "embarazo",
-        stage: "collecting_service",
+        stage: "choosing_booking_service",
       });
       expect(result.reply).toMatch(/agendar|cita/i);
       expect(result.reply).toMatch(/servicio concreto|qu[eé] servicio/i);
@@ -226,6 +226,78 @@ describe("Maternaly conversation authority", () => {
       expect(eventTypes(result)).not.toContain("maternaly_availability_checked");
     },
   );
+
+  it("keeps stage and booking intent across the exact three-turn reported flow", async () => {
+    const client = new InMemoryNormalizedSheetsClient(
+      createRealTemplateWorkbook({ multiSession: true, sessionCapacity: "14" }),
+    );
+    const adapter = new MaternalyCoreAdapter(
+      undefined,
+      undefined,
+      undefined,
+      new MaternalyToolExecutor(client),
+    );
+    const env = normalizedTestEnv();
+
+    const catalog = await adapter.handle({
+      conversation: fakeConversation(),
+      inbound: {
+        provider: "twilio_sandbox",
+        from: "whatsapp:+34600111222",
+        text: "Me parece bien. Te explico: estoy embarazada de 5 meses y necesito saber qué servicios ofrecéis",
+      },
+      env,
+    });
+
+    expect(catalog.authorityTrace.policy.action).toBe("catalog_info");
+    expect(catalog.state).toMatchObject({
+      journeyStage: "embarazo",
+      pregnancyMonth: 5,
+      stage: "collecting_service",
+    });
+    expect(catalog.reply).toMatch(/embarazada de 5 meses/i);
+    expect(catalog.reply).not.toMatch(/en qu[eé] momento est[aá]s|Lactancia|Pedi[aá]trica/i);
+
+    const appointment = await adapter.handle({
+      conversation: fakeConversation({ ...catalog.conversationPatch }),
+      inbound: {
+        provider: "twilio_sandbox",
+        from: "whatsapp:+34600111222",
+        text: "quiero agendar cita",
+      },
+      env,
+    });
+
+    expect(appointment.authorityTrace.policy.action).toBe("booking_service_selection");
+    expect(appointment.state).toMatchObject({
+      journeyStage: "embarazo",
+      pregnancyMonth: 5,
+      stage: "choosing_booking_service",
+    });
+    expect(appointment.reply).toMatch(/agenda vinculada|fechas y plazas reales/i);
+    expect(appointment.reply).not.toMatch(/equipo confirme la agenda/i);
+
+    const serviceChoice = await adapter.handle({
+      conversation: fakeConversation({ ...appointment.conversationPatch }),
+      inbound: {
+        provider: "twilio_sandbox",
+        from: "whatsapp:+34600111222",
+        text: "Quiero para charla informativa",
+      },
+      env,
+    });
+
+    expect(serviceChoice.authorityTrace.policy.action).toBe("normalized_registration");
+    expect(serviceChoice.state).toMatchObject({
+      serviceKey: "charla_embarazo_1_20",
+      journeyStage: "embarazo",
+      pregnancyMonth: 5,
+      stage: "choosing_session",
+    });
+    expect(eventTypes(serviceChoice)).toContain("maternaly_availability_checked");
+    expect(serviceChoice.reply).toMatch(/Charla Informativa[\s\S]*(Erandio|Bilbao|online)/i);
+    expect(serviceChoice.reply).not.toMatch(/¿Quieres reservar tu plaza\?|equipo confirme la agenda/i);
+  });
 
   it("keeps gestational context and social replies outside a topical BLW registration flow", async () => {
     const client = new InMemoryNormalizedSheetsClient(

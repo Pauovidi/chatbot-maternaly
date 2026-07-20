@@ -57,6 +57,7 @@ export interface MaternalyNormalizedFlowState {
   stage?:
     | "greeting"
     | "choosing_journey_stage"
+    | "choosing_booking_service"
     | "collecting_service"
     | "awaiting_booking_decision"
     | "choosing_session"
@@ -73,6 +74,7 @@ export interface MaternalyNormalizedFlowState {
   peopleCount?: number;
   partnerName?: string;
   pregnancyWeek?: number;
+  pregnancyMonth?: number;
   fppOrDueDate?: string;
   babyBirthDate?: string;
   location?: string;

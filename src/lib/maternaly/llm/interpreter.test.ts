@@ -268,6 +268,58 @@ describe("Maternaly LLM interpreter", () => {
     expect(result.service_candidate).toBeUndefined();
   });
 
+  it("keeps the journey stage from a compound pregnancy-and-catalog message", async () => {
+    const result = await new LlmIntentClassifier().classify(
+      "Me parece bien. Te explico: estoy embarazada de 5 meses y necesito saber qué servicios ofrecéis",
+      { active_stage: "choosing_journey_stage" },
+    );
+
+    expect(result).toMatchObject({
+      intent: "service_discovery",
+      service_scope: "catalog",
+      slots: expect.objectContaining({
+        journey_stage: "embarazo",
+        pregnancy_month: 5,
+      }),
+      needs_availability_lookup: false,
+    });
+  });
+
+  it.each([
+    ["Quiero para charla informativa", "charla_embarazo_1_20"],
+    ["el taller BLW", "taller_blw"],
+  ])(
+    "treats '%s' as the service choice for the pending appointment",
+    async (message, serviceKey) => {
+      const result = await new LlmIntentClassifier().classify(message, {
+        active_stage: "choosing_booking_service",
+        journey_stage: "embarazo",
+      });
+
+      expect(result).toMatchObject({
+        intent: "registration_start",
+        service_candidate: serviceKey,
+        service_question_focus: "booking",
+        needs_availability_lookup: true,
+        slots: expect.objectContaining({ normalized_service_key: serviceKey }),
+      });
+    },
+  );
+
+  it("keeps booking focus for a service without a linked agenda", async () => {
+    const result = await new LlmIntentClassifier().classify("Pilates embarazo", {
+      active_stage: "choosing_booking_service",
+      journey_stage: "embarazo",
+    });
+
+    expect(result).toMatchObject({
+      intent: "service_question",
+      service_candidate: "pilates",
+      service_question_focus: "booking",
+      needs_availability_lookup: false,
+    });
+  });
+
   it("does not mistake a pregnancy service name for a journey-stage choice", async () => {
     const result = await new LlmIntentClassifier().classify("Pilates embarazo", {
       active_stage: "choosing_journey_stage",
@@ -725,6 +777,45 @@ describe("Maternaly LLM interpreter", () => {
       service_scope: "unknown",
       service_candidate: undefined,
       needs_availability_lookup: false,
+    });
+  });
+
+  it("keeps the pending booking intent when OpenAI treats the chosen service as information", async () => {
+    vi.stubEnv("LLM_PROVIDER", "openai");
+    process.env.OPENAI_API_KEY = "test-openai-key";
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          output_text: JSON.stringify({
+            intent: "service_question",
+            service_scope: "explicit",
+            service_candidate: "charla_embarazo_1_20",
+            slots: {
+              service_id: "charla_embarazo_1_20",
+              normalized_service_key: "charla_embarazo_1_20",
+            },
+            service_question_focus: "general",
+            needs_availability_lookup: false,
+            confidence: 0.98,
+            missing_fields: [],
+            should_handoff: false,
+            safety_flags: [],
+          }),
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    await expect(
+      new LlmIntentClassifier().classify("Quiero para charla informativa", {
+        active_stage: "choosing_booking_service",
+        journey_stage: "embarazo",
+      }),
+    ).resolves.toMatchObject({
+      intent: "registration_start",
+      service_candidate: "charla_embarazo_1_20",
+      service_question_focus: "booking",
+      needs_availability_lookup: true,
     });
   });
 

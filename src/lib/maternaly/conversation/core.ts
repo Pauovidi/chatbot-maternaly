@@ -255,6 +255,7 @@ function summarizeState(state: MaternalyNormalizedFlowState | undefined) {
     peopleCount: state?.peopleCount,
     hasPartnerName: Boolean(state?.partnerName),
     hasPregnancyWeek: Boolean(state?.pregnancyWeek),
+    hasPregnancyMonth: Boolean(state?.pregnancyMonth),
     hasFppOrDueDate: Boolean(state?.fppOrDueDate),
     hasBabyBirthDate: Boolean(state?.babyBirthDate),
     location: state?.location,
@@ -870,6 +871,8 @@ function stateBaseAfterServiceSwitch(
   // fields, observations, pending fields and idempotency context.
   return {
     journeyStage: previous.journeyStage,
+    pregnancyWeek: previous.pregnancyWeek,
+    pregnancyMonth: previous.pregnancyMonth,
     fullName: previous.fullName,
     phone: previous.phone,
     email: previous.email,
@@ -1439,6 +1442,8 @@ export class MaternalyStateReducer {
         ? {
             ...(previous ?? { updatedAt: nowIso() }),
             journeyStage,
+            pregnancyWeek: input.intent.slots.pregnancy_week ?? previous?.pregnancyWeek,
+            pregnancyMonth: input.intent.slots.pregnancy_month ?? previous?.pregnancyMonth,
             mode: input.conversation.mode,
             updatedAt: nowIso(),
           }
@@ -1453,6 +1458,7 @@ export class MaternalyStateReducer {
               peopleCount: contextual.slots.peopleCount ?? registrationSlots.people_count ?? previous?.peopleCount,
               partnerName: registrationSlots.partner_name ?? contextual.slots.partnerName ?? previous?.partnerName,
               pregnancyWeek: registrationSlots.pregnancy_week ?? previous?.pregnancyWeek,
+              pregnancyMonth: input.intent.slots.pregnancy_month ?? previous?.pregnancyMonth,
               fppOrDueDate: registrationSlots.fpp_or_due_date ?? contextual.slots.fppOrDueDate ?? previous?.fppOrDueDate,
               babyBirthDate: registrationSlots.baby_birth_date ?? contextual.slots.babyBirthDate ?? previous?.babyBirthDate,
               selectedSessionId: registrationSlots.selected_session_id ?? previous?.selectedSessionId,
@@ -2057,7 +2063,7 @@ export class MaternalyCoreAdapter {
               ...toPersistedState(state),
               serviceKey: undefined,
               journeyStage: decision.journeyStage ?? state.journeyStage,
-              stage: "collecting_service",
+              stage: "choosing_booking_service",
               selectedSessionId: undefined,
               selectedGroupId: undefined,
               pendingFields: [],
@@ -2076,10 +2082,12 @@ export class MaternalyCoreAdapter {
         : {
             ...toPersistedState(state),
             stage:
-              decision.action === "handoff"
-                ? "handoff"
-                : decision.action === "greeting"
-                  ? "choosing_journey_stage"
+               decision.action === "handoff"
+                 ? "handoff"
+                 : decision.action === "greeting"
+                  ? state.journeyStage
+                    ? state.stage ?? "collecting_service"
+                    : "choosing_journey_stage"
                 : decision.action === "normalized_registration" && state.serviceKey
                   ? "choosing_session"
                   : decision.action === "service_info" &&
