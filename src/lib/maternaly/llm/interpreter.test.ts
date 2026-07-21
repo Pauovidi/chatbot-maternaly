@@ -78,6 +78,25 @@ describe("Maternaly LLM interpreter", () => {
     });
   });
 
+  it("resolves a direct Charla availability request without waiting for OpenAI", async () => {
+    vi.stubEnv("LLM_PROVIDER", "openai");
+    process.env.OPENAI_API_KEY = "test-openai-key";
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+
+    await expect(
+      new LlmIntentClassifier().classify(
+        "pues quería saber qué citas tenéis disponibles para la charla informativa",
+      ),
+    ).resolves.toMatchObject({
+      intent: "registration_start",
+      service_candidate: "charla_embarazo_1_20",
+      service_question_focus: "schedule",
+      needs_availability_lookup: true,
+    });
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
   it("reads structured output from the raw Responses API content shape", async () => {
     vi.stubEnv("LLM_PROVIDER", "openai");
     process.env.OPENAI_API_KEY = "test-openai-key";

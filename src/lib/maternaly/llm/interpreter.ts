@@ -1062,11 +1062,27 @@ export class LlmIntentClassifier {
     context: MaternalyInterpretationContext = {},
     env: NodeJS.ProcessEnv = process.env,
   ): Promise<StructuredIntent> {
+    const deterministic = this.classifyWithMock(message, context);
+    const isExplicitAgendaLookup = Boolean(
+      deterministic.service_candidate &&
+        deterministic.needs_availability_lookup &&
+        ["registration_start", "availability_request", "registration_slot_selected"].includes(
+          deterministic.intent,
+        ),
+    );
+
+    // Las consultas inequívocas de agenda no necesitan esperar al modelo: ya
+    // contienen servicio e intención transaccional y deben responder a tiempo
+    // para el webhook de WhatsApp.
+    if (isExplicitAgendaLookup) {
+      return deterministic;
+    }
+
     if (env.LLM_PROVIDER === "openai" && env.OPENAI_API_KEY) {
       return this.classifyWithOpenAi(message, context, env);
     }
 
-    return this.classifyWithMock(message, context);
+    return deterministic;
   }
 
   classifyWithMock(
@@ -1362,37 +1378,47 @@ export class LlmIntentClassifier {
     context: MaternalyInterpretationContext,
     env: NodeJS.ProcessEnv,
   ): Promise<StructuredIntent> {
-    const response = await fetch("https://api.openai.com/v1/responses", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${env.OPENAI_API_KEY}`,
-      },
-      body: JSON.stringify({
-        model: env.LLM_MODEL || "gpt-4.1-mini",
-        input: [
-          {
-            role: "system",
-            content: MATERNALY_OPENAI_SYSTEM_PROMPT,
-          },
-          {
-            role: "user",
-            content: JSON.stringify({
-              current_message: message,
-              conversation_context: context,
-            }),
-          },
-        ],
-        text: {
-          format: {
-            type: "json_schema",
-            name: "maternaly_structured_intent",
-            strict: false,
-            schema: MATERNALY_STRUCTURED_OUTPUT_SCHEMA,
-          },
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 3_500);
+    let response: Response;
+    try {
+      response = await fetch("https://api.openai.com/v1/responses", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${env.OPENAI_API_KEY}`,
         },
-      }),
-    });
+        signal: controller.signal,
+        body: JSON.stringify({
+          model: env.LLM_MODEL || "gpt-4.1-mini",
+          input: [
+            {
+              role: "system",
+              content: MATERNALY_OPENAI_SYSTEM_PROMPT,
+            },
+            {
+              role: "user",
+              content: JSON.stringify({
+                current_message: message,
+                conversation_context: context,
+              }),
+            },
+          ],
+          text: {
+            format: {
+              type: "json_schema",
+              name: "maternaly_structured_intent",
+              strict: false,
+              schema: MATERNALY_STRUCTURED_OUTPUT_SCHEMA,
+            },
+          },
+        }),
+      });
+    } catch {
+      return this.classifyWithMock(message, context);
+    } finally {
+      clearTimeout(timeoutId);
+    }
 
     if (!response.ok) {
       return this.classifyWithMock(message, context);
