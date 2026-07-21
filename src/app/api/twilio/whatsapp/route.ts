@@ -264,6 +264,8 @@ export async function POST(request: Request) {
       result: "accepted",
       conversationId: result.conversation.id,
       duplicate: Boolean(messageSid && !result.botReply),
+      hasBotReply: Boolean(result.botReply),
+      twimlHasMessage: result.twiml?.includes("<Message>") ?? false,
     });
 
     return new NextResponse(buildSafeMaternalyTwilioResponse(result.twiml), {

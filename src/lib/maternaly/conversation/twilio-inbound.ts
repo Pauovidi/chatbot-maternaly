@@ -12,7 +12,7 @@ import { MaternalyConversationOutbox, type MaternalyOutboundMedia } from "@/lib/
 import { readMaternalyRuntimeConfig } from "@/lib/maternaly/config/env";
 import { resolveMaternalyServiceMedia } from "@/lib/maternaly/conversation/service-media";
 import type { NormalizedSheetsClient } from "@/lib/maternaly/sheets/normalized-client";
-import { ensureMaternalySafeReply } from "./response-engine";
+import { MATERNALY_SAFE_FALLBACK, ensureMaternalySafeReply } from "./response-engine";
 
 function nowIso() {
   return new Date().toISOString();
@@ -179,6 +179,20 @@ export async function handleInboundMaternalyWhatsApp(
     env: options.normalizedEnv,
   });
 
+  console.info(
+    "[maternaly:turn]",
+    JSON.stringify({
+      conversationId: latest.id,
+      mode: latest.mode,
+      intent: core.intent.intent,
+      action: core.authorityTrace.policy.action,
+      hasReply: Boolean(core.reply),
+      hasRenderedMessage: Boolean(core.renderedMessage),
+      stage: core.state?.stage,
+      totalDurationMs: core.authorityTrace.timing.totalDurationMs,
+    }),
+  );
+
   const patched = await store.replaceConversation({
     ...latest,
     ...core.conversationPatch,
@@ -188,7 +202,35 @@ export async function handleInboundMaternalyWhatsApp(
     await store.addEvent(createEvent(latest.id, event.eventType, event.payload));
   }
 
-  if (!core.reply) {
+  if (!core.reply || !core.renderedMessage) {
+    if (latest.mode === "bot") {
+      const rendered = {
+        kind: "text" as const,
+        text: ensureMaternalySafeReply(MATERNALY_SAFE_FALLBACK),
+        source: "copy_renderer" as const,
+        renderer: "MaternalyCopyRenderer" as const,
+      };
+      const fallbackOutbox = outbox.buildText({
+        conversationId: latest.id,
+        provider,
+        rendered,
+      });
+      const botReply = await store.addMessage(createMessage(fallbackOutbox.messageDraft));
+      await store.addEvent(
+        createEvent(latest.id, "bot_auto_reply_fallback", {
+          botDomain: "maternaly",
+          source: "maternaly_core_policy_copy",
+          reason: "no_visible_reply_in_bot_mode",
+        }),
+      );
+      return {
+        conversation: (await store.getById(latest.id)) ?? patched,
+        inbound,
+        botReply,
+        twiml: fallbackOutbox.twiml,
+      };
+    }
+
     await store.addEvent(
       createEvent(latest.id, "bot_auto_reply_skipped", {
         botDomain: "maternaly",
