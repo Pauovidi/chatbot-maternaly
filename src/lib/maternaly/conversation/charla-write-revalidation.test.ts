@@ -5,27 +5,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FileConversationStore } from "@/lib/hotel/conversations/file-store";
 import { MaternalyToolExecutor } from "@/lib/maternaly/conversation/core";
 import { handleInboundMaternalyWhatsApp } from "@/lib/maternaly/conversation/twilio-inbound";
-import { MATERNALY_CHARLA_SESSIONS } from "@/lib/maternaly/knowledge/charla-informativa-contract";
 import type { NormalizedSheetsClient } from "@/lib/maternaly/sheets/normalized-client";
 import {
   createRealTemplateWorkbook,
   normalizedTestEnv,
 } from "@/lib/maternaly/sheets/normalized-test-utils";
-
-const SPANISH_MONTHS = [
-  "enero",
-  "febrero",
-  "marzo",
-  "abril",
-  "mayo",
-  "junio",
-  "julio",
-  "agosto",
-  "septiembre",
-  "octubre",
-  "noviembre",
-  "diciembre",
-] as const;
 
 class ChangingCapacityClient implements NormalizedSheetsClient {
   readonly appended: Array<{ tabTitle: string; values: Array<string | number | undefined> }> = [];
@@ -140,7 +124,7 @@ describe("Charla: revalidación final y calendario seguro", () => {
     expect(result.writeResult).toMatchObject({ ok: false, applied: false });
   });
 
-  it("sigue mostrando las ocho fechas del Word durante una caída total de Sheets y no escribe", async () => {
+  it("no muestra fechas fijas durante una caída total de Sheets y no escribe", async () => {
     const client = new FailingReadClient();
     const store = new FileConversationStore(path.join(tempDir, "conversation.json"));
     const env = normalizedTestEnv({
@@ -169,17 +153,8 @@ describe("Charla: revalidación final y calendario seguro", () => {
     );
     const reply = result.botReply?.body ?? "";
 
-    for (const session of MATERNALY_CHARLA_SESSIONS) {
-      const [year, month, day] = session.date.split("-");
-      const monthName = SPANISH_MONTHS[Number(month) - 1];
-      expect(reply).toMatch(
-        new RegExp(
-          `${session.date}|${Number(day)}[\\/-]${Number(month)}[\\/-]${year}|${Number(day)} de ${monthName} de ${year}`,
-          "i",
-        ),
-      );
-    }
-    expect(reply).toMatch(/validaci[oó]n manual|revisi[oó]n manual|pendiente/i);
+    expect(reply).toMatch(/no puedo comprobar la disponibilidad/i);
+    expect(reply).not.toMatch(/20 de agosto|10 de agosto|pendiente de validaci[oó]n manual/i);
     expect(client.appended).toHaveLength(0);
   });
 });

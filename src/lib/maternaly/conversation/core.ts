@@ -23,10 +23,7 @@ import {
   type NormalizedSheetsClient,
   type NormalizedServiceSheetSnapshot,
 } from "@/lib/maternaly/sheets/normalized-client";
-import {
-  projectCharlaContractCalendar,
-  type NormalizedAvailableSession,
-} from "@/lib/maternaly/sheets/normalized-availability";
+import { type NormalizedAvailableSession } from "@/lib/maternaly/sheets/normalized-availability";
 import {
   getNormalizedServiceAvailability,
   type NormalizedServiceAvailabilityResult,
@@ -1646,9 +1643,7 @@ export class MaternalyToolExecutor {
       env,
     });
 
-    const canShowContractCalendar = input.serviceKey === "charla_embarazo_1_20";
-
-    if (!availability.ok && !canShowContractCalendar) {
+    if (!availability.ok) {
       const status =
         availability.reason === "missing_sheet_id"
           ? "not_configured"
@@ -1670,9 +1665,7 @@ export class MaternalyToolExecutor {
 
     const snapshot = availability.snapshot;
     const sessions = availability.sessions;
-    const calendarSessions = input.serviceKey === "charla_embarazo_1_20"
-      ? projectCharlaContractCalendar(sessions)
-      : sessions;
+    const calendarSessions = sessions;
     const selectedSession = chooseSession(input.message, input.state, calendarSessions);
     if (!selectedSession) {
       return {
@@ -1823,9 +1816,7 @@ export class MaternalyToolExecutor {
         serviceKey: input.serviceKey,
         snapshot: writeAvailability.snapshot ?? snapshot,
         sessions: writeAvailability.sessions,
-        calendarSessions: input.serviceKey === "charla_embarazo_1_20"
-          ? projectCharlaContractCalendar(writeAvailability.sessions)
-          : writeAvailability.sessions,
+        calendarSessions: writeAvailability.sessions,
         selectedSession,
         missingFields: [],
         availability: writeAvailability,
@@ -1835,9 +1826,7 @@ export class MaternalyToolExecutor {
 
     const writeSnapshot = writeAvailability.snapshot;
     const writeSessions = writeAvailability.sessions;
-    const writeCalendarSessions = input.serviceKey === "charla_embarazo_1_20"
-      ? projectCharlaContractCalendar(writeSessions)
-      : writeSessions;
+    const writeCalendarSessions = writeSessions;
     const revalidatedSession =
       writeCalendarSessions.find((candidate) => candidate.sessionId === selectedSession.sessionId) ??
       writeCalendarSessions.find(

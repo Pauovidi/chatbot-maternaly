@@ -229,7 +229,11 @@ describe("Maternaly conversation authority", () => {
 
   it("keeps stage and booking intent across the exact three-turn reported flow", async () => {
     const client = new InMemoryNormalizedSheetsClient(
-      createRealTemplateWorkbook({ multiSession: true, sessionCapacity: "14" }),
+      createRealTemplateWorkbook({
+        serviceKey: "charla_embarazo_1_20",
+        multiSession: true,
+        sessionCapacity: "14",
+      }),
     );
     const adapter = new MaternalyCoreAdapter(
       undefined,
