@@ -9,7 +9,6 @@ import {
   listAvailableSessionsFromSnapshot,
   type NormalizedAvailableSession,
 } from "./normalized-availability";
-import { listLegacyCharlaSessions } from "./legacy-charla-availability";
 import {
   NORMALIZED_REQUIRED_TABS,
   getCell,
@@ -28,7 +27,7 @@ export type NormalizedServiceAvailabilityReason =
   | "header_not_found";
 
 export interface NormalizedServiceAvailabilityDiagnostics {
-  selectedSource: "normalized_sheets" | "legacy_charla_sheet";
+  selectedSource: "normalized_sheets";
   headersDetected: boolean;
   criticalTabsOk: boolean;
   sheetIdRedacted?: string;
@@ -136,24 +135,6 @@ export async function getNormalizedServiceAvailability({
     };
 
     if (blockingParseErrors.length > 0) {
-      const legacySessions = serviceKey === "charla_embarazo_1_20"
-        ? await readLegacyCharlaAvailability(sheetsClient, sheetId)
-        : [];
-      if (legacySessions.length > 0) {
-        return {
-          ok: true,
-          serviceKey,
-          reason: "sessions_available",
-          sessions: legacySessions,
-          diagnostics: {
-            ...diagnostics,
-            selectedSource: "legacy_charla_sheet",
-            headersDetected: true,
-            criticalTabsOk: true,
-            errorType: "legacy_charla_layout",
-          },
-        };
-      }
       return {
         ok: false,
         serviceKey,
@@ -188,30 +169,6 @@ export async function getNormalizedServiceAvailability({
         errorType: classifyAvailabilityError(error),
       },
     };
-  }
-}
-
-async function readLegacyCharlaAvailability(
-  client: NormalizedSheetsClient,
-  sheetId: string,
-): Promise<NormalizedAvailableSession[]> {
-  if (!client.profileSpreadsheet) {
-    return [];
-  }
-  try {
-    const profile = await client.profileSpreadsheet(sheetId);
-    const tabs = await Promise.all(
-      profile.tabs.map(async (tab) => ({
-        title: tab.title,
-        rows: await client.readTabRows(sheetId, tab.title),
-      })),
-    );
-    return listLegacyCharlaSessions({
-      spreadsheetTitle: profile.title,
-      tabs,
-    });
-  } catch {
-    return [];
   }
 }
 

@@ -26,10 +26,6 @@ export interface NormalizedServiceSheetSnapshot {
 
 export interface NormalizedSheetsClient {
   readTabRows(sheetId: string, tabTitle: string): Promise<unknown[][]>;
-  profileSpreadsheet?(sheetId: string): Promise<{
-    title?: string;
-    tabs: Array<{ title: string }>;
-  }>;
   appendRow(
     sheetId: string,
     tabTitle: string,
@@ -42,13 +38,6 @@ export class GoogleNormalizedSheetsClient implements NormalizedSheetsClient {
 
   readTabRows(sheetId: string, tabTitle: string): Promise<unknown[][]> {
     return this.client.readTabRows(sheetId, tabTitle);
-  }
-
-  profileSpreadsheet(sheetId: string): Promise<{
-    title?: string;
-    tabs: Array<{ title: string }>;
-  }> {
-    return this.client.profileSpreadsheet(sheetId);
   }
 
   appendRow(
