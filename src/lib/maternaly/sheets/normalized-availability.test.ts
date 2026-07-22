@@ -144,7 +144,7 @@ describe("normalized Maternaly availability", () => {
     });
   });
 
-  it("keeps only future Charla sessions documented with the correct venue, modality and time", async () => {
+  it("uses every future Charla session published in the normalized agenda", async () => {
     const workbook = createRealTemplateWorkbook({
       serviceKey: "charla_embarazo_1_20",
       multiSession: true,
@@ -243,15 +243,19 @@ describe("normalized Maternaly availability", () => {
     });
 
     expect(sessions.map((session) => session.sessionId)).toEqual([
+      "sesion_charla_online_20260810",
+      "sesion_charla_erandio_wrong_time",
       "sesion_charla_erandio_20260924",
       "sesion_charla_bilbao_20261006",
-      "sesion_charla_online_20260810",
+      "sesion_charla_online_undocumented",
     ]);
     expect(sessions.map(({ location, modality, startTime }) => ({
       location,
       modality,
       startTime,
     }))).toEqual([
+      { location: "Online", modality: "online", startTime: "19:00" },
+      { location: "Erandio", modality: "presencial", startTime: "17:00" },
       { location: "Erandio", modality: "presencial", startTime: "18:30" },
       { location: "Bilbao", modality: "presencial", startTime: "17:00" },
       { location: "Online", modality: "online", startTime: "19:00" },

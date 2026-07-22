@@ -443,7 +443,7 @@ describe("contrato conversacional del Word: Charla Informativa Gratuita", () => 
     },
   );
 
-  it("al aceptar ofrece Erandio, Bilbao y online con los horarios y fechas del Word", async () => {
+  it("al aceptar muestra únicamente las sesiones futuras publicadas en la agenda", async () => {
     const harness = makeHarness();
 
     const result = await reachAvailableOptions(harness);
@@ -452,25 +452,25 @@ describe("contrato conversacional del Word: Charla Informativa Gratuita", () => 
     expect(reply).toMatch(/Erandio[\s\S]{0,90}18:30|18:30[\s\S]{0,90}Erandio/i);
     expect(reply).toMatch(/Bilbao[\s\S]{0,90}17:00|17:00[\s\S]{0,90}Bilbao/i);
     expect(reply).toMatch(/online[\s\S]{0,90}19:00|19:00[\s\S]{0,90}online/i);
-    for (const documentedDate of [
+    for (const publishedDate of [
+      /2026-07-20|20[\/-]07[\/-]2026|20 de julio/i,
       /2026-08-20|20[\/-]08[\/-]2026|20 de agosto/i,
       /2026-09-24|24[\/-]09[\/-]2026|24 de septiembre/i,
       /2026-10-08|08[\/-]10[\/-]2026|8 de octubre/i,
       /2026-10-06|06[\/-]10[\/-]2026|6 de octubre/i,
-      /2026-12-15|15[\/-]12[\/-]2026|15 de diciembre/i,
       /2026-08-10|10[\/-]08[\/-]2026|10 de agosto/i,
       /2026-09-07|07[\/-]09[\/-]2026|7 de septiembre/i,
       /2026-10-05|05[\/-]10[\/-]2026|5 de octubre/i,
     ]) {
-      expect.soft(reply).toMatch(documentedDate);
+      expect.soft(reply).toMatch(publishedDate);
     }
-    for (const historicalOrExampleDate of [
+    for (const unpublishedDate of [
       /2026-06-25|25[\/-]06[\/-]2026|25 de junio/i,
       /2026-07-16|16[\/-]07[\/-]2026|16 de julio/i,
       /2026-06-16|16[\/-]06[\/-]2026|16 de junio/i,
-      /2026-07-20|20[\/-]07[\/-]2026|20 de julio/i,
+      /2026-12-15|15[\/-]12[\/-]2026|15 de diciembre/i,
     ]) {
-      expect.soft(reply).not.toMatch(historicalOrExampleDate);
+      expect.soft(reply).not.toMatch(unpublishedDate);
     }
     expect(result.conversation.maternalyNormalizedFlow?.stage).toBe("choosing_session");
   });
@@ -482,7 +482,7 @@ describe("contrato conversacional del Word: Charla Informativa Gratuita", () => 
     const selected = await harness.send("1");
 
     expect(selected.conversation.maternalyNormalizedFlow?.selectedSessionId).toBe(
-      "sesion_charla_erandio_20260820",
+      "sesion_charla_online_20260720_ejemplo",
     );
     expect(selected.botReply?.body).toMatch(/una o dos personas|1 o 2 personas/i);
   });
@@ -507,16 +507,17 @@ describe("contrato conversacional del Word: Charla Informativa Gratuita", () => 
       modality: "online",
     });
     expect(reply).toMatch(/online[\s\S]{0,80}19:00/i);
-    expect(reply).toMatch(/1\.\s*10 de agosto/i);
-    expect(reply).toMatch(/2\.\s*7 de septiembre/i);
-    expect(reply).toMatch(/3\.\s*5 de octubre/i);
+    expect(reply).toMatch(/1\.\s*20 de julio/i);
+    expect(reply).toMatch(/2\.\s*10 de agosto/i);
+    expect(reply).toMatch(/3\.\s*7 de septiembre/i);
+    expect(reply).toMatch(/4\.\s*5 de octubre/i);
     expect(reply).not.toMatch(/Erandio|Bilbao|18:30|17:00/i);
     expect(reply).not.toMatch(/quieres reservar tu plaza/i);
     expect(harness.client.appended).toHaveLength(0);
 
     const selected = await harness.send("1");
     expect(selected.conversation.maternalyNormalizedFlow?.selectedSessionId).toBe(
-      "sesion_charla_online_20260810",
+      "sesion_charla_online_20260720_ejemplo",
     );
     expect(selected.botReply?.body).toMatch(/una o dos personas|1 o 2 personas/i);
     expect(harness.client.appended).toHaveLength(0);

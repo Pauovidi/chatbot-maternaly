@@ -1713,82 +1713,6 @@ export class MaternalyToolExecutor {
       notes: notesFromState(stateWithSelection),
     };
 
-    const manualValidationResult = (manualInput: {
-      snapshot?: NormalizedServiceSheetSnapshot;
-      sessions: NormalizedAvailableSession[];
-      calendarSessions: NormalizedAvailableSession[];
-      selectedSession: NormalizedAvailableSession;
-      availability: NormalizedServiceAvailabilityResult;
-    }): NormalizedToolResult => {
-      if (!manualInput.snapshot) {
-        return {
-          status: "manual_validation_required",
-          serviceKey: input.serviceKey,
-          sessions: manualInput.sessions,
-          calendarSessions: manualInput.calendarSessions,
-          selectedSession: manualInput.selectedSession,
-          missingFields: [],
-          availability: manualInput.availability,
-          error: manualInput.availability.diagnostics.errorType ?? manualInput.availability.reason,
-        };
-      }
-
-      const preparedPlan = buildRegistrationWritePlan({
-        snapshot: manualInput.snapshot,
-        session: manualInput.selectedSession,
-        draft,
-        env,
-      });
-      const blockedReasons = Array.from(new Set([
-        ...preparedPlan.blockedReasons,
-        "contract_session_requires_manual_review",
-      ]));
-      const plan: NormalizedRegistrationWritePlan = {
-        ...preparedPlan,
-        allowedLive: false,
-        blocked: true,
-        blockedReasons,
-        operations: preparedPlan.operations.map((operation) => ({
-          ...operation,
-          operation: "noop" as const,
-        })),
-      };
-      const writeResult: NormalizedRegistrationWriteResult = {
-        ok: false,
-        applied: false,
-        mode: plan.mode,
-        blockedReason: blockedReasons.join(" | "),
-        plan,
-        updatedRanges: [],
-        formattedRanges: [],
-        formatApplied: false,
-        formatWarnings: [],
-      };
-
-      return {
-        status: "manual_validation_required",
-        serviceKey: input.serviceKey,
-        snapshot: manualInput.snapshot,
-        sessions: manualInput.sessions,
-        calendarSessions: manualInput.calendarSessions,
-        selectedSession: manualInput.selectedSession,
-        missingFields: [],
-        plan,
-        writeResult,
-        availability: manualInput.availability,
-      };
-    };
-
-    if (selectedSession.source === "contract_pending_validation") {
-      return manualValidationResult({
-        snapshot,
-        sessions,
-        calendarSessions,
-        selectedSession,
-        availability,
-      });
-    }
-
     let writeAvailability: NormalizedServiceAvailabilityResult;
     try {
       writeAvailability = await getNormalizedServiceAvailability({
@@ -1849,16 +1773,6 @@ export class MaternalyToolExecutor {
         availability: writeAvailability,
         error: "selected_session_not_available_on_revalidation",
       };
-    }
-
-    if (revalidatedSession.source === "contract_pending_validation") {
-      return manualValidationResult({
-        snapshot: writeSnapshot,
-        sessions: writeSessions,
-        calendarSessions: writeCalendarSessions,
-        selectedSession: revalidatedSession,
-        availability: writeAvailability,
-      });
     }
 
     const plan = buildRegistrationWritePlan({

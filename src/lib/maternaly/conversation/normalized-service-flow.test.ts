@@ -955,11 +955,10 @@ describe("normalized Maternaly WhatsApp flow", () => {
       store,
       { normalizedSheetsClient: client, normalizedEnv: env },
     );
-    expect(first.botReply?.body).toMatch(/Opciones para Charla/i);
+    expect(first.botReply?.body).toMatch(/sesiones publicadas para la Charla/i);
     expect(first.conversation.maternalyNormalizedFlow?.selectedSessionId).toBeUndefined();
     const firstReply = first.botReply?.body ?? "";
     expect(firstReply.indexOf("Erandio")).toBeLessThan(firstReply.indexOf("Bilbao"));
-    expect(firstReply.indexOf("Bilbao")).toBeLessThan(firstReply.toLocaleLowerCase("es").lastIndexOf("online"));
 
     const second = await handleInboundMaternalyWhatsApp(
       {

@@ -17,7 +17,6 @@ import type {
 import {
   MATERNALY_CHARLA_CTA,
   MATERNALY_CHARLA_FACTS,
-  MATERNALY_CHARLA_OPTIONS,
   MATERNALY_CONTACT,
   MATERNALY_JOURNEY_STAGE_OPTIONS,
   MATERNALY_PREGNANCY_SERVICE_MENU,
@@ -974,54 +973,47 @@ export class MaternalyCopyRenderer {
     const preferredLocation = normalizeCopy(state?.location ?? "");
     const preferredModality = normalizeCopy(state?.modality ?? "");
     const hasPreference = Boolean(preferredLocation || preferredModality);
-    const visibleOptions = MATERNALY_CHARLA_OPTIONS.filter((option) => {
-      const optionLocation = normalizeCopy(option.location);
-      const locationMatches =
-        !preferredLocation ||
-        optionLocation.includes(preferredLocation) ||
-        (preferredLocation === "online" && option.id === "online");
-      const modalityMatches = !preferredModality || option.modality === preferredModality;
-      return locationMatches && modalityMatches;
-    });
-    if (hasPreference && visibleOptions.length === 0) {
+    const visibleSessions = sessions
+      .filter((session) => {
+        const sessionLocation = normalizeCopy(
+          [session.location, session.groupName, session.sessionName].filter(Boolean).join(" "),
+        );
+        const sessionModality = normalizeCopy(session.modality ?? "");
+        return (
+          (!preferredLocation || sessionLocation.includes(preferredLocation)) &&
+          (!preferredModality || sessionModality === preferredModality)
+        );
+      })
+      .sort((left, right) =>
+        `${left.date ?? "9999-12-31"} ${left.startTime ?? "99:99"}`.localeCompare(
+          `${right.date ?? "9999-12-31"} ${right.startTime ?? "99:99"}`,
+        ),
+      );
+    if (hasPreference && visibleSessions.length === 0) {
       return [
-        "No encuentro una opción que combine esa sede y esa modalidad.",
-        "En esta charla, Erandio y Bilbao son presenciales; la opción online se realiza en directo por Zoom.",
-        "Dime cuál de las tres prefieres y te muestro únicamente sus fechas.",
+        "No encuentro sesiones publicadas que coincidan con esa preferencia.",
+        "Puedo mostrarte todas las fechas de la agenda o puedes decirme otra sede, modalidad o fecha.",
       ].join("\n\n");
     }
-    const narrowed = visibleOptions.length < MATERNALY_CHARLA_OPTIONS.length;
-    let ordinal = 0;
-    const sections = visibleOptions.map((option) => {
-      const matching = sessions.filter((session) => resolveCharlaOption(session)?.id === option.id);
-      const heading = `${option.location} — ${option.modality === "online" ? "online en directo" : "presencial"} — ${option.startTime}`;
-      const dates = matching.length
-        ? matching.map((session) => {
-            ordinal += 1;
-            const availability = session.source === "contract_pending_validation"
-              ? " (pendiente de validación manual)"
-              : session.full
-                ? " (sin plazas libres)"
-                : "";
-            return `${ordinal}. ${formatSpanishDate(session.date)}, ${session.startTime ?? option.startTime}${availability}`;
-          })
-        : ["Sin fecha publicada en la agenda en este momento."];
-      return `${heading}\n${dates.map((date) => `   ${date}`).join("\n")}`;
+    const options = visibleSessions.slice(0, 8).map((session, index) => {
+      const where = session.location ?? session.groupName;
+      const modality = session.modality ? ` — ${session.modality}` : "";
+      const availability = session.availableSeats === undefined
+        ? "disponibilidad por confirmar"
+        : session.full
+          ? "sin plazas libres"
+          : `${session.availableSeats} plaza${session.availableSeats === 1 ? "" : "s"} disponible${session.availableSeats === 1 ? "" : "s"}`;
+      return `${index + 1}. ${formatSpanishDate(session.date)}, ${session.startTime ?? "hora por confirmar"} — ${where}${modality} (${availability})`;
     });
 
-    const intro = narrowed
-      ? visibleOptions.length === 1
-        ? `Perfecto. Estas son las fechas de la Charla Informativa en ${visibleOptions[0].location === "Online" ? "modalidad online" : visibleOptions[0].location}:`
-        : "Perfecto. Estas son las opciones presenciales de la Charla Informativa:"
-      : "Claro. Opciones para Charla Informativa gratuita (las tres modalidades):";
-    const closing = narrowed
-      ? "Dime qué fecha prefieres y continúo con la solicitud."
-      : "Dime si te encaja mejor Erandio, Bilbao u online y, si ya lo sabes, qué fecha prefieres.";
+    const intro = hasPreference
+      ? "Perfecto. Estas son las sesiones publicadas que encajan con tu preferencia:"
+      : "Claro. Estas son las sesiones publicadas para la Charla Informativa:";
 
     return [
       intro,
-      ...sections,
-      closing,
+      ...options,
+      "Dime el número o la fecha que prefieres y continúo con la solicitud.",
     ].join("\n\n");
   }
 

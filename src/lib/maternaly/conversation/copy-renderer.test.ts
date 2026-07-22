@@ -179,7 +179,7 @@ describe("MaternalyCopyRenderer availability guardrails", () => {
     expect(reply).not.toMatch(/2026-\d{2}-\d{2}|plazas disponibles/i);
   });
 
-  it("shows Charla modalities in Erandio, Bilbao, online order with their documented times", () => {
+  it("shows the Charla sessions published in the agenda with their real availability", () => {
     const renderer = new MaternalyCopyRenderer();
     const toolResult: MaternalyCopyToolResult = {
       status: "sessions_available",
@@ -218,12 +218,12 @@ describe("MaternalyCopyRenderer availability guardrails", () => {
       toolResult,
     }) ?? "";
 
-    expect(reply).toContain("Opciones para Charla Informativa");
-    expect(reply).toContain("Erandio — presencial — 18:30");
-    expect(reply).toContain("Bilbao — presencial — 17:00");
-    expect(reply).toContain("Online — online en directo — 19:00");
-    expect(reply.indexOf("Erandio —")).toBeLessThan(reply.indexOf("Bilbao —"));
-    expect(reply.indexOf("Bilbao —")).toBeLessThan(reply.indexOf("Online —"));
+    expect(reply).toContain("sesiones publicadas para la Charla Informativa");
+    expect(reply).toContain("10 de agosto de 2026, 19:00 — online — online (14 plazas disponibles)");
+    expect(reply).toContain("20 de agosto de 2026, 18:30 — Erandio — presencial (14 plazas disponibles)");
+    expect(reply).toContain("6 de octubre de 2026, 17:00 — Bilbao — presencial (14 plazas disponibles)");
+    expect(reply.indexOf("10 de agosto")).toBeLessThan(reply.indexOf("20 de agosto"));
+    expect(reply.indexOf("20 de agosto")).toBeLessThan(reply.indexOf("6 de octubre"));
   });
 
   it("asks Charla attendance count before any contact field", () => {

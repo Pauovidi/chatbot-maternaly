@@ -1,11 +1,8 @@
 import type { NormalizedServiceSheetSnapshot } from "@/lib/maternaly/sheets/normalized-client";
 import {
-  MATERNALY_CHARLA_SESSIONS,
-  isDocumentedCharlaSession,
   normalizeCharlaDate,
   normalizeCharlaModality,
   normalizeCharlaTime,
-  resolveCharlaOption,
 } from "@/lib/maternaly/knowledge/charla-informativa-contract";
 import {
   MATERNALY_NORMALIZED_SERVICES,
@@ -33,7 +30,6 @@ export interface NormalizedAvailableSession {
   availableSeats?: number;
   full: boolean;
   availabilityStatus: "available" | "full" | "unknown_capacity";
-  source?: "normalized_sheets" | "contract_pending_validation";
 }
 
 const OCCUPYING_STATUSES = [
@@ -252,99 +248,15 @@ export function listAvailableSessionsFromSnapshot(
         availableSeats,
         full,
         availabilityStatus,
-        source: "normalized_sheets" as const,
       };
     })
-    .filter((session) => isCurrentOrFutureSession(session.date, today))
-    .filter(
-      (session) =>
-        snapshot.serviceKey !== "charla_embarazo_1_20" ||
-        isDocumentedCharlaSession({
-          location: session.location,
-          modality: session.modality,
-          groupName: session.groupName,
-          sessionName: session.sessionName,
-          date: session.date,
-          startTime: session.startTime,
-        }),
-    );
+    .filter((session) => isCurrentOrFutureSession(session.date, today));
 
   if (snapshot.serviceKey !== "charla_embarazo_1_20") {
     return sessions;
   }
 
-  const optionOrder = new Map([
-    ["erandio", 0],
-    ["bilbao", 1],
-    ["online", 2],
-  ]);
-  return sessions.sort((a, b) => {
-    const aOrder = optionOrder.get(resolveCharlaOption(a)?.id ?? "") ?? 99;
-    const bOrder = optionOrder.get(resolveCharlaOption(b)?.id ?? "") ?? 99;
-    return aOrder - bOrder || compareSessions(a, b);
-  });
-}
-
-function charlaSessionKey(session: {
-  optionId?: string;
-  location?: string;
-  modality?: string;
-  groupName?: string;
-  sessionName?: string;
-  date?: string;
-  startTime?: string;
-}): string | undefined {
-  const optionId = session.optionId ?? resolveCharlaOption(session)?.id;
-  const date = normalizeCharlaDate(session.date);
-  const startTime = normalizeCharlaTime(session.startTime);
-  return optionId && date && startTime ? `${optionId}|${date}|${startTime}` : undefined;
-}
-
-/**
- * Proyecta siempre el calendario prescrito por la clienta. Las filas reales de
- * Sheets conservan capacidad e IDs; las fechas sin respaldo se etiquetan como
- * pendientes para que puedan mostrarse, pero nunca escribirse automáticamente.
- */
-export function projectCharlaContractCalendar(
-  sheetSessions: NormalizedAvailableSession[],
-  options: { now?: Date } = {},
-): NormalizedAvailableSession[] {
-  const today = currentDateIso(options.now ?? new Date());
-  const realByContractKey = new Map<string, NormalizedAvailableSession>();
-
-  for (const session of sheetSessions) {
-    const key = charlaSessionKey(session);
-    if (key && !realByContractKey.has(key)) {
-      realByContractKey.set(key, session);
-    }
-  }
-
-  return MATERNALY_CHARLA_SESSIONS
-    .filter((session) => session.date >= today)
-    .map((contractSession) => {
-      const key = charlaSessionKey(contractSession)!;
-      const real = realByContractKey.get(key);
-      if (real) {
-        return { ...real, source: "normalized_sheets" as const };
-      }
-
-      return {
-        serviceKey: "charla_embarazo_1_20" as const,
-        serviceLabel: MATERNALY_NORMALIZED_SERVICES.charla_embarazo_1_20.label,
-        groupId: `contract-pending:${contractSession.optionId}`,
-        groupName: contractSession.location,
-        sessionId: `contract-pending:${contractSession.optionId}:${contractSession.date}:${contractSession.startTime}`,
-        sessionName: MATERNALY_NORMALIZED_SERVICES.charla_embarazo_1_20.label,
-        location: contractSession.location,
-        modality: contractSession.modality,
-        date: contractSession.date,
-        startTime: contractSession.startTime,
-        occupied: 0,
-        full: false,
-        availabilityStatus: "unknown_capacity" as const,
-        source: "contract_pending_validation" as const,
-      };
-    });
+  return sessions.sort(compareSessions);
 }
 
 export function formatAvailableSessionsReply(sessions: NormalizedAvailableSession[]): string {
