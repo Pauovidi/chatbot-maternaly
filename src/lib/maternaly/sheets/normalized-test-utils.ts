@@ -10,7 +10,7 @@ export const NORMALIZED_TEST_HEADERS = {
 } satisfies Record<string, string[][]>;
 
 export const REAL_TEMPLATE_TEST_HEADERS = {
-  Servicio_Config: [["service_id", "servicio"]],
+  Servicio_Config: [["campo", "valor", "obligatorio", "descripcion"]],
   Clientes_Local: [[
     "cliente_id",
     "nombre",
@@ -132,7 +132,8 @@ export function createNormalizedWorkbook(options: NormalizedWorkbookOptions = {}
     return {
       Servicio_Config: withVisualRows("Servicio_Config", [
         ...REAL_TEMPLATE_TEST_HEADERS.Servicio_Config,
-        [serviceKey, serviceName],
+        ["servicio_id", serviceKey, "Sí", "ID único del servicio"],
+        ["nombre_servicio", serviceName, "Sí", "Nombre comercial del servicio"],
       ]),
       Clientes_Local: withVisualRows("Clientes_Local", [...REAL_TEMPLATE_TEST_HEADERS.Clientes_Local]),
       Grupos_Ediciones: withVisualRows("Grupos_Ediciones", [

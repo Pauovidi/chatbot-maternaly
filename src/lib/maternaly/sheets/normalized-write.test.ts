@@ -280,7 +280,7 @@ describe("normalized Maternaly write plan", () => {
       serviceKey: "charla_embarazo_1_20",
       visualHeaderRows: false,
     });
-    workbook.Servicio_Config[1][0] = workbookServiceId;
+    workbook.Servicio_Config[1][1] = workbookServiceId;
     workbook.Grupos_Ediciones[1][1] = workbookServiceId;
     workbook.Grupos_Ediciones[1][5] = "";
     workbook.Sesiones[1][2] = workbookServiceId;

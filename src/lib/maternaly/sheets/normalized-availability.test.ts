@@ -151,7 +151,7 @@ describe("normalized Maternaly availability", () => {
       multiSession: true,
       visualHeaderRows: false,
     });
-    workbook.Servicio_Config[1][0] = workbookServiceId;
+    workbook.Servicio_Config[1][1] = workbookServiceId;
     for (const row of workbook.Grupos_Ediciones.slice(1)) {
       row[1] = workbookServiceId;
       row[5] = "";
@@ -161,8 +161,8 @@ describe("normalized Maternaly availability", () => {
       row[9] = "";
       row[10] = "0";
       row[11] = "";
-      row[12] = "Sí";
-      row[13] = "Sí";
+      row[12] = "";
+      row[13] = "";
     }
 
     const client = new InMemoryNormalizedSheetsClient(workbook);

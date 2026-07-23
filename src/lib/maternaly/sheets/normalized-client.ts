@@ -4,6 +4,7 @@ import {
   NORMALIZED_REQUIRED_TABS,
   getCell,
   humanNormalize,
+  normalizeSheetText,
   type MaternalyNormalizedServiceKey,
   type NormalizedRequiredTab,
   rowsToObjects,
@@ -35,12 +36,26 @@ export interface NormalizedSheetsClient {
   ): Promise<AppendRowResult>;
 }
 
+function getConfiguredServiceId(row: NormalizedRow): string {
+  const directServiceId = getCell(row, "serviceId");
+  if (directServiceId) {
+    return directServiceId;
+  }
+
+  const field = normalizeSheetText(row.campo ?? row.clave ?? row.field ?? "");
+  if (!["servicio_id", "service_id", "id_servicio"].includes(field)) {
+    return "";
+  }
+
+  return String(row.valor ?? row.value ?? "").trim();
+}
+
 export function getNormalizedWorkbookServiceId(
   snapshot: NormalizedServiceSheetSnapshot,
 ): string {
   return (
     snapshot.tabs.Servicio_Config.rows
-      .map((row) => getCell(row, "serviceId"))
+      .map(getConfiguredServiceId)
       .find(Boolean) ?? snapshot.serviceKey
   );
 }
@@ -56,7 +71,7 @@ export function serviceIdBelongsToNormalizedWorkbook(
   const acceptedIds = new Set([
     humanNormalize(snapshot.serviceKey),
     ...snapshot.tabs.Servicio_Config.rows
-      .map((row) => humanNormalize(getCell(row, "serviceId")))
+      .map((row) => humanNormalize(getConfiguredServiceId(row)))
       .filter(Boolean),
   ]);
 

@@ -158,11 +158,6 @@ function isActiveRow(row: NormalizedRow): boolean {
   );
 }
 
-function hasExplicitUnlimitedCapacity(row: NormalizedRow): boolean {
-  const reservable = humanNormalize(getCell(row, "reservableChatbot"));
-  return ["si", "yes", "true", "1"].includes(reservable);
-}
-
 export function calculateSessionOccupancy(input: {
   registrations: NormalizedRow[];
   sessionId: string;
@@ -205,8 +200,7 @@ export function listAvailableSessionsFromSnapshot(
       const capacityTotal = sessionCapacity ?? group?.capacityTotal;
       const unlimitedCapacity =
         capacityTotal === undefined &&
-        directAvailable === undefined &&
-        hasExplicitUnlimitedCapacity(row);
+        directAvailable === undefined;
       const calculatedOccupied = calculateSessionOccupancy({
         registrations,
         sessionId,

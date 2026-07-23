@@ -224,6 +224,21 @@ export function detectNormalizedHeaderRow(
   headerRowIndex: number;
   parseError?: string;
 } {
+  if (tab === "Servicio_Config") {
+    const keyValueHeaderIndex = rows
+      .slice(0, HEADER_SCAN_LIMIT)
+      .findIndex((row) => {
+        const cells = new Set(row.map(normalizeSheetText));
+        return (
+          (cells.has("campo") || cells.has("clave") || cells.has("field")) &&
+          (cells.has("valor") || cells.has("value"))
+        );
+      });
+    if (keyValueHeaderIndex >= 0) {
+      return { headerRowIndex: keyValueHeaderIndex };
+    }
+  }
+
   const expected = tab
     ? TAB_HEADER_EXPECTATIONS[tab] ?? []
     : (Object.keys(NORMALIZED_COLUMN_ALIASES) as NormalizedColumnKey[]);
