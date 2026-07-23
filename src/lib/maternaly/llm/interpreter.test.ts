@@ -1171,6 +1171,26 @@ describe("Maternaly LLM interpreter", () => {
     });
   });
 
+  it("treats a contextual request to schedule as the pending service booking", async () => {
+    const result = await new LlmIntentClassifier().classify(
+      "pues si, quiero agendar ¿es posible?",
+      {
+        active_service_id: "charla_embarazo_1_20",
+        active_normalized_service_key: "charla_embarazo_1_20",
+        active_stage: "awaiting_booking_decision",
+        recent_messages: [
+          { role: "assistant", text: "¿Quieres reservar tu plaza?" },
+        ],
+      },
+    );
+
+    expect(result).toMatchObject({
+      intent: "registration_start",
+      service_candidate: "charla_embarazo_1_20",
+      needs_availability_lookup: true,
+    });
+  });
+
   it.each(["1", "una", "uno", "2", "dos"])(
     "does not infer the brief attendee answer %s outside a pending people-count field",
     async (message) => {

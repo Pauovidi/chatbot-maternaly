@@ -251,7 +251,7 @@ describe("MaternalyCopyRenderer availability guardrails", () => {
     }) ?? "";
 
     expect(reply).toContain("sesiones publicadas para la Charla Informativa");
-    expect(reply).toContain("10 de agosto de 2026, 19:00 — online — online (14 plazas disponibles)");
+    expect(reply).toContain("10 de agosto de 2026, 19:00 — online (14 plazas disponibles)");
     expect(reply).toContain("20 de agosto de 2026, 18:30 — Erandio — presencial (14 plazas disponibles)");
     expect(reply).toContain("6 de octubre de 2026, 17:00 — Bilbao — presencial (14 plazas disponibles)");
     expect(reply.indexOf("10 de agosto")).toBeLessThan(reply.indexOf("20 de agosto"));

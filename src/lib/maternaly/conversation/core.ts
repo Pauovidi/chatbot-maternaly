@@ -338,10 +338,60 @@ function normalizeDateLike(value: string | undefined): string | undefined {
 }
 
 function extractDateFromMessage(message: string): string | undefined {
-  return normalizeDateLike(
+  const numericDate = normalizeDateLike(
     message.match(/\b\d{4}-\d{2}-\d{2}\b/)?.[0] ??
       message.match(/\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b/)?.[0],
   );
+  if (numericDate) {
+    return numericDate;
+  }
+
+  const text = normalize(message);
+  const textualDate = text.match(
+    /\b(\d{1,2})\s*(?:de\s+)?(ene(?:ro)?|feb(?:rero)?|mar(?:zo)?|abr(?:il)?|may(?:o)?|jun(?:io)?|jul(?:io)?|ago(?:sto)?|sep(?:tiembre)?|set(?:iembre)?|oct(?:ubre)?|nov(?:iembre)?|dic(?:iembre)?)(?:\s*(?:de\s+)?(\d{4}))?\b/,
+  );
+  if (!textualDate) {
+    return undefined;
+  }
+
+  const monthByPrefix: Record<string, number> = {
+    ene: 1,
+    feb: 2,
+    mar: 3,
+    abr: 4,
+    may: 5,
+    jun: 6,
+    jul: 7,
+    ago: 8,
+    sep: 9,
+    set: 9,
+    oct: 10,
+    nov: 11,
+    dic: 12,
+  };
+  const day = Number(textualDate[1]);
+  const month = monthByPrefix[textualDate[2].slice(0, 3)];
+  const now = new Date();
+  let year = textualDate[3] ? Number(textualDate[3]) : now.getUTCFullYear();
+  let candidate = normalizeDateLike(
+    `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`,
+  );
+  if (!candidate) {
+    return undefined;
+  }
+
+  if (!textualDate[3]) {
+    const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+    const candidateDate = new Date(`${candidate}T00:00:00.000Z`);
+    if (candidateDate.getTime() < today.getTime()) {
+      year += 1;
+      candidate = normalizeDateLike(
+        `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`,
+      );
+    }
+  }
+
+  return candidate;
 }
 
 function isFutureDate(isoDate: string): boolean {
@@ -365,6 +415,7 @@ function extractPersonSegmentAfterPrefix(message: string, prefix: RegExp): strin
     /(?:\+?\d[\d\s().-]{6,}\d)/,
     /\b\d{4}-\d{2}-\d{2}\b|\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b/,
     /\s+(?:y\s+)?(?:mi\s+)?(?:email|correo|tel[eé]fono|telefono|fecha|fpp)\b/i,
+    /\s+y\s+(?:mi\s+)?(?:pareja|acompa[nñ]ante)\b/i,
     /\s+y\s+(?:voy|vengo|vamos|somos|estoy|tengo|quiero|necesito|prefiero)\b/i,
   ];
   const boundaries = boundaryPatterns
@@ -380,6 +431,7 @@ function normalizeFullNameCandidate(
 ): string | undefined {
   const candidate = value
     ?.replace(/[.,;:!?]+$/g, "")
+    .replace(/^["'“”«»]+|["'“”«»]+$/g, "")
     .replace(/\s+/g, " ")
     .trim();
   if (!candidate) {

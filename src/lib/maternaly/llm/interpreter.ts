@@ -397,7 +397,7 @@ function reservationCtaAnswer(
   }
 
   const startsWithAffirmative =
-    /^(?:si|claro(?:\s+que\s+si)?|vale|de\s+acuerdo|perfecto|por\s+supuesto|adelante)\b/.test(
+    /^(?:pues\s+)?(?:si|claro(?:\s+que\s+si)?|vale|de\s+acuerdo|perfecto|por\s+supuesto|adelante)\b/.test(
       compactText,
     );
   if (
@@ -763,7 +763,7 @@ function isContextualContinuation(text: string): boolean {
       text.trim(),
     ) ||
     /^(?:y\s+)?(?:en\s+)?(?:bilbao|erandio|online)[?!.\s]*$/.test(text.trim()) ||
-    /^(?:(?:si|vale|perfecto)[,\s]+)?(?:(?:me\s+)?(?:quiero|gustaria|interesa)\s+)?(?:reservar|apuntar(?:me)?|inscribir(?:me)?|asistir|ir)(?:\s+(?:ya|ahora))?[.!?]*$/.test(
+    /^(?:pues\s+)?(?:(?:si|vale|perfecto)[,\s]+)?(?:(?:me\s+)?(?:quiero|gustaria|interesa)\s+)?(?:agendar|reservar|apuntar(?:me)?|inscribir(?:me)?|asistir|ir)(?:\s+(?:(?:una|la|mi)\s+)?cita)?(?:\s+(?:ya|ahora))?(?:\s+es\s+posible)?[.!?]*$/.test(
       text.trim(),
     ) ||
     /^(?:quiero\s+)?(?:continuar|seguir)\s+con\s+(?:la|mi|una)\s+cita[.!?]*$/.test(text.trim())
@@ -1172,7 +1172,7 @@ export class LlmIntentClassifier {
         text,
       );
     const explicitlyWantsRegistration =
-      /(reserv|apunt|inscrib|preinscrib|plaza|me interesa|quiero ir|quiero asistir|me gustar[ií]a asistir|gu[aá]rdame|continuar\s+con\s+(?:la|mi|una)\s+cita|seguir\s+con\s+(?:la|mi|una)\s+cita)/.test(
+      /(agend|reserv|apunt|inscrib|preinscrib|plaza|me interesa|quiero ir|quiero asistir|me gustar[ií]a asistir|gu[aá]rdame|continuar\s+con\s+(?:la|mi|una)\s+cita|seguir\s+con\s+(?:la|mi|una)\s+cita)/.test(
         text,
       ) || asksToBookAppointment(text);
     const selectsServiceForPendingBooking = Boolean(

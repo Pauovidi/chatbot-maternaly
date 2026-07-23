@@ -999,7 +999,10 @@ export class MaternalyCopyRenderer {
     }
     const options = visibleSessions.slice(0, 8).map((session, index) => {
       const where = session.location ?? session.groupName;
-      const modality = session.modality ? ` — ${session.modality}` : "";
+      const modality =
+        session.modality && normalizeCopy(where ?? "") !== normalizeCopy(session.modality)
+          ? ` — ${session.modality}`
+          : "";
       const availability =
         session.availabilityStatus === "unlimited"
           ? undefined

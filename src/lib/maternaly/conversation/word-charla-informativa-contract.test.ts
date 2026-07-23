@@ -605,6 +605,54 @@ describe("contrato conversacional del Word: Charla Informativa Gratuita", () => 
     expect(harness.client.appended).toHaveLength(0);
   });
 
+  it("completa y escribe la cita con el diálogo exacto observado en WhatsApp", async () => {
+    const harness = makeHarness("whatsapp:+34999000142", { liveWrite: true });
+    await harness.send("Cuéntame la charla informativa gratuita para las primeras veinte semanas");
+
+    const agenda = await harness.send("pues si, quiero agendar ¿es posible?");
+    expect(agenda.botReply?.body).toMatch(/10 de agosto de 2026/i);
+    expect(agenda.botReply?.body).not.toMatch(/Te sigo|elegir un servicio/i);
+
+    const selected = await harness.send("quiero el 10 de agosto");
+    expect(selected.botReply?.body).toMatch(/acudir[eé]is una o dos personas/i);
+
+    const attendees = await harness.send("yo y mi pareja");
+    expect(attendees.botReply?.body).toMatch(/nombre y apellidos/i);
+
+    const completed = await harness.send(
+      'Mi nombre es "Paola Esto Es Una Prueba" y mi pareja Manolo. fecha probable de parto 14 de Oct',
+    );
+    expect(completed.conversation.maternalyNormalizedFlow).toMatchObject({
+      stage: "write_planned",
+      selectedSessionId: "sesion_charla_online_20260810",
+      fullName: "Paola Esto Es Una Prueba",
+      peopleCount: 2,
+      partnerName: "Manolo",
+      fppOrDueDate: "2026-10-14",
+    });
+    expect(harness.client.appended.map((entry) => entry.tabTitle)).toContain("Inscripciones");
+    const registrationWrite = harness.client.appended.find(
+      (entry) => entry.tabTitle === "Inscripciones",
+    );
+    expect(registrationWrite?.values.join("|")).toMatch(/Paola\|Esto Es Una Prueba/i);
+    expect(registrationWrite?.values.join("|")).toMatch(/sesion_charla_online_20260810/i);
+    expect(registrationWrite?.values.join("|")).toMatch(/2026-10-14/i);
+    expect(registrationWrite?.values.join("|")).toMatch(/Manolo/i);
+    const writeEvent = [...completed.conversation.events]
+      .reverse()
+      .find(
+        (event) =>
+          event.eventType === "maternaly_tool_executed" &&
+          isRecord(event.payload) &&
+          event.payload.status === "write_result",
+      );
+    expect(writeEvent?.payload).toMatchObject({ applied: true, mode: "live" });
+    expect(completed.botReply?.body).toMatch(
+      /preinscripci[oó]n[\s\S]{0,50}registrad|pendiente de validaci[oó]n/i,
+    );
+    expect(completed.botReply?.body).not.toMatch(/me faltan estos datos|Te sigo/i);
+  });
+
   it.each([
     {
       label: "Erandio",
