@@ -100,6 +100,33 @@ describe("twilio whatsapp client", () => {
     fetchMock.mockRestore();
   });
 
+  it("includes a public media URL when sending a WhatsApp message", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(JSON.stringify({ sid: "SM_media" }), { status: 200 }),
+    );
+
+    const result = await sendTwilioWhatsAppText(
+      {
+        to: "+34612345678",
+        body: "Hola",
+        mediaUrl: "https://maternaly.example.test/poster.jpeg",
+      },
+      {
+        accountSid: "AC_test",
+        authToken: "token",
+        from: "+15551234567",
+        mock: false,
+        providerMode: "real",
+      },
+    );
+    const [, init] = fetchMock.mock.calls[0];
+    const body = init?.body as URLSearchParams;
+
+    expect(result.ok).toBe(true);
+    expect(body.get("MediaUrl")).toBe("https://maternaly.example.test/poster.jpeg");
+    fetchMock.mockRestore();
+  });
+
   it("returns a non-throwing failure when the network request fails", async () => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")

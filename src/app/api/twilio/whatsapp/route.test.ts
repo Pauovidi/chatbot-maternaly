@@ -116,6 +116,71 @@ describe("Maternaly Twilio WhatsApp route", () => {
     expect(second.text).toContain("<Message>");
   });
 
+  it("queues the reply through the Twilio API and returns empty TwiML in live mode", async () => {
+    vi.stubEnv("TWILIO_ACCOUNT_SID", "AC_test");
+    vi.stubEnv("TWILIO_AUTH_TOKEN", "token");
+    vi.stubEnv("TWILIO_WHATSAPP_FROM", "whatsapp:+14155238886");
+    vi.stubEnv("HOTEL_CONVERSATIONS_MOCK_TWILIO", "false");
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(JSON.stringify({ sid: "SM_OUTBOUND_API" }), { status: 200 }),
+    );
+
+    const result = await postTwilio({
+      body: "hola",
+      sid: "SM_DIRECT_DELIVERY_1",
+    });
+    const [url, init] = fetchMock.mock.calls[0];
+    const body = init?.body as URLSearchParams;
+
+    expect(result.response.status).toBe(200);
+    expect(result.text).toBe('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
+    expect(String(url)).toContain("/Messages.json");
+    expect(body.get("To")).toBe("whatsapp:+34600000123");
+    expect(body.get("Body")).toMatch(/Maternaly|asistente virtual/i);
+  });
+
+  it("falls back to visible TwiML when direct Twilio delivery fails", async () => {
+    vi.stubEnv("TWILIO_ACCOUNT_SID", "AC_test");
+    vi.stubEnv("TWILIO_AUTH_TOKEN", "token");
+    vi.stubEnv("TWILIO_WHATSAPP_FROM", "whatsapp:+14155238886");
+    vi.stubEnv("HOTEL_CONVERSATIONS_MOCK_TWILIO", "false");
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response("upstream failed", { status: 500 }),
+    );
+
+    const result = await postTwilio({
+      body: "hola",
+      sid: "SM_DIRECT_DELIVERY_FALLBACK",
+    });
+
+    expect(result.response.status).toBe(200);
+    expect(result.text).toContain("<Message>");
+    expect(result.message).toMatch(/Maternaly|asistente virtual/i);
+  });
+
+  it("does not queue a second outbound message when Twilio retries the same SID", async () => {
+    vi.stubEnv("TWILIO_ACCOUNT_SID", "AC_test");
+    vi.stubEnv("TWILIO_AUTH_TOKEN", "token");
+    vi.stubEnv("TWILIO_WHATSAPP_FROM", "whatsapp:+14155238886");
+    vi.stubEnv("HOTEL_CONVERSATIONS_MOCK_TWILIO", "false");
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ sid: "SM_OUTBOUND_ONCE" }), { status: 200 }),
+    );
+
+    const first = await postTwilio({
+      body: "hola",
+      sid: "SM_DIRECT_DELIVERY_DEDUPE",
+    });
+    const duplicate = await postTwilio({
+      body: "hola",
+      sid: "SM_DIRECT_DELIVERY_DEDUPE",
+    });
+
+    expect(first.text).toBe('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
+    expect(duplicate.text).toBe('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("returns fallback TwiML instead of silence when the store fails on a later message", async () => {
     await postTwilio({ body: "hola", sid: "SM_STORE_1" });
     await writeFile(storePath, "{not valid json", "utf8");

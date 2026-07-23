@@ -3,7 +3,10 @@ import {
   buildTwilioMessageResponse,
   redactConversationSensitiveText,
 } from "@/lib/hotel/conversations/service";
-import { readTwilioWhatsAppConfig } from "@/lib/hotel/twilio/client";
+import {
+  readTwilioWhatsAppConfig,
+  sendTwilioWhatsAppText,
+} from "@/lib/hotel/twilio/client";
 import { handleInboundMaternalyWhatsApp } from "@/lib/maternaly/conversation/twilio-inbound";
 import {
   MATERNALY_SAFE_FALLBACK,
@@ -144,6 +147,24 @@ function logTwilioWebhook(event: Record<string, unknown>) {
   console.info("[twilio:webhook]", JSON.stringify(event));
 }
 
+async function deliverTwilioReply(input: {
+  to: string;
+  body: string;
+  mediaUrl?: string;
+}): Promise<{ delivered: boolean; sidPresent: boolean; error?: string }> {
+  const config = readTwilioWhatsAppConfig();
+  if (config.mock) {
+    return { delivered: false, sidPresent: false };
+  }
+
+  const result = await sendTwilioWhatsAppText(input, config);
+  return {
+    delivered: result.ok,
+    sidPresent: Boolean(result.sid),
+    error: result.error,
+  };
+}
+
 async function readTwilioPayload(request: Request): Promise<Record<string, string>> {
   const contentType = request.headers.get("content-type") ?? "";
   if (contentType.includes("application/json")) {
@@ -268,7 +289,32 @@ export async function POST(request: Request) {
       twimlHasMessage: result.twiml?.includes("<Message>") ?? false,
     });
 
-    return new NextResponse(buildSafeMaternalyTwilioResponse(result.twiml), {
+    const safeTwiml = buildSafeMaternalyTwilioResponse(result.twiml);
+    if (result.botReply) {
+      const outboundBody = containsLegacyHotelKnowledge(result.botReply.body)
+        ? MATERNALY_SAFE_FALLBACK
+        : result.botReply.body;
+      const delivery = await deliverTwilioReply({
+        to: from,
+        body: outboundBody,
+        mediaUrl: result.outboundMedia?.[0]?.url,
+      });
+      logTwilioWebhook({
+        ...requestLog,
+        result: delivery.delivered ? "outbound_queued" : "outbound_api_fallback_to_twiml",
+        conversationId: result.conversation.id,
+        deliveryMode: delivery.delivered ? "twilio_rest_api" : "twiml",
+        outboundSidPresent: delivery.sidPresent,
+        error: delivery.error,
+      });
+      if (delivery.delivered) {
+        return new NextResponse(buildTwilioMessageResponse(), {
+          headers: TWILIO_XML_HEADERS,
+        });
+      }
+    }
+
+    return new NextResponse(safeTwiml, {
       headers: TWILIO_XML_HEADERS,
     });
   } catch (error) {
@@ -278,6 +324,21 @@ export async function POST(request: Request) {
       reason: "handler_failed",
       errorType: error instanceof Error ? error.name : typeof error,
     });
+    const delivery = await deliverTwilioReply({
+      to: from,
+      body: MATERNALY_SAFE_FALLBACK,
+    });
+    if (delivery.delivered) {
+      logTwilioWebhook({
+        ...requestLog,
+        result: "fallback_outbound_queued",
+        deliveryMode: "twilio_rest_api",
+        outboundSidPresent: delivery.sidPresent,
+      });
+      return new NextResponse(buildTwilioMessageResponse(), {
+        headers: TWILIO_XML_HEADERS,
+      });
+    }
     return new NextResponse(buildTwilioMessageResponse(MATERNALY_SAFE_FALLBACK), {
       headers: TWILIO_XML_HEADERS,
     });

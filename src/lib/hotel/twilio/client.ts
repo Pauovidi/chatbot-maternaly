@@ -13,6 +13,7 @@ type TwilioProviderMode = TwilioWhatsAppConfig["providerMode"];
 export interface TwilioSendInput {
   to: string;
   body: string;
+  mediaUrl?: string;
 }
 
 export interface TwilioSendResult {
@@ -116,6 +117,9 @@ export async function sendTwilioWhatsAppText(
     To: asWhatsAppAddress(input.to),
     Body: input.body,
   });
+  if (input.mediaUrl?.trim()) {
+    formBody.set("MediaUrl", input.mediaUrl.trim());
+  }
 
   if (config.messagingServiceSid) {
     formBody.set("MessagingServiceSid", config.messagingServiceSid);
