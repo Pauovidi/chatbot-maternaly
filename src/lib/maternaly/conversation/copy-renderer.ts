@@ -940,11 +940,13 @@ export class MaternalyCopyRenderer {
         : "Sí, tenemos una charla gratuita para embarazadas de la semana 1 a la 20, presencial u online.";
     const options = result.sessions.slice(0, 4).map((session, index) => {
       const capacity =
-        session.availableSeats === undefined
-          ? "disponibilidad a validar"
-          : session.full
-            ? "sin plazas libres"
-            : `${session.availableSeats} plaza${session.availableSeats === 1 ? "" : "s"} disponible${session.availableSeats === 1 ? "" : "s"}`;
+        session.availabilityStatus === "unlimited"
+          ? "inscripción libre"
+          : session.availableSeats === undefined
+            ? "disponibilidad a validar"
+            : session.full
+              ? "sin plazas libres"
+              : `${session.availableSeats} plaza${session.availableSeats === 1 ? "" : "s"} disponible${session.availableSeats === 1 ? "" : "s"}`;
       return `${index + 1}. ${this.formatSession(session)} (${capacity})`;
     });
 
@@ -998,11 +1000,14 @@ export class MaternalyCopyRenderer {
     const options = visibleSessions.slice(0, 8).map((session, index) => {
       const where = session.location ?? session.groupName;
       const modality = session.modality ? ` — ${session.modality}` : "";
-      const availability = session.availableSeats === undefined
-        ? "disponibilidad por confirmar"
-        : session.full
-          ? "sin plazas libres"
-          : `${session.availableSeats} plaza${session.availableSeats === 1 ? "" : "s"} disponible${session.availableSeats === 1 ? "" : "s"}`;
+      const availability =
+        session.availabilityStatus === "unlimited"
+          ? "inscripción libre"
+          : session.availableSeats === undefined
+            ? "disponibilidad por confirmar"
+            : session.full
+              ? "sin plazas libres"
+              : `${session.availableSeats} plaza${session.availableSeats === 1 ? "" : "s"} disponible${session.availableSeats === 1 ? "" : "s"}`;
       return `${index + 1}. ${formatSpanishDate(session.date)}, ${session.startTime ?? "hora por confirmar"} — ${where}${modality} (${availability})`;
     });
 

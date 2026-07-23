@@ -1,8 +1,9 @@
 import crypto from "node:crypto";
 import { readMaternalyRuntimeConfig } from "@/lib/maternaly/config/env";
-import type {
-  NormalizedServiceSheetSnapshot,
-  NormalizedSheetsClient,
+import {
+  getNormalizedWorkbookServiceId,
+  type NormalizedServiceSheetSnapshot,
+  type NormalizedSheetsClient,
 } from "@/lib/maternaly/sheets/normalized-client";
 import type { NormalizedAvailableSession } from "@/lib/maternaly/sheets/normalized-availability";
 import {
@@ -286,6 +287,7 @@ function valuesForHeaders(
 function baseValues(input: {
   draft: NormalizedRegistrationDraft;
   session: NormalizedAvailableSession;
+  workbookServiceId: string;
   idempotencyKey: string;
   clientId: string;
   registrationId: string;
@@ -307,7 +309,7 @@ function baseValues(input: {
     : "pendiente";
 
   return {
-    serviceId: input.draft.serviceKey,
+    serviceId: input.workbookServiceId,
     serviceName: service.label,
     groupId: input.session.groupId,
     sessionId: input.session.sessionId,
@@ -339,8 +341,8 @@ function baseValues(input: {
     requiresHuman: "no",
     conversationId: input.idempotencyKey,
 
-    service_id: input.draft.serviceKey,
-    servicio_id: input.draft.serviceKey,
+    service_id: input.workbookServiceId,
+    servicio_id: input.workbookServiceId,
     servicio: service.label,
     group_id: input.session.groupId,
     session_id: input.session.sessionId,
@@ -422,6 +424,7 @@ export function buildRegistrationWritePlan(input: {
   const base = baseValues({
     draft: input.draft,
     session: input.session,
+    workbookServiceId: getNormalizedWorkbookServiceId(input.snapshot),
     idempotencyKey,
     clientId,
     registrationId: generatedIds.registrationId,

@@ -2,6 +2,8 @@ import { readMaternalyRuntimeConfig } from "@/lib/maternaly/config/env";
 import { GoogleSheetsClient, type AppendRowResult } from "@/lib/maternaly/sheets/client";
 import {
   NORMALIZED_REQUIRED_TABS,
+  getCell,
+  humanNormalize,
   type MaternalyNormalizedServiceKey,
   type NormalizedRequiredTab,
   rowsToObjects,
@@ -31,6 +33,34 @@ export interface NormalizedSheetsClient {
     tabTitle: string,
     values: Array<string | number | undefined>,
   ): Promise<AppendRowResult>;
+}
+
+export function getNormalizedWorkbookServiceId(
+  snapshot: NormalizedServiceSheetSnapshot,
+): string {
+  return (
+    snapshot.tabs.Servicio_Config.rows
+      .map((row) => getCell(row, "serviceId"))
+      .find(Boolean) ?? snapshot.serviceKey
+  );
+}
+
+export function serviceIdBelongsToNormalizedWorkbook(
+  snapshot: NormalizedServiceSheetSnapshot,
+  serviceId: string | undefined,
+): boolean {
+  if (!serviceId?.trim()) {
+    return true;
+  }
+
+  const acceptedIds = new Set([
+    humanNormalize(snapshot.serviceKey),
+    ...snapshot.tabs.Servicio_Config.rows
+      .map((row) => humanNormalize(getCell(row, "serviceId")))
+      .filter(Boolean),
+  ]);
+
+  return acceptedIds.has(humanNormalize(serviceId));
 }
 
 export class GoogleNormalizedSheetsClient implements NormalizedSheetsClient {

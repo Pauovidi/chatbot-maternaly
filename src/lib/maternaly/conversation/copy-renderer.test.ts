@@ -100,6 +100,37 @@ describe("MaternalyCopyRenderer availability guardrails", () => {
     expect(reply).not.toMatch(/no puedo validar disponibilidad/i);
   });
 
+  it("describes reservable sessions without a capacity limit as inscripción libre", () => {
+    const renderer = new MaternalyCopyRenderer();
+    const session = charlaSession({
+      id: "sesion_charla_erandio_20260924",
+      groupId: "grupo_charla_erandio",
+      location: "Erandio",
+      modality: "presencial",
+      date: "2026-09-24",
+      startTime: "18:30",
+    });
+    session.capacityTotal = undefined;
+    session.availableSeats = undefined;
+    session.availabilityStatus = "unlimited";
+
+    const reply = renderer.render({
+      decision: {
+        action: "normalized_registration",
+        serviceKey: "charla_embarazo_1_20",
+      },
+      toolResult: {
+        status: "sessions_available",
+        serviceKey: "charla_embarazo_1_20",
+        sessions: [session],
+        missingFields: [],
+      },
+    }) ?? "";
+
+    expect(reply).toMatch(/inscripci[oó]n libre/i);
+    expect(reply).not.toMatch(/validar|por confirmar/i);
+  });
+
   it("keeps greeting warm and within the emoji policy", () => {
     const renderer = new MaternalyCopyRenderer();
     const reply = renderer.render({ decision: { action: "greeting" } }) ?? "";

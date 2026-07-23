@@ -274,6 +274,68 @@ describe("normalized Maternaly write plan", () => {
     expect(interactionsRow.requiere_humano).toBe("no");
   });
 
+  it("writes an unlimited Charla registration using the workbook service id", async () => {
+    const workbookServiceId = "SER_CHARLA_INFO_EMBARAZO_1_20";
+    const workbook = createRealTemplateWorkbook({
+      serviceKey: "charla_embarazo_1_20",
+      visualHeaderRows: false,
+    });
+    workbook.Servicio_Config[1][0] = workbookServiceId;
+    workbook.Grupos_Ediciones[1][1] = workbookServiceId;
+    workbook.Grupos_Ediciones[1][5] = "";
+    workbook.Sesiones[1][2] = workbookServiceId;
+    workbook.Sesiones[1][9] = "";
+    workbook.Sesiones[1][10] = "0";
+    workbook.Sesiones[1][11] = "";
+    workbook.Sesiones[1][12] = "Sí";
+    workbook.Sesiones[1][13] = "Sí";
+
+    const client = new InMemoryNormalizedSheetsClient(workbook);
+    const snapshot = await readNormalizedServiceSheet(
+      "charla_embarazo_1_20",
+      client,
+      normalizedTestEnv(),
+    );
+    const session = listAvailableSessionsFromSnapshot(snapshot, {
+      now: new Date(2026, 6, 23, 12),
+    })[0];
+    if (!session) {
+      throw new Error("missing unlimited Charla session");
+    }
+
+    const plan = buildRegistrationWritePlan({
+      snapshot,
+      session,
+      draft: {
+        serviceKey: "charla_embarazo_1_20",
+        fullName: "PRUEBA BOT CHARLA",
+        phone: "+34999000141",
+        email: "prueba.bot.charla@example.test",
+        peopleCount: 1,
+        fppOrDueDate: "2026-12-31",
+      },
+      env: normalizedTestEnv({
+        MATERNALY_NORMALIZED_SHEETS_WRITE_MODE: "live",
+        GOOGLE_SHEETS_ACCESS_MODE: "live",
+        BOT_SHEETS_LIVE_WRITE_ENABLED: "true",
+      }),
+    });
+
+    expect(session.availabilityStatus).toBe("unlimited");
+    expect(plan.blocked).toBe(false);
+    expect(plan.blockedReasons).not.toContain("unknown_capacity_requires_manual_review");
+
+    const result = await applyRegistrationWritePlan({ snapshot, client, plan });
+    expect(result.ok).toBe(true);
+    expect(result.applied).toBe(true);
+
+    const registrationsRow = appendedRowByHeader(
+      snapshot.tabs.Inscripciones.headers,
+      client.appended.find((item) => item.tabTitle === "Inscripciones")?.values ?? [],
+    );
+    expect(registrationsRow.servicio_id).toBe(workbookServiceId);
+  });
+
   it("maps Charla partner name to the real-template pareja_nombre column", async () => {
     const { snapshot, session } = await buildRealFixture({
       serviceKey: "charla_embarazo_1_20",

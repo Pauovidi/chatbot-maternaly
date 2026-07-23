@@ -1,4 +1,7 @@
-import type { NormalizedServiceSheetSnapshot } from "@/lib/maternaly/sheets/normalized-client";
+import {
+  serviceIdBelongsToNormalizedWorkbook,
+  type NormalizedServiceSheetSnapshot,
+} from "@/lib/maternaly/sheets/normalized-client";
 import {
   normalizeCharlaDate,
   normalizeCharlaModality,
@@ -29,7 +32,7 @@ export interface NormalizedAvailableSession {
   occupied: number;
   availableSeats?: number;
   full: boolean;
-  availabilityStatus: "available" | "full" | "unknown_capacity";
+  availabilityStatus: "available" | "unlimited" | "full" | "unknown_capacity";
 }
 
 const OCCUPYING_STATUSES = [
@@ -155,6 +158,11 @@ function isActiveRow(row: NormalizedRow): boolean {
   );
 }
 
+function hasExplicitUnlimitedCapacity(row: NormalizedRow): boolean {
+  const reservable = humanNormalize(getCell(row, "reservableChatbot"));
+  return ["si", "yes", "true", "1"].includes(reservable);
+}
+
 export function calculateSessionOccupancy(input: {
   registrations: NormalizedRow[];
   sessionId: string;
@@ -183,8 +191,8 @@ export function listAvailableSessionsFromSnapshot(
       const group = groups.get(getCell(row, "groupId"));
       const rowServiceId = getCell(row, "serviceId");
       return (
-        (!rowServiceId || rowServiceId === snapshot.serviceKey) &&
-        (!group?.serviceId || group.serviceId === snapshot.serviceKey)
+        serviceIdBelongsToNormalizedWorkbook(snapshot, rowServiceId) &&
+        serviceIdBelongsToNormalizedWorkbook(snapshot, group?.serviceId)
       );
     })
     .map((row) => {
@@ -195,6 +203,10 @@ export function listAvailableSessionsFromSnapshot(
       const directOccupied = parsePositiveInteger(getCell(row, "occupiedSeats"));
       const directAvailable = parsePositiveInteger(getCell(row, "availableSeats"));
       const capacityTotal = sessionCapacity ?? group?.capacityTotal;
+      const unlimitedCapacity =
+        capacityTotal === undefined &&
+        directAvailable === undefined &&
+        hasExplicitUnlimitedCapacity(row);
       const calculatedOccupied = calculateSessionOccupancy({
         registrations,
         sessionId,
@@ -205,9 +217,10 @@ export function listAvailableSessionsFromSnapshot(
         (directAvailable !== undefined && capacityTotal !== undefined
           ? Math.max(capacityTotal - directAvailable, 0)
           : calculatedOccupied);
-      const availableSeats =
-        directAvailable ??
-        (capacityTotal === undefined ? undefined : Math.max(capacityTotal - occupied, 0));
+      const availableSeats = unlimitedCapacity
+        ? undefined
+        : directAvailable ??
+          (capacityTotal === undefined ? undefined : Math.max(capacityTotal - occupied, 0));
       const full = availableSeats !== undefined && availableSeats <= 0;
       const sessionName = getCell(row, "sessionName") || service.label;
       const rowCenter = getCell(row, "center");
@@ -229,7 +242,13 @@ export function listAvailableSessionsFromSnapshot(
       });
       const rawDate = getCell(row, "date");
       const availabilityStatus: NormalizedAvailableSession["availabilityStatus"] =
-        availableSeats === undefined ? "unknown_capacity" : full ? "full" : "available";
+        unlimitedCapacity
+          ? "unlimited"
+          : availableSeats === undefined
+            ? "unknown_capacity"
+            : full
+              ? "full"
+              : "available";
 
       return {
         serviceKey: snapshot.serviceKey,
@@ -267,11 +286,13 @@ export function formatAvailableSessionsReply(sessions: NormalizedAvailableSessio
   const lines = sessions.slice(0, 4).map((session, index) => {
     const when = [session.date, session.startTime].filter(Boolean).join(" ");
     const capacity =
-      session.availableSeats === undefined
-        ? "disponibilidad a validar"
-        : session.full
-          ? "sin plazas libres"
-          : `${session.availableSeats} plaza${session.availableSeats === 1 ? "" : "s"} disponible${session.availableSeats === 1 ? "" : "s"}`;
+      session.availabilityStatus === "unlimited"
+        ? "inscripción libre"
+        : session.availableSeats === undefined
+          ? "disponibilidad a validar"
+          : session.full
+            ? "sin plazas libres"
+            : `${session.availableSeats} plaza${session.availableSeats === 1 ? "" : "s"} disponible${session.availableSeats === 1 ? "" : "s"}`;
     return `${index + 1}. ${when || session.sessionName} (${capacity})`;
   });
 

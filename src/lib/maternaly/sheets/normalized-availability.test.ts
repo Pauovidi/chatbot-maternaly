@@ -144,6 +144,74 @@ describe("normalized Maternaly availability", () => {
     });
   });
 
+  it("accepts the workbook service id and treats explicitly reservable blank capacity as unlimited", async () => {
+    const workbookServiceId = "SER_CHARLA_INFO_EMBARAZO_1_20";
+    const workbook = createRealTemplateWorkbook({
+      serviceKey: "charla_embarazo_1_20",
+      multiSession: true,
+      visualHeaderRows: false,
+    });
+    workbook.Servicio_Config[1][0] = workbookServiceId;
+    for (const row of workbook.Grupos_Ediciones.slice(1)) {
+      row[1] = workbookServiceId;
+      row[5] = "";
+    }
+    for (const row of workbook.Sesiones.slice(1)) {
+      row[2] = workbookServiceId;
+      row[9] = "";
+      row[10] = "0";
+      row[11] = "";
+      row[12] = "Sí";
+      row[13] = "Sí";
+    }
+
+    const client = new InMemoryNormalizedSheetsClient(workbook);
+    const snapshot = await readNormalizedServiceSheet(
+      "charla_embarazo_1_20",
+      client,
+      normalizedTestEnv(),
+    );
+    const sessions = listAvailableSessionsFromSnapshot(snapshot, {
+      now: new Date(2026, 6, 23, 12),
+    });
+
+    expect(sessions).toHaveLength(2);
+    expect(sessions.map((session) => session.sessionId)).toEqual([
+      "sesion_charla_erandio_20260924",
+      "sesion_charla_bilbao_20261006",
+    ]);
+    expect(sessions.every((session) => session.availabilityStatus === "unlimited")).toBe(true);
+    expect(sessions.every((session) => session.full === false)).toBe(true);
+    expect(sessions.every((session) => session.availableSeats === undefined)).toBe(true);
+  });
+
+  it("keeps an explicit zero capacity closed", async () => {
+    const workbook = createRealTemplateWorkbook({
+      serviceKey: "charla_embarazo_1_20",
+      visualHeaderRows: false,
+    });
+    workbook.Sesiones[1][9] = "0";
+    workbook.Sesiones[1][10] = "0";
+    workbook.Sesiones[1][11] = "0";
+
+    const client = new InMemoryNormalizedSheetsClient(workbook);
+    const snapshot = await readNormalizedServiceSheet(
+      "charla_embarazo_1_20",
+      client,
+      normalizedTestEnv(),
+    );
+    const session = listAvailableSessionsFromSnapshot(snapshot, {
+      now: new Date(2026, 6, 23, 12),
+    })[0];
+
+    expect(session).toMatchObject({
+      capacityTotal: 0,
+      availableSeats: 0,
+      full: true,
+      availabilityStatus: "full",
+    });
+  });
+
   it("uses every future Charla session published in the normalized agenda", async () => {
     const workbook = createRealTemplateWorkbook({
       serviceKey: "charla_embarazo_1_20",
