@@ -281,13 +281,13 @@ export function formatAvailableSessionsReply(sessions: NormalizedAvailableSessio
     const when = [session.date, session.startTime].filter(Boolean).join(" ");
     const capacity =
       session.availabilityStatus === "unlimited"
-        ? "inscripción libre"
+        ? undefined
         : session.availableSeats === undefined
           ? "disponibilidad a validar"
           : session.full
             ? "sin plazas libres"
             : `${session.availableSeats} plaza${session.availableSeats === 1 ? "" : "s"} disponible${session.availableSeats === 1 ? "" : "s"}`;
-    return `${index + 1}. ${when || session.sessionName} (${capacity})`;
+    return `${index + 1}. ${when || session.sessionName}${capacity ? ` (${capacity})` : ""}`;
   });
 
   return [

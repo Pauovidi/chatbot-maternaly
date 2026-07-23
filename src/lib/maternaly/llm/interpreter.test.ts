@@ -1132,6 +1132,8 @@ describe("Maternaly LLM interpreter", () => {
     ["uno", 1],
     ["2", 2],
     ["dos", 2],
+    ["yo y mi pareja", 2],
+    ["mi pareja y yo", 2],
   ])(
     "interprets the brief pending-attendee answer %s as %i person(s)",
     async (message, expectedPeopleCount) => {
@@ -1153,6 +1155,21 @@ describe("Maternaly LLM interpreter", () => {
       });
     },
   );
+
+  it("continues the active appointment instead of falling back to general conversation", async () => {
+    const result = await new LlmIntentClassifier().classify("continuar con la cita", {
+      active_service_id: "charla_embarazo_1_20",
+      active_normalized_service_key: "charla_embarazo_1_20",
+      active_stage: "collecting_contact",
+      pending_fields: ["peopleCount", "fullName", "fppOrDueDate"],
+    });
+
+    expect(result).toMatchObject({
+      intent: "registration_start",
+      service_candidate: "charla_embarazo_1_20",
+      needs_availability_lookup: true,
+    });
+  });
 
   it.each(["1", "una", "uno", "2", "dos"])(
     "does not infer the brief attendee answer %s outside a pending people-count field",

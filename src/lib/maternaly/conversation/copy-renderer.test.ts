@@ -100,7 +100,7 @@ describe("MaternalyCopyRenderer availability guardrails", () => {
     expect(reply).not.toMatch(/no puedo validar disponibilidad/i);
   });
 
-  it("describes reservable sessions without a capacity limit as inscripción libre", () => {
+  it("keeps an unlimited internal capacity out of the customer-facing copy", () => {
     const renderer = new MaternalyCopyRenderer();
     const session = charlaSession({
       id: "sesion_charla_erandio_20260924",
@@ -127,7 +127,8 @@ describe("MaternalyCopyRenderer availability guardrails", () => {
       },
     }) ?? "";
 
-    expect(reply).toMatch(/inscripci[oó]n libre/i);
+    expect(reply).toContain("24 de septiembre de 2026, 18:30 — Erandio — presencial");
+    expect(reply).not.toMatch(/inscripci[oó]n libre/i);
     expect(reply).not.toMatch(/validar|por confirmar/i);
   });
 

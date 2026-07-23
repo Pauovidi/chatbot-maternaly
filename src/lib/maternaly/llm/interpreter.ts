@@ -765,7 +765,8 @@ function isContextualContinuation(text: string): boolean {
     /^(?:y\s+)?(?:en\s+)?(?:bilbao|erandio|online)[?!.\s]*$/.test(text.trim()) ||
     /^(?:(?:si|vale|perfecto)[,\s]+)?(?:(?:me\s+)?(?:quiero|gustaria|interesa)\s+)?(?:reservar|apuntar(?:me)?|inscribir(?:me)?|asistir|ir)(?:\s+(?:ya|ahora))?[.!?]*$/.test(
       text.trim(),
-    )
+    ) ||
+    /^(?:quiero\s+)?(?:continuar|seguir)\s+con\s+(?:la|mi|una)\s+cita[.!?]*$/.test(text.trim())
   );
 }
 
@@ -899,7 +900,7 @@ function extractPartnerName(message: string): string | undefined {
 
 function inferPeopleCount(text: string): number | undefined {
   if (
-    /\ben\s+pareja\b|\b(?:somos|iremos|vamos|acudiremos|vendremos|seremos)\s+(?:los\s+)?dos\b|\b(?:dos|2)\s*(?:personas?|asistentes?)\b/.test(
+    /\ben\s+pareja\b|\b(?:yo\s+y\s+mi\s+pareja|mi\s+pareja\s+y\s+yo)\b|\b(?:somos|iremos|vamos|acudiremos|vendremos|seremos)\s+(?:los\s+)?dos\b|\b(?:dos|2)\s*(?:personas?|asistentes?)\b/.test(
       text,
     )
   ) {
@@ -936,6 +937,13 @@ function contextualPendingPeopleCount(
     return 1;
   }
   if (/^(?:2|dos)$/.test(compactText)) {
+    return 2;
+  }
+  if (
+    /^(?:yo\s+y\s+mi\s+pareja|mi\s+pareja\s+y\s+yo|(?:iremos|vamos|acudiremos|vendremos)\s+(?:mi\s+pareja\s+y\s+yo|yo\s+y\s+mi\s+pareja))$/.test(
+      compactText,
+    )
+  ) {
     return 2;
   }
   return undefined;
@@ -1070,11 +1078,18 @@ export class LlmIntentClassifier {
           deterministic.intent,
         ),
     );
+    const isPendingRegistrationFieldAnswer = Boolean(
+      context.active_stage === "collecting_contact" &&
+        deterministic.intent === "registration_data_provided" &&
+        context.pending_fields?.includes("peopleCount") &&
+        deterministic.people_count,
+    );
 
     // Las consultas inequívocas de agenda no necesitan esperar al modelo: ya
     // contienen servicio e intención transaccional y deben responder a tiempo
-    // para el webhook de WhatsApp.
-    if (isExplicitAgendaLookup) {
+    // para el webhook de WhatsApp. Las respuestas a un campo que el propio
+    // flujo acaba de preguntar tampoco deben reinterpretarse fuera de contexto.
+    if (isExplicitAgendaLookup || isPendingRegistrationFieldAnswer) {
       return deterministic;
     }
 
@@ -1157,7 +1172,7 @@ export class LlmIntentClassifier {
         text,
       );
     const explicitlyWantsRegistration =
-      /(reserv|apunt|inscrib|preinscrib|plaza|me interesa|quiero ir|quiero asistir|me gustar[ií]a asistir|gu[aá]rdame)/.test(
+      /(reserv|apunt|inscrib|preinscrib|plaza|me interesa|quiero ir|quiero asistir|me gustar[ií]a asistir|gu[aá]rdame|continuar\s+con\s+(?:la|mi|una)\s+cita|seguir\s+con\s+(?:la|mi|una)\s+cita)/.test(
         text,
       ) || asksToBookAppointment(text);
     const selectsServiceForPendingBooking = Boolean(

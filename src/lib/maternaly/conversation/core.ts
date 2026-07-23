@@ -485,7 +485,11 @@ function extractContextualFullName(
 
 function inferContextualPeopleCount(message: string): number | undefined {
   const text = normalize(message);
-  if (/\b(?:voy|vengo|vamos)\s+en\s+pareja\b|\bsomos\s+dos\b|\b2\s*personas?\b|\bdos\s+personas?\b/.test(text)) {
+  if (
+    /\b(?:voy|vengo|vamos)\s+en\s+pareja\b|\b(?:yo\s+y\s+mi\s+pareja|mi\s+pareja\s+y\s+yo)\b|\bsomos\s+dos\b|\b2\s*personas?\b|\bdos\s+personas?\b/.test(
+      text,
+    )
+  ) {
     return 2;
   }
 

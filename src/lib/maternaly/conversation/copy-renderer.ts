@@ -941,13 +941,13 @@ export class MaternalyCopyRenderer {
     const options = result.sessions.slice(0, 4).map((session, index) => {
       const capacity =
         session.availabilityStatus === "unlimited"
-          ? "inscripción libre"
+          ? undefined
           : session.availableSeats === undefined
             ? "disponibilidad a validar"
             : session.full
               ? "sin plazas libres"
               : `${session.availableSeats} plaza${session.availableSeats === 1 ? "" : "s"} disponible${session.availableSeats === 1 ? "" : "s"}`;
-      return `${index + 1}. ${this.formatSession(session)} (${capacity})`;
+      return `${index + 1}. ${this.formatSession(session)}${capacity ? ` (${capacity})` : ""}`;
     });
 
     return [
@@ -1002,13 +1002,13 @@ export class MaternalyCopyRenderer {
       const modality = session.modality ? ` — ${session.modality}` : "";
       const availability =
         session.availabilityStatus === "unlimited"
-          ? "inscripción libre"
+          ? undefined
           : session.availableSeats === undefined
             ? "disponibilidad por confirmar"
             : session.full
               ? "sin plazas libres"
               : `${session.availableSeats} plaza${session.availableSeats === 1 ? "" : "s"} disponible${session.availableSeats === 1 ? "" : "s"}`;
-      return `${index + 1}. ${formatSpanishDate(session.date)}, ${session.startTime ?? "hora por confirmar"} — ${where}${modality} (${availability})`;
+      return `${index + 1}. ${formatSpanishDate(session.date)}, ${session.startTime ?? "hora por confirmar"} — ${where}${modality}${availability ? ` (${availability})` : ""}`;
     });
 
     const intro = hasPreference

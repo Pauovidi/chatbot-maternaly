@@ -928,6 +928,68 @@ describe("normalized Maternaly WhatsApp flow", () => {
     expect(result.conversation.maternalyNormalizedFlow?.partnerName).toBe("Marta López");
   });
 
+  it("keeps the selected Charla session when the attendee answer is 'yo y mi pareja'", async () => {
+    const store = makeStore();
+    const client = new InMemoryNormalizedSheetsClient(
+      createRealTemplateWorkbook({
+        serviceKey: "charla_embarazo_1_20",
+        multiSession: true,
+        sessionCapacity: "",
+      }),
+    );
+    const env = {
+      ...normalizedTestEnv(),
+      LLM_PROVIDER: "openai",
+      OPENAI_API_KEY: "test-key-that-must-not-be-used-for-a-pending-field",
+    };
+    const from = "whatsapp:+34999000139";
+
+    await handleInboundMaternalyWhatsApp(
+      {
+        from,
+        body: "Quiero apuntarme a la charla informativa",
+        messageSid: "SM_CHARLA_CONTEXT_1",
+      },
+      store,
+      { normalizedSheetsClient: client, normalizedEnv: env },
+    );
+    const selected = await handleInboundMaternalyWhatsApp(
+      {
+        from,
+        body: "el 24 de septiembre",
+        messageSid: "SM_CHARLA_CONTEXT_2",
+      },
+      store,
+      { normalizedSheetsClient: client, normalizedEnv: env },
+    );
+
+    expect(selected.botReply?.body).toMatch(/acudir[eé]is una o dos personas/i);
+    expect(selected.conversation.maternalyNormalizedFlow?.selectedSessionId).toBe(
+      "sesion_charla_erandio_20260924",
+    );
+
+    const attendees = await handleInboundMaternalyWhatsApp(
+      {
+        from,
+        body: "yo y mi pareja",
+        messageSid: "SM_CHARLA_CONTEXT_3",
+      },
+      store,
+      { normalizedSheetsClient: client, normalizedEnv: env },
+    );
+
+    expect(attendees.botReply?.body).toMatch(
+      /nombre y apellidos|nombre de la pareja|fecha probable de parto/i,
+    );
+    expect(attendees.botReply?.body).not.toMatch(/Te sigo|elegir un servicio/i);
+    expect(attendees.conversation.maternalyNormalizedFlow).toMatchObject({
+      stage: "collecting_contact",
+      serviceKey: "charla_embarazo_1_20",
+      selectedSessionId: "sesion_charla_erandio_20260924",
+      peopleCount: 2,
+    });
+  });
+
   it("keeps Charla blocked for two attendees until the companion name is provided", async () => {
     const store = makeStore();
     const client = new InMemoryNormalizedSheetsClient(
