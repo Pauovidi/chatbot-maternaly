@@ -10,6 +10,8 @@ import {
   createNormalizedWorkbook,
   normalizedTestEnv,
 } from "@/lib/maternaly/sheets/normalized-test-utils";
+import { createMaternalyReminderLifecycle } from "@/lib/maternaly/reminders/lifecycle";
+import { InMemoryMaternalyReminderRepository } from "@/lib/maternaly/reminders/memory-repository";
 
 const forbiddenHotelCopy = /\b(?:hotel|perros|canino|vacunas|comida|visitas|somos perros)\b/i;
 
@@ -91,6 +93,35 @@ describe("normalized Maternaly WhatsApp flow", () => {
     expect(result.botReply?.body).not.toMatch(forbiddenHotelCopy);
     expect(result.conversation.serviceDetected).toBe("Taller BLW");
     expect(result.conversation.events.map((event) => event.eventType)).toContain("maternaly_tool_executed");
+  });
+
+  it("serializes concurrent retries and answers a MessageSid only once", async () => {
+    const store = makeStore();
+    const client = new InMemoryNormalizedSheetsClient(createNormalizedWorkbook());
+    const payload = {
+      from: "+34600111001",
+      body: "Hola, quiero información",
+      messageSid: "SM_DUPLICATE_CONCURRENT_1",
+      channel: "twilio" as const,
+    };
+
+    const results = await Promise.all([
+      handleInboundMaternalyWhatsApp(payload, store, {
+        normalizedSheetsClient: client,
+        normalizedEnv: normalizedTestEnv(),
+      }),
+      handleInboundMaternalyWhatsApp(payload, store, {
+        normalizedSheetsClient: client,
+        normalizedEnv: normalizedTestEnv(),
+      }),
+    ]);
+    const record = await store.getByPhone("34600111001");
+
+    expect(record?.messages.filter(
+      (message) => message.externalMessageSid === payload.messageSid,
+    )).toHaveLength(1);
+    expect(record?.messages.filter((message) => message.direction === "outbound")).toHaveLength(1);
+    expect(results.filter((result) => Boolean(result.botReply))).toHaveLength(1);
   });
 
   it("handles YCloud inbound through the shared normalized flow", async () => {
@@ -427,7 +458,7 @@ describe("normalized Maternaly WhatsApp flow", () => {
     const details = await handleInboundMaternalyWhatsApp(
       {
         from: "whatsapp:+34999000113",
-        body: "Soy Laura Ruiz, fecha 31/12/2026",
+        body: "Soy Laura Ruiz, fecha 31/03/2027",
         messageSid: "SM_CONTEXTUAL_CHARLA_4",
       },
       store,
@@ -435,7 +466,7 @@ describe("normalized Maternaly WhatsApp flow", () => {
     );
 
     expect(details.botReply?.body).toMatch(/nombre de la pareja|nombre del acompa[nñ]ante/i);
-    expect(details.conversation.maternalyNormalizedFlow?.fppOrDueDate).toBe("2026-12-31");
+    expect(details.conversation.maternalyNormalizedFlow?.fppOrDueDate).toBe("2027-03-31");
     expect(details.conversation.maternalyNormalizedFlow?.babyBirthDate).toBeUndefined();
     expect(lastPayload(details.conversation.events, "maternaly_registration_slots_enriched")).toMatchObject({
       dateMappedTo: "fppOrDueDate",
@@ -551,6 +582,7 @@ describe("normalized Maternaly WhatsApp flow", () => {
     );
     expect(first.botReply?.body).toMatch(/Opciones para Taller BLW/i);
     expect(first.botReply?.body).not.toMatch(/no puedo validar disponibilidad/i);
+    expect(first.conversation.maternalyReservationStatus).toBe("none");
 
     const second = await handleInboundMaternalyWhatsApp(
       {
@@ -739,6 +771,7 @@ describe("normalized Maternaly WhatsApp flow", () => {
 
     expect(result.botReply?.body).toMatch(/no puedo dejar la solicitud cerrada|revisión/i);
     expect(result.conversation.mode).toBe("human");
+    expect(result.conversation.maternalyReservationStatus).toBe("none");
     expect(client.appended).toHaveLength(0);
     expect(JSON.stringify(lastPayload(result.conversation.events, "maternaly_tool_executed")?.blockedReasons)).toContain(
       "missing_required_columns:Clientes_Local",
@@ -913,7 +946,7 @@ describe("normalized Maternaly WhatsApp flow", () => {
     const result = await handleInboundMaternalyWhatsApp(
       {
         from: "+34600111223",
-        body: "Soy Laura Ruiz, mi pareja es Marta López, FPP 2026-11-30",
+        body: "Soy Laura Ruiz, mi pareja es Marta López, FPP 2027-03-31",
         messageSid: "SM_CHARLA_3",
       },
       store,
@@ -1046,7 +1079,7 @@ describe("normalized Maternaly WhatsApp flow", () => {
     const blocked = await handleInboundMaternalyWhatsApp(
       {
         from,
-        body: "Soy Paula Ortega, FPP 31/12/2026",
+        body: "Soy Paula Ortega, FPP 31/03/2027",
         messageSid: "SM_CHARLA_OPTIONS_4",
       },
       store,
@@ -1060,7 +1093,7 @@ describe("normalized Maternaly WhatsApp flow", () => {
       phone: "+34999000131",
       fullName: "Paula Ortega",
       peopleCount: 2,
-      fppOrDueDate: "31/12/2026",
+      fppOrDueDate: "31/03/2027",
     });
     expect(blocked.conversation.maternalyNormalizedFlow?.email).toBeUndefined();
     expect(blocked.conversation.maternalyNormalizedFlow?.partnerName).toBeUndefined();
@@ -1083,7 +1116,7 @@ describe("normalized Maternaly WhatsApp flow", () => {
       phone: "+34999000131",
       fullName: "Paula Ortega",
       peopleCount: 2,
-      fppOrDueDate: "31/12/2026",
+      fppOrDueDate: "31/03/2027",
       partnerName: "Marcos Gómez",
     });
   });
@@ -1117,7 +1150,7 @@ describe("normalized Maternaly WhatsApp flow", () => {
     await handleInboundMaternalyWhatsApp(
       {
         from,
-        body: "Soy Paula Ortega, voy en pareja, FPP 31/12/2026",
+        body: "Soy Paula Ortega, voy en pareja, FPP 31/03/2027",
         messageSid: `SM_CHARLA_SHORT_${partnerName}_3`,
       },
       store,
@@ -1172,7 +1205,7 @@ describe("normalized Maternaly WhatsApp flow", () => {
     await handleInboundMaternalyWhatsApp(
       {
         from,
-        body: "Soy Paula Ortega, voy en pareja, FPP 31/12/2026",
+        body: "Soy Paula Ortega, voy en pareja, FPP 31/03/2027",
         messageSid: "SM_CHARLA_PENDING_3",
       },
       store,
@@ -1243,7 +1276,7 @@ describe("normalized Maternaly WhatsApp flow", () => {
     const result = await handleInboundMaternalyWhatsApp(
       {
         from,
-        body: "Soy Paula Ortega, FPP 31/12/2026",
+        body: "Soy Paula Ortega, FPP 31/03/2027",
         messageSid: "SM_CHARLA_SINGLE_4",
       },
       store,
@@ -1280,5 +1313,219 @@ describe("normalized Maternaly WhatsApp flow", () => {
       expect(result.botReply?.body).toMatch(/equipo de Maternaly|persona/i);
       expect(client.appended).toHaveLength(0);
     }
+  });
+
+  it("confirms a live registration internally and cancels its Sheet row safely", async () => {
+    const store = makeStore();
+    const client = new InMemoryNormalizedSheetsClient(
+      createNormalizedWorkbook({ serviceKey: "charla_embarazo_1_20" }),
+    );
+    const env = normalizedTestEnv({
+      MATERNALY_NORMALIZED_SHEETS_WRITE_MODE: "live",
+      GOOGLE_SHEETS_ACCESS_MODE: "live",
+      BOT_SHEETS_LIVE_WRITE_ENABLED: "true",
+      MATERNALY_REMINDERS_ENABLED: "true",
+    });
+    const reminderRepository = new InMemoryMaternalyReminderRepository();
+    const runtimeOptions = {
+      normalizedSheetsClient: client,
+      normalizedEnv: env,
+      reminderLifecycle: createMaternalyReminderLifecycle(reminderRepository),
+    };
+    const from = "+34600111999";
+
+    await handleInboundMaternalyWhatsApp(
+      { from, body: "Quiero apuntarme a la charla informativa", messageSid: "SM_CANCEL_LIVE_1" },
+      store,
+      runtimeOptions,
+    );
+    await handleInboundMaternalyWhatsApp(
+      { from, body: "Opción 1", messageSid: "SM_CANCEL_LIVE_2" },
+      store,
+      runtimeOptions,
+    );
+    await handleInboundMaternalyWhatsApp(
+      { from, body: "Una persona", messageSid: "SM_CANCEL_LIVE_3" },
+      store,
+      runtimeOptions,
+    );
+    const confirmed = await handleInboundMaternalyWhatsApp(
+      {
+        from,
+        body: "Soy Ana Ruiz, FPP 31/03/2027",
+        messageSid: "SM_CANCEL_LIVE_4",
+      },
+      store,
+      runtimeOptions,
+    );
+
+    expect(confirmed.conversation.maternalyReservationStatus).toBe("confirmed");
+    expect(confirmed.conversation.maternalyNormalizedFlow?.stage).toBe("confirmed");
+    expect(reminderRepository.list()).toEqual([
+      expect.objectContaining({
+        registrationId: expect.stringMatching(/^INS_BOT_/),
+        sessionId: "sesion_charla_bilbao_20261006",
+        status: "scheduled",
+        scheduledFor: "2026-10-04T15:00:00.000Z",
+      }),
+    ]);
+
+    const cancelled = await handleInboundMaternalyWhatsApp(
+      { from, body: "Quiero cancelar mi inscripción", messageSid: "SM_CANCEL_LIVE_5" },
+      store,
+      runtimeOptions,
+    );
+
+    expect(cancelled.botReply?.body).toMatch(/he cancelado|cancelaci[oó]n.*correct/i);
+    expect(cancelled.conversation.maternalyReservationStatus).toBe("none");
+    expect(cancelled.conversation.maternalyNormalizedFlow?.stage).toBe("collecting_service");
+    expect(cancelled.conversation.mode).toBe("bot");
+    expect(client.updatedCells).toEqual([
+      expect.objectContaining({ tabTitle: "Inscripciones", value: "Cancelada" }),
+    ]);
+    expect(cancelled.conversation.events.map((event) => event.eventType)).toContain(
+      "maternaly_registration_cancellation_executed",
+    );
+    expect(cancelled.conversation.events.map((event) => event.eventType)).toContain(
+      "maternaly_reminders_cancelled_for_registration",
+    );
+    expect(reminderRepository.list()[0]?.status).toBe("cancelled");
+  });
+
+  it("escalates when the Sheet row is cancelled after its reminder stopped being pending", async () => {
+    const store = makeStore();
+    const client = new InMemoryNormalizedSheetsClient(
+      createNormalizedWorkbook({ serviceKey: "charla_embarazo_1_20" }),
+    );
+    const env = normalizedTestEnv({
+      MATERNALY_NORMALIZED_SHEETS_WRITE_MODE: "live",
+      GOOGLE_SHEETS_ACCESS_MODE: "live",
+      BOT_SHEETS_LIVE_WRITE_ENABLED: "true",
+      MATERNALY_REMINDERS_ENABLED: "true",
+    });
+    const reminderRepository = new InMemoryMaternalyReminderRepository();
+    const reminderLifecycle = createMaternalyReminderLifecycle(reminderRepository);
+    const runtimeOptions = {
+      normalizedSheetsClient: client,
+      normalizedEnv: env,
+      reminderLifecycle: {
+        scheduleCharla: reminderLifecycle.scheduleCharla,
+        cancelPendingForRegistration: async () => 0,
+      },
+    };
+    const from = "+34600111998";
+
+    await handleInboundMaternalyWhatsApp(
+      { from, body: "Quiero apuntarme a la charla informativa", messageSid: "SM_CANCEL_SENDING_1" },
+      store,
+      runtimeOptions,
+    );
+    await handleInboundMaternalyWhatsApp(
+      { from, body: "Opción 1", messageSid: "SM_CANCEL_SENDING_2" },
+      store,
+      runtimeOptions,
+    );
+    await handleInboundMaternalyWhatsApp(
+      { from, body: "Una persona", messageSid: "SM_CANCEL_SENDING_3" },
+      store,
+      runtimeOptions,
+    );
+    await handleInboundMaternalyWhatsApp(
+      { from, body: "Soy Ana Ruiz, FPP 31/03/2027", messageSid: "SM_CANCEL_SENDING_4" },
+      store,
+      runtimeOptions,
+    );
+
+    const cancelled = await handleInboundMaternalyWhatsApp(
+      { from, body: "Quiero cancelar mi inscripción", messageSid: "SM_CANCEL_SENDING_5" },
+      store,
+      runtimeOptions,
+    );
+
+    expect(cancelled.botReply?.body).toMatch(/he cancelado tu inscripci[oó]n/i);
+    expect(cancelled.botReply?.body).toMatch(/proceso de env[ií]o|a[uú]n recibas/i);
+    expect(cancelled.conversation.mode).toBe("human");
+    expect(cancelled.conversation.requiresManualReview).toBe(true);
+    expect(cancelled.conversation.events.map((event) => event.eventType)).toContain(
+      "maternaly_reminder_cancellation_not_pending",
+    );
+    expect(cancelled.conversation.events.map((event) => event.eventType)).not.toContain(
+      "maternaly_reminders_cancelled_for_registration",
+    );
+    expect(client.updatedCells).toEqual([
+      expect.objectContaining({ tabTitle: "Inscripciones", value: "Cancelada" }),
+    ]);
+  });
+
+  it("recovers an already-confirmed Sheet row without duplicating it and schedules its reminder", async () => {
+    const client = new InMemoryNormalizedSheetsClient(
+      createNormalizedWorkbook({ serviceKey: "charla_embarazo_1_20" }),
+    );
+    const baseEnv = normalizedTestEnv({
+      MATERNALY_NORMALIZED_SHEETS_WRITE_MODE: "live",
+      GOOGLE_SHEETS_ACCESS_MODE: "live",
+      BOT_SHEETS_LIVE_WRITE_ENABLED: "true",
+    });
+    const from = "+34600111888";
+    const runBooking = async (
+      store: FileConversationStore,
+      sidPrefix: string,
+      options: Parameters<typeof handleInboundMaternalyWhatsApp>[2],
+    ) => {
+      await handleInboundMaternalyWhatsApp(
+        { from, body: "Quiero apuntarme a la charla informativa", messageSid: `${sidPrefix}_1` },
+        store,
+        options,
+      );
+      await handleInboundMaternalyWhatsApp(
+        { from, body: "Opción 1", messageSid: `${sidPrefix}_2` },
+        store,
+        options,
+      );
+      await handleInboundMaternalyWhatsApp(
+        { from, body: "Una persona", messageSid: `${sidPrefix}_3` },
+        store,
+        options,
+      );
+      return handleInboundMaternalyWhatsApp(
+        { from, body: "Soy Ana Ruiz, FPP 31/03/2027", messageSid: `${sidPrefix}_4` },
+        store,
+        options,
+      );
+    };
+
+    const first = await runBooking(
+      new FileConversationStore(path.join(tempDir, "first-write.json")),
+      "SM_RECOVERY_FIRST",
+      { normalizedSheetsClient: client, normalizedEnv: baseEnv },
+    );
+    expect(first.conversation.maternalyReservationStatus).toBe("confirmed");
+    expect(client.appended.filter((item) => item.tabTitle === "Inscripciones")).toHaveLength(1);
+
+    const reminderRepository = new InMemoryMaternalyReminderRepository();
+    const recovered = await runBooking(
+      new FileConversationStore(path.join(tempDir, "recovered-write.json")),
+      "SM_RECOVERY_SECOND",
+      {
+        normalizedSheetsClient: client,
+        normalizedEnv: { ...baseEnv, MATERNALY_REMINDERS_ENABLED: "true" },
+        reminderLifecycle: createMaternalyReminderLifecycle(reminderRepository),
+      },
+    );
+
+    expect(recovered.botReply?.body).toMatch(/reserva ha quedado confirmada/i);
+    expect(recovered.conversation.maternalyReservationStatus).toBe("confirmed");
+    expect(client.appended.filter((item) => item.tabTitle === "Inscripciones")).toHaveLength(1);
+    expect(lastPayload(recovered.conversation.events, "maternaly_tool_executed")).toMatchObject({
+      applied: false,
+      registrationPersisted: true,
+      registrationStatus: "confirmada",
+    });
+    expect(reminderRepository.list()).toEqual([
+      expect.objectContaining({
+        registrationId: expect.stringMatching(/^INS_BOT_/),
+        status: "scheduled",
+      }),
+    ]);
   });
 });

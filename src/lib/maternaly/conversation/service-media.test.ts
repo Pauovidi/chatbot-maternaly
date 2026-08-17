@@ -58,6 +58,7 @@ describe("Maternaly service media", () => {
       expect.objectContaining({
         serviceId: "taller_blw",
         url: "https://maternaly.example.test/maternaly/services/taller-blw.jpeg",
+        prefaceText: "Te paso la información del taller BLW para que sepas en qué consiste.",
       }),
     ]);
   });
@@ -101,6 +102,37 @@ describe("Maternaly service media", () => {
     });
 
     expect(media).toEqual([]);
+  });
+
+  it.each([
+    "maternaly_service_media_dispatch_attempted",
+    "maternaly_service_media_dispatch_failed",
+  ])("retries a poster after %s without a queued confirmation", (eventType) => {
+    const media = resolveMaternalyServiceMedia({
+      conversation: conversation([
+        {
+          id: `evt_${eventType}`,
+          conversationId: "conversation_media",
+          eventType,
+          payload: {
+            serviceId: "taller_blw",
+            triggerKind: "explicit_service",
+            messageId: "msg_media_attempt",
+          },
+          createdAt: "2026-07-16T10:00:00.000Z",
+        },
+      ]),
+      inboundText: "Quiero información del taller BLW",
+      intent: intent("taller_blw"),
+      appBaseUrl: "https://maternaly.example.test",
+    });
+
+    expect(media).toEqual([
+      expect.objectContaining({
+        serviceId: "taller_blw",
+        triggerKind: "explicit_service",
+      }),
+    ]);
   });
 
   it.each([

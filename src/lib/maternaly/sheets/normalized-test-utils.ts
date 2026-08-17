@@ -1,4 +1,6 @@
 import type { NormalizedSheetsClient } from "@/lib/maternaly/sheets/normalized-client";
+import { calculateSessionOccupancy } from "@/lib/maternaly/sheets/normalized-availability";
+import { rowsToObjects } from "@/lib/maternaly/sheets/normalized-template";
 
 export const NORMALIZED_TEST_HEADERS = {
   Servicio_Config: [["service_id", "servicio"]],
@@ -36,7 +38,7 @@ export const REAL_TEMPLATE_TEST_HEADERS = {
     "centro",
     "modalidad",
     "capacidad_total",
-    "estado",
+    "estado_grupo",
     "visible_chatbot",
     "reservable_chatbot",
   ]],
@@ -199,10 +201,23 @@ export class InMemoryNormalizedSheetsClient implements NormalizedSheetsClient {
     values: Array<string | number | undefined>;
   }> = [];
   readonly formattedRanges: string[] = [];
+  readonly updatedCells: Array<{
+    sheetId: string;
+    tabTitle: string;
+    rowNumber: number;
+    columnIndex: number;
+    value: string | number;
+  }> = [];
 
   constructor(
     private readonly workbook: Record<string, unknown[][]>,
-    private readonly options: { failFormatting?: boolean; disableFormatting?: boolean } = {},
+    private readonly options: {
+      failFormatting?: boolean;
+      disableFormatting?: boolean;
+      failAppendTabs?: string[];
+      failAppendAfterApplyTabs?: string[];
+      failUpdateAfterApply?: boolean;
+    } = {},
   ) {}
 
   async readTabRows(_sheetId: string, tabTitle: string): Promise<unknown[][]> {
@@ -225,8 +240,14 @@ export class InMemoryNormalizedSheetsClient implements NormalizedSheetsClient {
     formatApplied?: boolean;
     formatWarning?: string;
   }> {
+    if (this.options.failAppendTabs?.includes(tabTitle)) {
+      throw new Error(`synthetic_append_failure:${tabTitle}`);
+    }
     this.appended.push({ sheetId, tabTitle, values });
     this.workbook[tabTitle]?.push(values);
+    if (this.options.failAppendAfterApplyTabs?.includes(tabTitle)) {
+      throw new Error(`synthetic_append_response_lost:${tabTitle}`);
+    }
     const updatedRange = `${tabTitle}!A${this.workbook[tabTitle]?.length ?? 1}:Z${this.workbook[tabTitle]?.length ?? 1}`;
     if (this.options.failFormatting) {
       return {
@@ -247,6 +268,75 @@ export class InMemoryNormalizedSheetsClient implements NormalizedSheetsClient {
       formattedRange: this.options.disableFormatting ? undefined : updatedRange,
       formatApplied: !this.options.disableFormatting,
     };
+  }
+
+  async appendRegistrationRowIfCapacityAllows(
+    sheetId: string,
+    tabTitle: "Inscripciones",
+    values: Array<string | number | undefined>,
+    guard: {
+      sessionId: string;
+      groupId: string;
+      capacityTotal: number;
+      peopleCount: number;
+    },
+  ) {
+    const registrations = rowsToObjects(this.workbook[tabTitle] ?? [], {
+      tab: "Inscripciones",
+    });
+    if (registrations.parseError) {
+      return { applied: false, reason: registrations.parseError };
+    }
+    const occupied = calculateSessionOccupancy({
+      registrations: registrations.rows,
+      sessionId: guard.sessionId,
+      groupId: guard.groupId,
+    });
+    if (occupied + guard.peopleCount > guard.capacityTotal) {
+      return { applied: false, reason: "session_full_on_atomic_append" };
+    }
+    const result = await this.appendRow(sheetId, tabTitle, values);
+    return { applied: true, result };
+  }
+
+  async updateCell(
+    sheetId: string,
+    tabTitle: string,
+    rowNumber: number,
+    columnIndex: number,
+    value: string | number,
+  ): Promise<void> {
+    const row = this.workbook[tabTitle]?.[rowNumber - 1];
+    if (!row) {
+      throw new Error(`missing_row:${tabTitle}:${rowNumber}`);
+    }
+    row[columnIndex] = value;
+    this.updatedCells.push({ sheetId, tabTitle, rowNumber, columnIndex, value });
+    if (this.options.failUpdateAfterApply) {
+      throw new Error(`synthetic_update_response_lost:${tabTitle}`);
+    }
+  }
+
+  async updateCellIfRowMatches(
+    sheetId: string,
+    tabTitle: string,
+    rowNumber: number,
+    columnIndex: number,
+    value: string | number,
+    expectedCells: Array<{ columnIndex: number; value: string | number }>,
+  ): Promise<boolean> {
+    const row = this.workbook[tabTitle]?.[rowNumber - 1];
+    if (!row) {
+      return false;
+    }
+    const matches = expectedCells.every(
+      (expected) => String(row[expected.columnIndex] ?? "") === String(expected.value),
+    );
+    if (!matches) {
+      return false;
+    }
+    await this.updateCell(sheetId, tabTitle, rowNumber, columnIndex, value);
+    return true;
   }
 }
 

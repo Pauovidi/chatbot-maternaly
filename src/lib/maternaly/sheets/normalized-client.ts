@@ -34,6 +34,32 @@ export interface NormalizedSheetsClient {
     tabTitle: string,
     values: Array<string | number | undefined>,
   ): Promise<AppendRowResult>;
+  appendRegistrationRowIfCapacityAllows?(
+    sheetId: string,
+    tabTitle: "Inscripciones",
+    values: Array<string | number | undefined>,
+    guard: {
+      sessionId: string;
+      groupId: string;
+      capacityTotal: number;
+      peopleCount: number;
+    },
+  ): Promise<{ applied: boolean; reason?: string; result?: AppendRowResult }>;
+  updateCell?(
+    sheetId: string,
+    tabTitle: string,
+    rowNumber: number,
+    columnIndex: number,
+    value: string | number,
+  ): Promise<void>;
+  updateCellIfRowMatches?(
+    sheetId: string,
+    tabTitle: string,
+    rowNumber: number,
+    columnIndex: number,
+    value: string | number,
+    expectedCells: Array<{ columnIndex: number; value: string | number }>,
+  ): Promise<boolean>;
 }
 
 function getConfiguredServiceId(row: NormalizedRow): string {
@@ -91,6 +117,16 @@ export class GoogleNormalizedSheetsClient implements NormalizedSheetsClient {
     values: Array<string | number | undefined>,
   ): Promise<AppendRowResult> {
     return this.client.appendRow(sheetId, tabTitle, values);
+  }
+
+  updateCell(
+    sheetId: string,
+    tabTitle: string,
+    rowNumber: number,
+    columnIndex: number,
+    value: string | number,
+  ): Promise<void> {
+    return this.client.updateCell(sheetId, tabTitle, rowNumber, columnIndex, value);
   }
 }
 

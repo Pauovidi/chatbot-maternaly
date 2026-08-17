@@ -14,6 +14,7 @@ export interface MaternalyServiceMedia {
   serviceId: MaternalyActiveServiceId;
   alt: string;
   url: string;
+  prefaceText: string;
   triggerKind: "catalog" | "explicit_service" | "contextual_service";
 }
 
@@ -21,6 +22,7 @@ interface MaternalyServiceMediaDefinition {
   serviceId: MaternalyActiveServiceId;
   alt: string;
   publicPath: string;
+  prefaceText: string;
 }
 
 const ACTIVE_SERVICE_MEDIA: readonly MaternalyServiceMediaDefinition[] = [
@@ -28,11 +30,13 @@ const ACTIVE_SERVICE_MEDIA: readonly MaternalyServiceMediaDefinition[] = [
     serviceId: "charla_embarazo_1_20",
     alt: "Cartel de la charla informativa gratuita de embarazo",
     publicPath: "/maternaly/services/charla-informativa-embarazo.jpeg",
+    prefaceText: "Te paso la información de la charla para que sepas en qué consiste.",
   },
   {
     serviceId: "taller_blw",
     alt: "Cartel del taller Baby-Led Weaning",
     publicPath: "/maternaly/services/taller-blw.jpeg",
+    prefaceText: "Te paso la información del taller BLW para que sepas en qué consiste.",
   },
 ];
 
@@ -163,6 +167,7 @@ export function resolveMaternalyServiceMedia(input: {
       serviceId: media.serviceId,
       alt: media.alt,
       url: new URL(media.publicPath, baseUrl).toString(),
+      prefaceText: media.prefaceText,
       triggerKind: trigger.triggerKind,
     }];
   });

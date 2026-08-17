@@ -7,11 +7,13 @@ import {
   normalizeCharlaModality,
   normalizeCharlaTime,
 } from "@/lib/maternaly/knowledge/charla-informativa-contract";
+import { madridSessionStartsAt } from "@/lib/maternaly/reminders/charla-integration";
 import {
   MATERNALY_NORMALIZED_SERVICES,
   getCell,
   humanNormalize,
   parsePositiveInteger,
+  registrationStatusDomain,
   type MaternalyNormalizedServiceKey,
   type NormalizedRow,
 } from "@/lib/maternaly/sheets/normalized-template";
@@ -28,6 +30,9 @@ export interface NormalizedAvailableSession {
   date?: string;
   startTime?: string;
   endTime?: string;
+  onlineJoinUrl?: string;
+  onlineAccessCode?: string;
+  onlineMeetingId?: string;
   capacityTotal?: number;
   occupied: number;
   availableSeats?: number;
@@ -49,6 +54,14 @@ const NON_OCCUPYING_STATUSES = [
   "baja",
   "no vino",
   "rechazada",
+  "inactiva",
+  "inactivo",
+  "cerrada",
+  "cerrado",
+  "finalizada",
+  "finalizado",
+  "archivada",
+  "archivado",
 ];
 
 export function registrationOccupiesCapacity(status: string): boolean {
@@ -58,6 +71,11 @@ export function registrationOccupiesCapacity(status: string): boolean {
   }
 
   return OCCUPYING_STATUSES.some((item) => normalized.includes(item));
+}
+
+export function registrationIsOpen(status: string): boolean {
+  const domain = registrationStatusDomain(status);
+  return domain === "confirmed" || domain === "pending";
 }
 
 function indexGroups(rows: NormalizedRow[]) {
@@ -74,6 +92,7 @@ function indexGroups(rows: NormalizedRow[]) {
           modality: getCell(row, "modality"),
           capacityTotal: parsePositiveInteger(getCell(row, "capacityTotal")),
           status: getCell(row, "status"),
+          active: isActiveRow(row),
         },
       ] as const;
     }),
@@ -119,17 +138,19 @@ function normalizeSessionLocation(input: {
   return input.rowCenter || input.groupCenter || undefined;
 }
 
-function currentDateIso(now: Date): string {
-  return [
-    now.getFullYear().toString().padStart(4, "0"),
-    (now.getMonth() + 1).toString().padStart(2, "0"),
-    now.getDate().toString().padStart(2, "0"),
-  ].join("-");
-}
-
-function isCurrentOrFutureSession(date: string | undefined, today: string): boolean {
-  const normalized = normalizeCharlaDate(date);
-  return !normalized || normalized >= today;
+function isFutureSessionStart(
+  date: string | undefined,
+  startTime: string | undefined,
+  now: Date,
+): boolean {
+  if (!date || !startTime) {
+    return false;
+  }
+  try {
+    return new Date(madridSessionStartsAt(date, startTime)).getTime() > now.getTime();
+  } catch {
+    return false;
+  }
 }
 
 function compareSessions(a: NormalizedAvailableSession, b: NormalizedAvailableSession): number {
@@ -154,7 +175,9 @@ function isActiveRow(row: NormalizedRow): boolean {
   return (
     !hidden &&
     !notReservable &&
-    (!status || !NON_OCCUPYING_STATUSES.some((item) => status.includes(item)))
+    ["activa", "activo", "abierta", "abierto", "programada", "programado", "publicada", "publicado"].includes(
+      status,
+    )
   );
 }
 
@@ -163,12 +186,31 @@ export function calculateSessionOccupancy(input: {
   sessionId: string;
   groupId: string;
 }): number {
-  return input.registrations.filter((row) => {
+  return input.registrations.reduce((occupied, row) => {
     const rowSessionId = getCell(row, "sessionId");
     const rowGroupId = getCell(row, "groupId");
-    const sameSession = rowSessionId ? rowSessionId === input.sessionId : rowGroupId === input.groupId;
-    return sameSession && registrationOccupiesCapacity(getCell(row, "status"));
-  }).length;
+    const notes = getCell(row, "notes");
+    const notesSessionId = /\bsession\s*:\s*([^|\s]+)\b/i.exec(notes)?.[1];
+    const sameStableGroup = Boolean(
+      rowGroupId && input.groupId && humanNormalize(rowGroupId) === humanNormalize(input.groupId),
+    );
+    const sameSession = sameStableGroup || (rowSessionId
+      ? rowSessionId === input.sessionId
+      : notesSessionId
+        ? notesSessionId === input.sessionId
+        : false);
+    if (!sameSession || !registrationOccupiesCapacity(getCell(row, "status"))) {
+      return occupied;
+    }
+
+    const directPeopleCount = parsePositiveInteger(getCell(row, "peopleCount"));
+    const notesPeopleCount = /\bpersonas?\s*:\s*(\d+)\b/i.exec(notes)?.[1];
+    const partnerPeopleCount = getCell(row, "partnerName").trim() ? 2 : undefined;
+    const peopleCount = directPeopleCount ??
+      (notesPeopleCount ? Number.parseInt(notesPeopleCount, 10) : undefined) ??
+      partnerPeopleCount;
+    return occupied + Math.max(1, peopleCount ?? 1);
+  }, 0);
 }
 
 export function listAvailableSessionsFromSnapshot(
@@ -178,7 +220,7 @@ export function listAvailableSessionsFromSnapshot(
   const service = MATERNALY_NORMALIZED_SERVICES[snapshot.serviceKey];
   const groups = indexGroups(snapshot.tabs.Grupos_Ediciones.rows);
   const registrations = snapshot.tabs.Inscripciones.rows;
-  const today = currentDateIso(options.now ?? new Date());
+  const now = options.now ?? new Date();
 
   const sessions = snapshot.tabs.Sesiones.rows
     .filter(isActiveRow)
@@ -186,6 +228,7 @@ export function listAvailableSessionsFromSnapshot(
       const group = groups.get(getCell(row, "groupId"));
       const rowServiceId = getCell(row, "serviceId");
       return (
+        Boolean(group?.active) &&
         serviceIdBelongsToNormalizedWorkbook(snapshot, rowServiceId) &&
         serviceIdBelongsToNormalizedWorkbook(snapshot, group?.serviceId)
       );
@@ -206,15 +249,23 @@ export function listAvailableSessionsFromSnapshot(
         sessionId,
         groupId,
       });
-      const occupied =
-        directOccupied ??
-        (directAvailable !== undefined && capacityTotal !== undefined
+      const occupiedFromDirectAvailability =
+        directAvailable !== undefined && capacityTotal !== undefined
           ? Math.max(capacityTotal - directAvailable, 0)
-          : calculatedOccupied);
+          : 0;
+      // Explicit counters or formulas can lag immediately after an append. The
+      // registration rows are reconciled with them so a locked re-read cannot
+      // hand out the same final seat twice.
+      const occupied = Math.max(
+        directOccupied ?? 0,
+        occupiedFromDirectAvailability,
+        calculatedOccupied,
+      );
       const availableSeats = unlimitedCapacity
         ? undefined
-        : directAvailable ??
-          (capacityTotal === undefined ? undefined : Math.max(capacityTotal - occupied, 0));
+        : capacityTotal !== undefined
+          ? Math.max(capacityTotal - occupied, 0)
+          : directAvailable;
       const full = availableSeats !== undefined && availableSeats <= 0;
       const sessionName = getCell(row, "sessionName") || service.label;
       const rowCenter = getCell(row, "center");
@@ -256,6 +307,9 @@ export function listAvailableSessionsFromSnapshot(
         date: normalizeCharlaDate(rawDate) ?? (rawDate || undefined),
         startTime: normalizeCharlaTime(getCell(row, "startTime")) ?? undefined,
         endTime: getCell(row, "endTime") || undefined,
+        onlineJoinUrl: getCell(row, "onlineJoinUrl") || undefined,
+        onlineAccessCode: getCell(row, "onlineAccessCode") || undefined,
+        onlineMeetingId: getCell(row, "onlineMeetingId") || undefined,
         capacityTotal,
         occupied,
         availableSeats,
@@ -263,7 +317,11 @@ export function listAvailableSessionsFromSnapshot(
         availabilityStatus,
       };
     })
-    .filter((session) => isCurrentOrFutureSession(session.date, today));
+    .filter(
+      (session) =>
+        Boolean(session.modality && session.location) &&
+        isFutureSessionStart(session.date, session.startTime, now),
+    );
 
   if (snapshot.serviceKey !== "charla_embarazo_1_20") {
     return sessions;

@@ -14,6 +14,25 @@ import {
 import { rowsToObjects } from "@/lib/maternaly/sheets/normalized-template";
 
 describe("normalized Maternaly availability", () => {
+  it("reads optional online access details from a normalized session", async () => {
+    const workbook = createNormalizedWorkbook({ serviceKey: "charla_embarazo_1_20" });
+    const rows = workbook.Sesiones as unknown[][];
+    (rows[0] as unknown[]).push("enlace_zoom", "clave_acceso", "id_reunion");
+    (rows[1] as unknown[]).push("https://zoom.example.test/j/123", "456789", "123");
+    const client = new InMemoryNormalizedSheetsClient(workbook);
+    const snapshot = await readNormalizedServiceSheet(
+      "charla_embarazo_1_20",
+      client,
+      normalizedTestEnv(),
+    );
+
+    expect(listAvailableSessionsFromSnapshot(snapshot)[0]).toMatchObject({
+      onlineJoinUrl: "https://zoom.example.test/j/123",
+      onlineAccessCode: "456789",
+      onlineMeetingId: "123",
+    });
+  });
+
   it("detects normalized headers below visual title and help rows", () => {
     const parsed = rowsToObjects(
       [
@@ -212,6 +231,74 @@ describe("normalized Maternaly availability", () => {
     });
   });
 
+  it("excludes a session from today once its Madrid start time has passed", async () => {
+    const workbook = createRealTemplateWorkbook({
+      serviceKey: "charla_embarazo_1_20",
+      visualHeaderRows: false,
+    });
+    workbook.Sesiones[1][3] = "2026-08-17";
+    workbook.Sesiones[1][4] = "10:00";
+    const client = new InMemoryNormalizedSheetsClient(workbook);
+    const snapshot = await readNormalizedServiceSheet(
+      "charla_embarazo_1_20",
+      client,
+      normalizedTestEnv(),
+    );
+
+    expect(
+      listAvailableSessionsFromSnapshot(snapshot, {
+        now: new Date("2026-08-17T09:00:00.000Z"),
+      }),
+    ).toHaveLength(0);
+  });
+
+  it("excludes sessions whose date, time, modality or location is incomplete", async () => {
+    const workbook = createRealTemplateWorkbook({
+      serviceKey: "charla_embarazo_1_20",
+      visualHeaderRows: false,
+    });
+    workbook.Sesiones[1][3] = "";
+    workbook.Sesiones[1][4] = "";
+    workbook.Sesiones[1][6] = "";
+    workbook.Sesiones[1][7] = "";
+    workbook.Grupos_Ediciones[1][3] = "";
+    workbook.Grupos_Ediciones[1][4] = "";
+    const client = new InMemoryNormalizedSheetsClient(workbook);
+    const snapshot = await readNormalizedServiceSheet(
+      "charla_embarazo_1_20",
+      client,
+      normalizedTestEnv(),
+    );
+
+    expect(listAvailableSessionsFromSnapshot(snapshot)).toHaveLength(0);
+  });
+
+  it("does not publish sessions from a cancelled, hidden or non-reservable group", async () => {
+    for (const mutate of [
+      (row: unknown[]) => { row[6] = "Cancelado"; },
+      (row: unknown[]) => { row[6] = "Inactivo"; },
+      (row: unknown[]) => { row[6] = "Cerrado"; },
+      (row: unknown[]) => { row[6] = "Finalizado"; },
+      (row: unknown[]) => { row[6] = "Bloqueado"; },
+      (row: unknown[]) => { row[6] = "Completo"; },
+      (row: unknown[]) => { row[7] = "no"; },
+      (row: unknown[]) => { row[8] = "no"; },
+    ]) {
+      const workbook = createRealTemplateWorkbook({
+        serviceKey: "charla_embarazo_1_20",
+        visualHeaderRows: false,
+      });
+      mutate(workbook.Grupos_Ediciones[1]);
+      const client = new InMemoryNormalizedSheetsClient(workbook);
+      const snapshot = await readNormalizedServiceSheet(
+        "charla_embarazo_1_20",
+        client,
+        normalizedTestEnv(),
+      );
+      expect(listAvailableSessionsFromSnapshot(snapshot)).toHaveLength(0);
+    }
+  });
+
   it("uses every future Charla session published in the normalized agenda", async () => {
     const workbook = createRealTemplateWorkbook({
       serviceKey: "charla_embarazo_1_20",
@@ -356,6 +443,119 @@ describe("normalized Maternaly availability", () => {
 
     expect(sessions[0]?.occupied).toBe(2);
     expect(sessions[0]?.availableSeats).toBe(1);
+  });
+
+  it("counts every attendee and overrides stale direct availability counters", async () => {
+    const workbook = createRealTemplateWorkbook({
+      serviceKey: "charla_embarazo_1_20",
+      sessionCapacity: "3",
+      visualHeaderRows: false,
+      registrations: [[
+        "INS_TEST",
+        "CLI_TEST",
+        "Ana",
+        "Prueba",
+        "+34600000001",
+        "grupo_charla_bilbao",
+        "charla_embarazo_1_20",
+        "2026-08-17",
+        "whatsapp",
+        "0 €",
+        "no_aplica",
+        "Confirmada",
+        "2026-12-31",
+        "Acompañante",
+        "",
+        "personas:2",
+      ]],
+    });
+    const client = new InMemoryNormalizedSheetsClient(workbook);
+    const snapshot = await readNormalizedServiceSheet(
+      "charla_embarazo_1_20",
+      client,
+      normalizedTestEnv(),
+    );
+
+    expect(listAvailableSessionsFromSnapshot(snapshot)[0]).toMatchObject({
+      occupied: 2,
+      availableSeats: 1,
+    });
+  });
+
+  it("counts a legacy confirmed partner as two attendees without people_count metadata", async () => {
+    const workbook = createRealTemplateWorkbook({
+      serviceKey: "charla_embarazo_1_20",
+      sessionCapacity: "2",
+      visualHeaderRows: false,
+      registrations: [[
+        "INS_LEGACY",
+        "CLI_LEGACY",
+        "Ana",
+        "Prueba",
+        "+34600000002",
+        "grupo_charla_bilbao",
+        "charla_embarazo_1_20",
+        "2026-08-17",
+        "manual",
+        "0 €",
+        "no_aplica",
+        "Confirmada",
+        "2026-12-31",
+        "Manolo",
+        "",
+        "",
+      ]],
+    });
+    const client = new InMemoryNormalizedSheetsClient(workbook);
+    const snapshot = await readNormalizedServiceSheet(
+      "charla_embarazo_1_20",
+      client,
+      normalizedTestEnv(),
+    );
+
+    expect(listAvailableSessionsFromSnapshot(snapshot)[0]).toMatchObject({
+      occupied: 2,
+      availableSeats: 0,
+      full: true,
+    });
+  });
+
+  it("keeps historical registrations attached when a session id is recreated in the same group", async () => {
+    const workbook = createRealTemplateWorkbook({
+      serviceKey: "charla_embarazo_1_20",
+      sessionCapacity: "1",
+      visualHeaderRows: false,
+      registrations: [[
+        "INS_OLD_SESSION",
+        "CLI_OLD_SESSION",
+        "Ana",
+        "Prueba",
+        "+34600000003",
+        "grupo_charla_bilbao",
+        "charla_embarazo_1_20",
+        "2026-08-17",
+        "manual",
+        "0 €",
+        "no_aplica",
+        "Activa",
+        "2027-03-31",
+        "",
+        "",
+        "session:sesion_charla_bilbao_OLD | personas:1",
+      ]],
+    });
+    const client = new InMemoryNormalizedSheetsClient(workbook);
+    const snapshot = await readNormalizedServiceSheet(
+      "charla_embarazo_1_20",
+      client,
+      normalizedTestEnv(),
+    );
+
+    expect(listAvailableSessionsFromSnapshot(snapshot)[0]).toMatchObject({
+      occupied: 1,
+      availableSeats: 0,
+      full: true,
+    });
   });
 
   it("subtracts occupied registrations from shifted 14-seat BLW templates", async () => {

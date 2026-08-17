@@ -620,15 +620,15 @@ describe("contrato conversacional del Word: Charla Informativa Gratuita", () => 
     expect(attendees.botReply?.body).toMatch(/nombre y apellidos/i);
 
     const completed = await harness.send(
-      'Mi nombre es "Paola Esto Es Una Prueba" y mi pareja Manolo. fecha probable de parto 14 de Oct',
+      'Mi nombre es "Paola Esto Es Una Prueba" y mi pareja Manolo. fecha probable de parto 14 de Mar de 2027',
     );
     expect(completed.conversation.maternalyNormalizedFlow).toMatchObject({
-      stage: "write_planned",
+      stage: "confirmed",
       selectedSessionId: "sesion_charla_online_20260810",
       fullName: "Paola Esto Es Una Prueba",
       peopleCount: 2,
       partnerName: "Manolo",
-      fppOrDueDate: "2026-10-14",
+      fppOrDueDate: "2027-03-14",
     });
     expect(harness.client.appended.map((entry) => entry.tabTitle)).toContain("Inscripciones");
     const registrationWrite = harness.client.appended.find(
@@ -636,8 +636,9 @@ describe("contrato conversacional del Word: Charla Informativa Gratuita", () => 
     );
     expect(registrationWrite?.values.join("|")).toMatch(/Paola\|Esto Es Una Prueba/i);
     expect(registrationWrite?.values.join("|")).toMatch(/sesion_charla_online_20260810/i);
-    expect(registrationWrite?.values.join("|")).toMatch(/2026-10-14/i);
+    expect(registrationWrite?.values.join("|")).toMatch(/2027-03-14/i);
     expect(registrationWrite?.values.join("|")).toMatch(/Manolo/i);
+    expect(registrationWrite?.values.join("|")).toMatch(/Activa/i);
     const writeEvent = [...completed.conversation.events]
       .reverse()
       .find(
@@ -647,9 +648,8 @@ describe("contrato conversacional del Word: Charla Informativa Gratuita", () => 
           event.payload.status === "write_result",
       );
     expect(writeEvent?.payload).toMatchObject({ applied: true, mode: "live" });
-    expect(completed.botReply?.body).toMatch(
-      /preinscripci[oó]n[\s\S]{0,50}registrad|pendiente de validaci[oó]n/i,
-    );
+    expect(completed.botReply?.body).toMatch(/reserva[\s\S]{0,30}confirmada/i);
+    expect(completed.botReply?.body).not.toMatch(/preinscripci[oó]n|pendiente de validaci[oó]n/i);
     expect(completed.botReply?.body).not.toMatch(/me faltan estos datos|Te sigo/i);
   });
 
@@ -701,7 +701,7 @@ describe("contrato conversacional del Word: Charla Informativa Gratuita", () => 
       expect.soft(collectionPrompt).not.toMatch(/email|correo electr[oó]nico/i);
 
       const completed = await harness.send(
-        `Soy Laura Ruiz Martínez, teléfono ${phone}, pareja: Mario López, FPP 31/12/2026`,
+        `Soy Laura Ruiz Martínez, teléfono ${phone}, pareja: Mario López, FPP 31/03/2027`,
       );
       const state = completed.conversation.maternalyNormalizedFlow;
       const confirmation = completed.botReply?.body ?? "";
@@ -713,7 +713,7 @@ describe("contrato conversacional del Word: Charla Informativa Gratuita", () => 
         peopleCount: 2,
         partnerName: "Mario López",
       });
-      expect.soft(state?.fppOrDueDate).toMatch(/2026-12-31|31\/12\/2026/);
+      expect.soft(state?.fppOrDueDate).toMatch(/2027-03-31|31\/03\/2027/);
       expect.soft(harness.client.appended.length).toBeGreaterThan(0);
       const writeEvent = [...completed.conversation.events]
         .reverse()
@@ -724,9 +724,13 @@ describe("contrato conversacional del Word: Charla Informativa Gratuita", () => 
             event.payload.status === "write_result",
         );
       expect.soft(writeEvent?.payload).toMatchObject({ applied: true, mode: "live" });
+      const registrationWrite = harness.client.appended.find(
+        (entry) => entry.tabTitle === "Inscripciones",
+      );
+      expect.soft(registrationWrite?.values.join("|")).toMatch(/Activa/i);
       expect.soft(confirmation).not.toMatch(/email|correo electr[oó]nico/i);
-      expect.soft(confirmation).toMatch(/preinscripci[oó]n[\s\S]{0,50}registrad|pendiente de validaci[oó]n/i);
-      expect.soft(confirmation).not.toMatch(/plaza[\s\S]{0,20}confirmada|reserva[\s\S]{0,20}confirmada/i);
+      expect.soft(confirmation).toMatch(/reserva[\s\S]{0,30}confirmada/i);
+      expect.soft(confirmation).not.toMatch(/preinscripci[oó]n|pendiente de validaci[oó]n/i);
       expect.soft(confirmation).toMatch(datePattern);
       expect.soft(confirmation).toMatch(/634\s*402\s*760/);
       expect.soft(confirmation).toMatch(/info@maternaly\.es/i);

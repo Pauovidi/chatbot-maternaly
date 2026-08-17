@@ -55,12 +55,41 @@ export const NORMALIZED_COLUMN_ALIASES = {
   date: ["fecha", "date", "dia"],
   startTime: ["hora_inicio", "inicio", "start_time", "hora"],
   endTime: ["hora_fin", "fin", "end_time"],
+  onlineJoinUrl: [
+    "enlace_online",
+    "enlace_zoom",
+    "zoom_url",
+    "join_url",
+    "url_reunion",
+    "url_sesion",
+  ],
+  onlineAccessCode: [
+    "clave_acceso",
+    "codigo_acceso",
+    "zoom_passcode",
+    "passcode",
+    "password_zoom",
+  ],
+  onlineMeetingId: [
+    "id_reunion",
+    "id_zoom",
+    "zoom_meeting_id",
+    "meeting_id",
+  ],
   capacityTotal: ["capacidad_total", "capacidad", "cupo", "plazas_totales"],
   occupiedSeats: ["plazas_ocupadas", "ocupadas", "occupied_seats"],
   availableSeats: ["plazas_disponibles", "disponibles", "available_seats"],
   visibleChatbot: ["visible_chatbot", "visible_bot"],
   reservableChatbot: ["reservable_chatbot", "reservable_bot"],
-  status: ["estado", "status", "estado_inscripcion", "resultado", "estado_cliente", "estado_sesion"],
+  status: [
+    "estado",
+    "status",
+    "estado_inscripcion",
+    "estado_grupo",
+    "resultado",
+    "estado_cliente",
+    "estado_sesion",
+  ],
   clientId: ["cliente_id", "client_id", "id_cliente"],
   registrationId: ["inscripcion_id", "registration_id", "id_inscripcion"],
   interactionId: ["interaccion_id", "interaction_id", "id_interaccion"],
@@ -333,7 +362,42 @@ export function parsePositiveInteger(value: string): number | undefined {
 }
 
 export function normalizePhoneForMatch(value: string): string {
-  return value.replace(/[^\d]/g, "");
+  let digits = value.replace(/[^\d]/g, "");
+  if (/^0034[6789]\d{8}$/.test(digits)) {
+    digits = digits.slice(2);
+  }
+  if (/^[6789]\d{8}$/.test(digits)) {
+    return `34${digits}`;
+  }
+  return digits;
+}
+
+export function registrationStatusDomain(
+  value: string,
+): "confirmed" | "pending" | "inactive" | "unknown" {
+  const normalized = humanNormalize(value);
+  if (["activa", "confirmada", "confirmado", "confirmed", "reserva confirmada"].includes(normalized)) {
+    return "confirmed";
+  }
+  if (["pendiente confirmar", "preinscrita", "reserva pendiente", "lista espera"].includes(normalized)) {
+    return "pending";
+  }
+  if (
+    [
+      "cancelada",
+      "anulada",
+      "baja",
+      "no vino",
+      "rechazada",
+      "inactiva",
+      "cerrada",
+      "finalizada",
+      "archivada",
+    ].includes(normalized)
+  ) {
+    return "inactive";
+  }
+  return "unknown";
 }
 
 export function redactSheetId(value: string): string {

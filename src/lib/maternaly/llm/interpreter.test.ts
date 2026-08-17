@@ -5,6 +5,266 @@ const forbiddenPromptPattern =
   /\b(?:hotel|perros|canino|vacunas|comida|visitas|residencia|qu[eé]\s+traer)\b/i;
 
 describe("Maternaly LLM interpreter", () => {
+  it("marks an explicit cancellation for the safe registration tool", async () => {
+    const result = await new LlmIntentClassifier().classify(
+      "Quiero cancelar mi inscripción a la charla",
+      { active_normalized_service_key: "charla_embarazo_1_20", active_stage: "confirmed" },
+      { LLM_PROVIDER: "mock" } as NodeJS.ProcessEnv,
+    );
+
+    expect(result.safety_flags).toContain("cancel_registration_request");
+    expect(result.safety_flags).toContain("handoff_cancel_or_reschedule");
+  });
+
+  it("does not cancel or hand off a negated cancellation request", async () => {
+    const result = await new LlmIntentClassifier().classify(
+      "No quiero cancelar mi inscripción",
+      { active_normalized_service_key: "charla_embarazo_1_20", active_stage: "confirmed" },
+      { LLM_PROVIDER: "mock" } as NodeJS.ProcessEnv,
+    );
+
+    expect(result.safety_flags).not.toContain("cancel_registration_request");
+    expect(result.safety_flags).not.toContain("handoff_cancel_or_reschedule");
+    expect(result.should_handoff).toBe(false);
+  });
+
+  it("overrides an OpenAI cancellation guess when the user explicitly negates it", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          output_text: JSON.stringify({
+            intent: "handoff_request",
+            slots: {},
+            service_question_focus: "unknown",
+            needs_availability_lookup: false,
+            confidence: 0.99,
+            missing_fields: [],
+            should_handoff: true,
+            safety_flags: ["cancel_registration_request", "handoff_cancel_or_reschedule"],
+          }),
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    const result = await new LlmIntentClassifier().classify(
+      "No quiero cancelar mi inscripción",
+      { active_normalized_service_key: "charla_embarazo_1_20", active_stage: "confirmed" },
+      { LLM_PROVIDER: "openai", OPENAI_API_KEY: "test-openai-key" } as NodeJS.ProcessEnv,
+    );
+
+    expect(result.classification_source).toBe("deterministic_override");
+    expect(result.safety_flags).not.toContain("cancel_registration_request");
+    expect(result.safety_flags).not.toContain("handoff_cancel_or_reschedule");
+    expect(result.should_handoff).toBe(false);
+  });
+
+  it.each([
+    "¿cómo puedo cancelar?",
+    "¿Cómo me doy de baja?",
+    "¿qué pasa si quiero cancelar mi inscripción?",
+    "¿se puede anular una inscripción?",
+    "Si quisiera cancelar, ¿qué tendría que hacer?",
+    "En caso de que tuviera que cancelarla, ¿cómo sería el proceso?",
+    "Si quisiera borrar mi inscripción, ¿cómo tendría que hacerlo?",
+    "No me doy de baja",
+    "No quiero borrar mi inscripción",
+  ])("keeps the procedural cancellation question '%s' informational", async (message) => {
+    const result = await new LlmIntentClassifier().classify(
+      message,
+      { active_normalized_service_key: "charla_embarazo_1_20", active_stage: "confirmed" },
+      { LLM_PROVIDER: "mock" } as NodeJS.ProcessEnv,
+    );
+
+    expect(result.safety_flags).not.toContain("cancel_registration_request");
+    expect(result.safety_flags).not.toContain("handoff_cancel_or_reschedule");
+    expect(result.should_handoff).toBe(false);
+  });
+
+  it.each(["Cancélame la inscripción", "Quiero cancelarla", "Quiero anularla"])(
+    "keeps the explicit pronominal cancellation '%s' destructive",
+    async (message) => {
+      const result = await new LlmIntentClassifier().classify(
+        message,
+        { active_normalized_service_key: "charla_embarazo_1_20", active_stage: "confirmed" },
+        { LLM_PROVIDER: "mock" } as NodeJS.ProcessEnv,
+      );
+
+      expect(result.safety_flags).toContain("cancel_registration_request");
+      expect(result.safety_flags).toContain("handoff_cancel_or_reschedule");
+      expect(result.should_handoff).toBe(true);
+    },
+  );
+
+  it.each([
+    "Me doy de baja",
+    "Dame de baja de la charla",
+    "Borra mi inscripción",
+    "Quita mi reserva",
+    "Ya no quiero la plaza",
+    "No voy a asistir, libera mi plaza",
+    "No puedo asistir",
+    "Finalmente no podré ir",
+    "No voy a poder acudir",
+    "No voy a ir",
+  ])("recognizes the habitual cancellation request '%s'", async (message) => {
+    const result = await new LlmIntentClassifier().classify(
+      message,
+      { active_normalized_service_key: "charla_embarazo_1_20", active_stage: "confirmed" },
+      { LLM_PROVIDER: "mock" } as NodeJS.ProcessEnv,
+    );
+
+    expect(result.safety_flags).toContain("cancel_registration_request");
+    expect(result.safety_flags).toContain("handoff_cancel_or_reschedule");
+    expect(result.should_handoff).toBe(true);
+  });
+
+  it("routes an ambiguous attendance problem to handoff without cancelling automatically", async () => {
+    const result = await new LlmIntentClassifier().classify(
+      "Me viene mal la cita",
+      { active_normalized_service_key: "charla_embarazo_1_20", active_stage: "confirmed" },
+      { LLM_PROVIDER: "mock" } as NodeJS.ProcessEnv,
+    );
+
+    expect(result.safety_flags).not.toContain("cancel_registration_request");
+    expect(result.safety_flags).toContain("handoff_cancel_or_reschedule");
+    expect(result.should_handoff).toBe(true);
+  });
+
+  it.each(["¿Qué pasa si no puedo asistir?", "No es que no pueda asistir; sí voy a ir"])(
+    "does not cancel for the non-destructive attendance wording '%s'",
+    async (message) => {
+      const result = await new LlmIntentClassifier().classify(
+        message,
+        { active_normalized_service_key: "charla_embarazo_1_20", active_stage: "confirmed" },
+        { LLM_PROVIDER: "mock" } as NodeJS.ProcessEnv,
+      );
+
+      expect(result.safety_flags).not.toContain("cancel_registration_request");
+    },
+  );
+
+  it.each([
+    "Me doy de baja de los mensajes, pero mantengo mi plaza",
+    "Dame de baja de las comunicaciones",
+    "Quiero la baja del newsletter, no de la cita",
+  ])("does not cancel a registration for the communications opt-out '%s'", async (message) => {
+    const result = await new LlmIntentClassifier().classify(
+      message,
+      { active_normalized_service_key: "charla_embarazo_1_20", active_stage: "confirmed" },
+      { LLM_PROVIDER: "mock" } as NodeJS.ProcessEnv,
+    );
+
+    expect(result.safety_flags).not.toContain("cancel_registration_request");
+    expect(result.intent).not.toBe("registration_start");
+  });
+
+  it.each([
+    "¿Está confirmada mi reserva?",
+    "Quería comprobar el estado de mi reserva",
+    "¿Mi plaza sigue confirmada?",
+  ])("classifies the reservation-status question '%s' as read-only", async (message) => {
+    const result = await new LlmIntentClassifier().classify(
+      message,
+      { active_normalized_service_key: "charla_embarazo_1_20", active_stage: "confirmed" },
+      { LLM_PROVIDER: "mock" } as NodeJS.ProcessEnv,
+    );
+
+    expect(result.intent).toBe("registration_status_query");
+    expect(result.needs_availability_lookup).toBe(false);
+    expect(result.safety_flags).not.toContain("cancel_registration_request");
+  });
+
+  it("overrides an OpenAI cancellation guess for a communications opt-out", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          output_text: JSON.stringify({
+            intent: "handoff_request",
+            slots: {},
+            service_question_focus: "unknown",
+            needs_availability_lookup: false,
+            confidence: 0.99,
+            missing_fields: [],
+            should_handoff: true,
+            safety_flags: ["cancel_registration_request", "handoff_cancel_or_reschedule"],
+          }),
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    const result = await new LlmIntentClassifier().classify(
+      "Dame de baja de las comunicaciones, mantengo mi plaza",
+      { active_normalized_service_key: "charla_embarazo_1_20", active_stage: "confirmed" },
+      { LLM_PROVIDER: "openai", OPENAI_API_KEY: "test-openai-key" } as NodeJS.ProcessEnv,
+    );
+
+    expect(result.classification_source).toBe("deterministic_override");
+    expect(result.safety_flags).not.toContain("cancel_registration_request");
+  });
+
+  it("overrides an OpenAI destructive guess for a procedural cancellation question", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          output_text: JSON.stringify({
+            intent: "handoff_request",
+            slots: {},
+            service_question_focus: "unknown",
+            needs_availability_lookup: false,
+            confidence: 0.99,
+            missing_fields: [],
+            should_handoff: true,
+            safety_flags: ["cancel_registration_request", "handoff_cancel_or_reschedule"],
+          }),
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    const result = await new LlmIntentClassifier().classify(
+      "¿cómo puedo cancelar?",
+      { active_normalized_service_key: "charla_embarazo_1_20", active_stage: "confirmed" },
+      { LLM_PROVIDER: "openai", OPENAI_API_KEY: "test-openai-key" } as NodeJS.ProcessEnv,
+    );
+
+    expect(result.classification_source).toBe("deterministic_override");
+    expect(result.safety_flags).not.toContain("cancel_registration_request");
+    expect(result.should_handoff).toBe(false);
+  });
+
+  it("overrides OpenAI for a conditional cancellation question", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          output_text: JSON.stringify({
+            intent: "handoff_request",
+            slots: {},
+            service_question_focus: "unknown",
+            needs_availability_lookup: false,
+            confidence: 0.99,
+            missing_fields: [],
+            should_handoff: true,
+            safety_flags: ["cancel_registration_request", "handoff_cancel_or_reschedule"],
+          }),
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    const result = await new LlmIntentClassifier().classify(
+      "Si quisiera cancelar, ¿qué tendría que hacer?",
+      { active_normalized_service_key: "charla_embarazo_1_20", active_stage: "confirmed" },
+      { LLM_PROVIDER: "openai", OPENAI_API_KEY: "test-openai-key" } as NodeJS.ProcessEnv,
+    );
+
+    expect(result.classification_source).toBe("deterministic_override");
+    expect(result.safety_flags).not.toContain("cancel_registration_request");
+    expect(result.safety_flags).not.toContain("handoff_cancel_or_reschedule");
+    expect(result.should_handoff).toBe(false);
+  });
+
   afterEach(() => {
     vi.restoreAllMocks();
     vi.unstubAllEnvs();
@@ -37,7 +297,7 @@ describe("Maternaly LLM interpreter", () => {
       ),
     );
 
-    await new LlmIntentClassifier().classify("hola", {
+    const result = await new LlmIntentClassifier().classify("hola", {
       active_service_id: "taller_blw",
       active_service_name: "Taller BLW",
       recent_messages: [{ role: "assistant", text: "¿Quieres saber el precio o el contenido?" }],
@@ -76,6 +336,7 @@ describe("Maternaly LLM interpreter", () => {
       type: "json_schema",
       name: "maternaly_structured_intent",
     });
+    expect(result.classification_source).toBe("deterministic_override");
   });
 
   it("resolves a direct Charla availability request without waiting for OpenAI", async () => {
@@ -92,6 +353,7 @@ describe("Maternaly LLM interpreter", () => {
       service_candidate: "charla_embarazo_1_20",
       service_question_focus: "schedule",
       needs_availability_lookup: true,
+      classification_source: "deterministic_fast_path",
     });
 
     expect(fetchSpy).not.toHaveBeenCalled();
@@ -140,6 +402,7 @@ describe("Maternaly LLM interpreter", () => {
       service_candidate: "taller_blw",
       service_question_focus: "contents",
       confidence: 0.94,
+      classification_source: "openai",
     });
   });
 
@@ -175,6 +438,38 @@ describe("Maternaly LLM interpreter", () => {
       service_candidate: undefined,
       service_question_focus: "booking",
       needs_availability_lookup: false,
+    });
+  });
+
+  it("records when OpenAI fails and deterministic NLU takes over", async () => {
+    vi.stubEnv("LLM_PROVIDER", "openai");
+    process.env.OPENAI_API_KEY = "test-openai-key";
+    vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("synthetic network failure"));
+
+    await expect(
+      new LlmIntentClassifier().classify("qué incluye el BLW"),
+    ).resolves.toMatchObject({
+      intent: "service_question",
+      service_candidate: "taller_blw",
+      classification_source: "deterministic_fallback",
+      classification_fallback_reason: "openai_fetch_error",
+    });
+  });
+
+  it("falls back deterministically when OpenAI returns malformed HTTP JSON", async () => {
+    vi.stubEnv("LLM_PROVIDER", "openai");
+    process.env.OPENAI_API_KEY = "test-openai-key";
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response("{", { status: 200, headers: { "Content-Type": "application/json" } }),
+    );
+
+    await expect(
+      new LlmIntentClassifier().classify("qué incluye el BLW"),
+    ).resolves.toMatchObject({
+      intent: "service_question",
+      service_candidate: "taller_blw",
+      classification_source: "deterministic_fallback",
+      classification_fallback_reason: "openai_invalid_http_json",
     });
   });
 
@@ -724,6 +1019,7 @@ describe("Maternaly LLM interpreter", () => {
       service_candidate: "taller_blw",
       service_question_focus: "general",
       needs_availability_lookup: false,
+      classification_source: "deterministic_override",
     });
   });
 
@@ -1156,6 +1452,174 @@ describe("Maternaly LLM interpreter", () => {
     },
   );
 
+  it.each([
+    "somos mi chico y yo",
+    "vendremos ambos",
+    "mi marido y yo",
+    "asistiremos las dos",
+  ])("understands the natural two-attendee answer '%s' while that field is pending", async (message) => {
+    const result = await new LlmIntentClassifier().classify(message, {
+      active_service_id: "charla_embarazo_1_20",
+      active_normalized_service_key: "charla_embarazo_1_20",
+      active_stage: "collecting_contact",
+      pending_fields: ["peopleCount", "fullName", "fppOrDueDate"],
+      recent_messages: [
+        { role: "assistant", text: "Perfecto. Antes de continuar, ¿acudiréis una o dos personas?" },
+      ],
+    });
+
+    expect(result).toMatchObject({
+      intent: "registration_data_provided",
+      people_count: 2,
+      slots: expect.objectContaining({ people_count: 2 }),
+    });
+  });
+
+  it.each([
+    "Al final viene mi pareja",
+    "Finalmente vendrá mi pareja",
+    "También asiste mi acompañante",
+    "Quiero añadir a mi pareja",
+  ])("updates a one-person draft when the user adds a companion: '%s'", async (message) => {
+    const result = await new LlmIntentClassifier().classify(message, {
+      active_service_id: "charla_embarazo_1_20",
+      active_normalized_service_key: "charla_embarazo_1_20",
+      active_stage: "collecting_contact",
+      pending_fields: ["fullName", "fppOrDueDate"],
+    });
+
+    expect(result).toMatchObject({
+      intent: "registration_data_provided",
+      people_count: 2,
+      slots: expect.objectContaining({ people_count: 2 }),
+    });
+  });
+
+  it.each([
+    "¿Puede venir mi pareja?",
+    "¿Podría añadir a mi acompañante?",
+  ])("keeps companion eligibility questions read-only: '%s'", async (message) => {
+    const result = await new LlmIntentClassifier().classify(message, {
+      active_service_id: "charla_embarazo_1_20",
+      active_normalized_service_key: "charla_embarazo_1_20",
+      active_stage: "collecting_contact",
+      pending_fields: ["fullName", "fppOrDueDate"],
+    });
+
+    expect(result.slots.people_count).toBeUndefined();
+    expect(result.people_count).toBeUndefined();
+  });
+
+  it("extracts a worded Spanish due date with the nearest reasonable year", async () => {
+    const now = new Date();
+    const thisYearCandidate = new Date(Date.UTC(now.getUTCFullYear(), 9, 14));
+    const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+    const expectedYear = thisYearCandidate.getTime() < today.getTime()
+      ? now.getUTCFullYear() + 1
+      : now.getUTCFullYear();
+    const result = await new LlmIntentClassifier().classify(
+      "mi fecha probable es el catorce de octubre",
+      {
+        active_service_id: "charla_embarazo_1_20",
+        active_normalized_service_key: "charla_embarazo_1_20",
+        active_stage: "collecting_contact",
+        pending_fields: ["fppOrDueDate"],
+      },
+    );
+
+    expect(result).toMatchObject({
+      intent: "registration_data_provided",
+      slots: expect.objectContaining({ fpp_or_due_date: `${expectedYear}-10-14` }),
+    });
+  });
+
+  it("keeps a punctuated middle initial in the full name", async () => {
+    const result = await new LlmIntentClassifier().classify("Mi nombre es Ana M. López", {
+      active_service_id: "charla_embarazo_1_20",
+      active_normalized_service_key: "charla_embarazo_1_20",
+      active_stage: "collecting_contact",
+      pending_fields: ["fullName"],
+    });
+
+    expect(result).toMatchObject({
+      intent: "registration_data_provided",
+      slots: expect.objectContaining({ full_name: "Ana M. López" }),
+    });
+  });
+
+  it.each([
+    "Mi nombre es Paola Esto Es Una Prueba y mi pareja Manolo. fecha probable de parto 14 de Oct",
+    'Mi nombre es "Paola Esto Es Una Prueba" y mi pareja Manolo. fecha probable de parto 14 de Oct.',
+  ])("segments the exact multi-field registration payload '%s'", (message) => {
+    const now = new Date();
+    const thisYearCandidate = new Date(Date.UTC(now.getUTCFullYear(), 9, 14));
+    const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+    const expectedYear = thisYearCandidate.getTime() < today.getTime()
+      ? now.getUTCFullYear() + 1
+      : now.getUTCFullYear();
+    const result = new LlmIntentClassifier().classifyWithMock(message, {
+      active_service_id: "charla_embarazo_1_20",
+      active_normalized_service_key: "charla_embarazo_1_20",
+      active_stage: "collecting_contact",
+      pending_fields: ["fullName", "partnerName", "fppOrDueDate"],
+    });
+
+    expect(result).toMatchObject({
+      intent: "registration_data_provided",
+      slots: expect.objectContaining({
+        full_name: "Paola Esto Es Una Prueba",
+        partner_name: "Manolo",
+        fpp_or_due_date: `${expectedYear}-10-14`,
+      }),
+    });
+    expect(result.slots.full_name).not.toMatch(/\by$/i);
+  });
+
+  it.each([
+    ["ene", "01"],
+    ["feb.", "02"],
+    ["mar", "03"],
+    ["abr.", "04"],
+    ["may", "05"],
+    ["jun.", "06"],
+    ["jul", "07"],
+    ["ago.", "08"],
+    ["sep", "09"],
+    ["set.", "09"],
+    ["oct", "10"],
+    ["nov.", "11"],
+    ["dic", "12"],
+  ])("extracts the abbreviated Spanish month '%s'", (month, expectedMonth) => {
+    const result = new LlmIntentClassifier().classifyWithMock(
+      `mi fecha probable de parto es el 14 de ${month}`,
+      {
+        active_service_id: "charla_embarazo_1_20",
+        active_normalized_service_key: "charla_embarazo_1_20",
+        active_stage: "collecting_contact",
+        pending_fields: ["fppOrDueDate"],
+      },
+    );
+
+    expect(result.slots.fpp_or_due_date).toMatch(new RegExp(`^\\d{4}-${expectedMonth}-14$`));
+  });
+
+  it.each(["la primera no, mejor la segunda", "la del diez"])(
+    "recognizes the contextual session selection '%s'",
+    async (message) => {
+      const result = await new LlmIntentClassifier().classify(message, {
+        active_service_id: "charla_embarazo_1_20",
+        active_normalized_service_key: "charla_embarazo_1_20",
+        active_stage: "choosing_session",
+      });
+
+      expect(result).toMatchObject({
+        intent: "registration_slot_selected",
+        service_candidate: "charla_embarazo_1_20",
+        needs_availability_lookup: true,
+      });
+    },
+  );
+
   it("continues the active appointment instead of falling back to general conversation", async () => {
     const result = await new LlmIntentClassifier().classify("continuar con la cita", {
       active_service_id: "charla_embarazo_1_20",
@@ -1233,4 +1697,131 @@ describe("Maternaly LLM interpreter", () => {
     expect(result.slots.people_count).toBeUndefined();
     expect(result.people_count).toBeUndefined();
   });
+
+  it.each(["Vamos 3 personas", "Seremos 4"])(
+    "does not accept an unsupported attendee count in '%s'",
+    async (message) => {
+      const result = await new LlmIntentClassifier().classify(message, {
+        active_service_id: "charla_embarazo_1_20",
+        active_normalized_service_key: "charla_embarazo_1_20",
+        active_stage: "collecting_contact",
+        pending_fields: ["peopleCount"],
+      });
+
+      expect(result.slots.people_count).toBeUndefined();
+      expect(result.people_count).toBeUndefined();
+    },
+  );
+
+  it("keeps a concrete service question when pregnancy context is shared in the same turn", async () => {
+    const result = await new LlmIntentClassifier().classifyWithMock(
+      "Estoy embarazada de 5 meses, ¿cuánto cuesta Pilates?",
+    );
+
+    expect(result).toMatchObject({
+      intent: "service_question",
+      service_candidate: "pilates",
+      service_scope: "explicit",
+      service_question_focus: "pricing",
+      slots: {
+        journey_stage: "embarazo",
+        pregnancy_month: 5,
+      },
+    });
+  });
+
+  it("keeps a concrete booking request when pregnancy context is shared in the same turn", async () => {
+    const result = await new LlmIntentClassifier().classifyWithMock(
+      "Estoy embarazada de 6 meses y quiero reservar el taller BLW",
+    );
+
+    expect(result).toMatchObject({
+      intent: "registration_start",
+      service_candidate: "taller_blw",
+      service_scope: "explicit",
+      service_question_focus: "booking",
+      needs_availability_lookup: true,
+      slots: {
+        journey_stage: "embarazo",
+        pregnancy_month: 6,
+        normalized_service_key: "taller_blw",
+      },
+    });
+  });
+
+  it.each([
+    ["Prefiero presencial, no online", undefined, "presencial"],
+    ["No online, mejor presencial", undefined, "presencial"],
+    ["En Bilbao, no Erandio", "bilbao", "presencial"],
+    ["No Bilbao, mejor Erandio", "erandio", "presencial"],
+  ])(
+    "resolves the asserted preference instead of the negated one in '%s'",
+    async (message, location, modality) => {
+      const result = await new LlmIntentClassifier().classifyWithMock(message, {
+        active_service_id: "charla_embarazo_1_20",
+        active_normalized_service_key: "charla_embarazo_1_20",
+        active_stage: "choosing_session",
+        location: "online",
+        modality: "online",
+      });
+
+      expect(result).toMatchObject({
+        intent: "availability_request",
+        service_candidate: "charla_embarazo_1_20",
+        needs_availability_lookup: true,
+        slots: {
+          location,
+          modality,
+        },
+      });
+    },
+  );
+
+  it("resumes the transactional service after an informational detour", async () => {
+    const result = await new LlmIntentClassifier().classifyWithMock("continuar con la cita", {
+      active_service_id: "pilates",
+      active_normalized_service_key: "taller_blw",
+      active_stage: "choosing_session",
+    });
+
+    expect(result).toMatchObject({
+      intent: "registration_start",
+      service_candidate: "taller_blw",
+      service_scope: "contextual",
+      needs_availability_lookup: true,
+      slots: { normalized_service_key: "taller_blw" },
+    });
+  });
+
+  it("continues the active booking when the user says exactly 'quiero una cita'", async () => {
+    const result = await new LlmIntentClassifier().classifyWithMock("quiero una cita", {
+      active_service_id: "charla_embarazo_1_20",
+      active_normalized_service_key: "charla_embarazo_1_20",
+      active_stage: "collecting_contact",
+    });
+
+    expect(result).toMatchObject({
+      intent: "registration_start",
+      service_candidate: "charla_embarazo_1_20",
+      service_scope: "contextual",
+      needs_availability_lookup: true,
+      slots: { normalized_service_key: "charla_embarazo_1_20" },
+    });
+  });
+
+  it.each(["Prefiero online o presencial", "No sé si Bilbao o Erandio"])(
+    "does not persist an unresolved alternative as a session preference in '%s'",
+    async (message) => {
+      const result = await new LlmIntentClassifier().classifyWithMock(message, {
+        active_service_id: "charla_embarazo_1_20",
+        active_normalized_service_key: "charla_embarazo_1_20",
+        active_stage: "choosing_session",
+      });
+
+      expect(result.intent).toBe("service_question");
+      expect(result.needs_availability_lookup).toBe(false);
+      expect(result.slots.location).toBeUndefined();
+      expect(result.slots.modality).toBeUndefined();
+    },
+  );
 });

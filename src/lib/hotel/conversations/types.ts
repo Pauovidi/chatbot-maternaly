@@ -82,6 +82,7 @@ export interface MaternalyNormalizedFlowState {
   observations?: string;
   pendingFields?: string[];
   idempotencyKey?: string;
+  rescheduleReviewRequired?: boolean;
   updatedAt: string;
 }
 

@@ -6,6 +6,7 @@ export interface TwilioWhatsAppConfig {
   mock: boolean;
   providerMode: "mock" | "sandbox" | "real";
   statusCallbackUrl?: string;
+  requestTimeoutMs?: number;
 }
 
 type TwilioProviderMode = TwilioWhatsAppConfig["providerMode"];
@@ -21,6 +22,8 @@ export interface TwilioSendResult {
   mode: "mock" | "real";
   sid?: string;
   error?: string;
+  /** The POST may have reached Twilio even though no response was observed. */
+  ambiguous?: boolean;
 }
 
 function parseBoolean(value: string | undefined, fallback: boolean): boolean {
@@ -37,6 +40,11 @@ function parseProviderMode(value: string | undefined): TwilioProviderMode | unde
   }
 
   return undefined;
+}
+
+function parseRequestTimeoutMs(value: string | undefined): number {
+  const parsed = Number.parseInt(value ?? "", 10);
+  return Number.isFinite(parsed) ? Math.min(15_000, Math.max(1_000, parsed)) : 5_000;
 }
 
 function asWhatsAppAddress(phone: string) {
@@ -90,6 +98,7 @@ export function readTwilioWhatsAppConfig(
       override: providerModeOverride,
     }),
     statusCallbackUrl: env.TWILIO_STATUS_CALLBACK_URL,
+    requestTimeoutMs: parseRequestTimeoutMs(env.TWILIO_REQUEST_TIMEOUT_MS),
   };
 }
 
@@ -131,7 +140,10 @@ export async function sendTwilioWhatsAppText(
     formBody.set("StatusCallback", config.statusCallbackUrl);
   }
 
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), config.requestTimeoutMs ?? 5_000);
   let response: Response;
+  let text: string;
   try {
     response = await fetch(
       `https://api.twilio.com/2010-04-01/Accounts/${config.accountSid}/Messages.json`,
@@ -144,22 +156,51 @@ export async function sendTwilioWhatsAppText(
           "Content-Type": "application/x-www-form-urlencoded",
         },
         body: formBody,
+        signal: controller.signal,
       },
     );
-  } catch {
+    text = await response.text();
+  } catch (error) {
+    const errorCode = (() => {
+      if (!error || typeof error !== "object") {
+        return undefined;
+      }
+      const direct = "code" in error ? String(error.code ?? "") : "";
+      const cause = "cause" in error && error.cause && typeof error.cause === "object"
+        ? error.cause
+        : undefined;
+      const caused = cause && "code" in cause ? String(cause.code ?? "") : "";
+      return direct || caused || undefined;
+    })();
+    const definitelyFailedBeforeSend = new Set([
+      "ENOTFOUND",
+      "EAI_AGAIN",
+      "ECONNREFUSED",
+      "ENETUNREACH",
+      "EHOSTUNREACH",
+      "UND_ERR_CONNECT_TIMEOUT",
+    ]).has(errorCode ?? "");
     return {
       ok: false,
       mode: "real",
-      error: "Twilio network request failed.",
+      ambiguous:
+        error instanceof Error && error.name === "AbortError"
+          ? true
+          : !definitelyFailedBeforeSend,
+      error:
+        error instanceof Error && error.name === "AbortError"
+          ? "Twilio request timed out."
+          : "Twilio network request failed.",
     };
+  } finally {
+    clearTimeout(timeoutId);
   }
-
-  const text = await response.text();
 
   if (!response.ok) {
     return {
       ok: false,
       mode: "real",
+      ambiguous: response.status >= 500,
       error: `Twilio returned ${response.status}`,
     };
   }

@@ -40,6 +40,21 @@ function columnToIndex(column: string): number {
     .reduce((total, char) => total * 26 + char.charCodeAt(0) - 64, 0) - 1;
 }
 
+function indexToColumn(index: number): string {
+  if (!Number.isInteger(index) || index < 0) {
+    throw new Error("invalid_column_index");
+  }
+
+  let current = index + 1;
+  let column = "";
+  while (current > 0) {
+    const remainder = (current - 1) % 26;
+    column = String.fromCharCode(65 + remainder) + column;
+    current = Math.floor((current - 1) / 26);
+  }
+  return column;
+}
+
 export function parseUpdatedA1Range(updatedRange: string): ParsedA1Range {
   const match = updatedRange.match(/^(?:'((?:''|[^'])+)'|([^!]+))!([A-Z]+)(\d+):([A-Z]+)(\d+)$/i);
   if (!match) {
@@ -198,7 +213,7 @@ export class GoogleSheetsClient {
   async readTabRows(
     spreadsheetId: string,
     tabTitle: string,
-    range = "A1:AZ1000",
+    range = "A:AZ",
   ): Promise<unknown[][]> {
     return this.readTabSample(spreadsheetId, tabTitle, range);
   }
@@ -265,6 +280,28 @@ export class GoogleSheetsClient {
     }
 
     return result;
+  }
+
+  async updateCell(
+    spreadsheetId: string,
+    tabTitle: string,
+    rowNumber: number,
+    columnIndex: number,
+    value: string | number,
+  ): Promise<void> {
+    if (!Number.isInteger(rowNumber) || rowNumber <= 1) {
+      throw new Error("invalid_data_row_number");
+    }
+
+    const client = await this.getClient();
+    const escaped = tabTitle.replace(/'/g, "''");
+    const cell = `${indexToColumn(columnIndex)}${rowNumber}`;
+    await client.spreadsheets.values.update({
+      spreadsheetId,
+      range: `'${escaped}'!${cell}`,
+      valueInputOption: "USER_ENTERED",
+      requestBody: { values: [[value]] },
+    });
   }
 }
 

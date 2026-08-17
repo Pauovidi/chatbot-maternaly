@@ -6,8 +6,10 @@ import {
 } from "@/lib/maternaly/knowledge/catalog";
 import type { MaternalyNormalizedFlowState } from "@/lib/hotel/conversations/types";
 import type { NormalizedAvailableSession } from "@/lib/maternaly/sheets/normalized-availability";
+import type { LookupNormalizedRegistrationResult } from "@/lib/maternaly/sheets/normalized-registration-management";
 import {
   MATERNALY_NORMALIZED_SERVICES,
+  registrationStatusDomain,
   type MaternalyNormalizedServiceKey,
 } from "@/lib/maternaly/sheets/normalized-template";
 import type {
@@ -33,6 +35,8 @@ export type MaternalyCopyAction =
   | "silent_human"
   | "reset"
   | "handoff"
+  | "cancel_registration"
+  | "reservation_status"
   | "privacy"
   | "payment"
   | "invoice"
@@ -71,18 +75,38 @@ export interface MaternalyCopyToolResult {
   plan?: {
     blocked: boolean;
     blockedReasons: string[];
+    existingRegistrationSheetStatus?: string;
   };
   writeResult?: {
     ok: boolean;
     mode: "dry_run" | "live";
     applied: boolean;
+    registrationPersisted?: boolean;
+    registrationStatus?: "preinscrita" | "confirmada";
   };
+  error?: string;
+}
+
+function isConfirmedLiveCharlaWrite(result: MaternalyCopyToolResult): boolean {
+  const writeResult = result.writeResult;
+  if (!writeResult?.ok || writeResult.mode !== "live") {
+    return false;
+  }
+
+  const persisted = writeResult.registrationPersisted ?? writeResult.applied;
+  const status = writeResult.registrationStatus ?? (writeResult.applied ? "confirmada" : undefined);
+  return result.serviceKey === "charla_embarazo_1_20" && persisted && status === "confirmada";
 }
 
 export interface MaternalyCopyRenderInput {
   decision: MaternalyCopyDecision;
   state?: MaternalyNormalizedFlowState;
   toolResult?: MaternalyCopyToolResult;
+  cancellationResult?: {
+    status: "cancelled" | "not_found" | "ambiguous" | "read_error" | "write_unavailable";
+  };
+  registrationLookupResult?: LookupNormalizedRegistrationResult;
+  reminderCancellationStatus?: "cancelled" | "skipped" | "not_pending" | "failed";
   message?: string;
 }
 
@@ -154,6 +178,19 @@ function formatSpanishDate(value: string | undefined): string {
     year: "numeric",
     timeZone: "UTC",
   }).format(date);
+}
+
+function safeOnlineJoinUrl(value: string | undefined): string | undefined {
+  if (!value?.trim()) {
+    return undefined;
+  }
+
+  try {
+    const url = new URL(value.trim());
+    return url.protocol === "https:" ? url.toString() : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function isCorrectionTurn(message: string | undefined): boolean {
@@ -253,6 +290,7 @@ export function ensureDistinctMaternalyReply(input: {
   const repeatableTechnicalActions: MaternalyCopyAction[] = [
     "reset",
     "handoff",
+    "cancel_registration",
     "silent_human",
     "privacy",
     "payment",
@@ -316,6 +354,8 @@ export class MaternalyCopyRenderer {
     const mustStayDeterministic =
       input.decision.action === "catalog_info" ||
       input.decision.action === "booking_service_selection" ||
+      input.decision.action === "cancel_registration" ||
+      input.decision.action === "reservation_status" ||
       service?.category === "sensitive" ||
       input.decision.serviceQuestionFocus === "clinical_risk";
 
@@ -344,6 +384,25 @@ export class MaternalyCopyRenderer {
         return undefined;
       case "reset":
         return "Listo, conversación reiniciada. Empezamos desde cero. ¿En qué puedo ayudarte?";
+      case "cancel_registration":
+        if (input.cancellationResult?.status === "cancelled") {
+          if (input.reminderCancellationStatus === "not_pending") {
+            return "He cancelado tu inscripción y la plaza vuelve a quedar disponible. El recordatorio ya no estaba pendiente y podría encontrarse en proceso de envío, así que es posible que aún recibas ese aviso. El equipo de Maternaly lo revisará.";
+          }
+          if (input.reminderCancellationStatus === "failed") {
+            return "He cancelado tu inscripción y la plaza vuelve a quedar disponible. No he podido verificar la anulación del recordatorio, así que el equipo de Maternaly lo revisará para evitar un aviso incorrecto.";
+          }
+          return "He cancelado tu inscripción correctamente y la plaza vuelve a quedar disponible. Si quieres elegir otra fecha, dímelo y te ayudo.";
+        }
+        if (input.cancellationResult?.status === "ambiguous") {
+          return "Veo más de una inscripción activa asociada a tu teléfono y no quiero cancelar la equivocada. El equipo de Maternaly lo revisará contigo para identificar la sesión correcta.";
+        }
+        if (input.cancellationResult?.status === "not_found") {
+          return "No he encontrado una inscripción activa que pueda cancelar con seguridad. Te paso con el equipo de Maternaly para que lo compruebe sin tocar una reserva equivocada.";
+        }
+        return "No he podido completar la cancelación de forma segura en la agenda. Te paso con el equipo de Maternaly para que la gestione contigo.";
+      case "reservation_status":
+        return this.renderReservationStatus(input.registrationLookupResult);
       case "handoff":
         if (input.decision.reason === "clinical_safety_requires_professional") {
           return "Siento que estés pasando por eso. Por seguridad, esto debe revisarlo una profesional cuanto antes. No puedo hacer diagnóstico por WhatsApp, así que te paso con el equipo de Maternaly para que lo miren contigo. Si el sangrado, el dolor o cualquier síntoma importante empeora, mi recomendación es que contactes lo antes posible con tu médico o acudas a urgencias.";
@@ -546,6 +605,28 @@ export class MaternalyCopyRenderer {
       return "Te sigo 😊 Ya tengo en cuenta que tu consulta no es de embarazo ni posparto. Cuéntame qué necesitas y seguimos desde ahí.";
     }
     return "Soy Ane, la asistente virtual de Maternaly. Puedo darte información precisa sobre nuestros servicios y ayudarte a preparar una reserva. Para orientarte sin dar nada por supuesto, dime primero en qué etapa estás: EMBARAZO, POSTPARTO u OTROS. 💛";
+  }
+
+  private renderReservationStatus(
+    result: LookupNormalizedRegistrationResult | undefined,
+  ): string {
+    if (result?.status === "found") {
+      const status = result.registration.status ?? "";
+      if (normalizeCopy(status) === "lista espera") {
+        return "Acabo de comprobar la agenda vinculada: tu inscripción figura en lista de espera. No he creado ni modificado ninguna reserva al consultarlo.";
+      }
+      const confirmed = registrationStatusDomain(status) === "confirmed";
+      return confirmed
+        ? "Sí. Acabo de comprobar la agenda vinculada y tu inscripción figura activa y confirmada. No he creado ni modificado ninguna reserva al consultarlo."
+        : "Acabo de comprobar la agenda vinculada: tu inscripción figura activa, pero todavía pendiente de confirmación. No he creado ni modificado ninguna reserva al consultarlo.";
+    }
+    if (result?.status === "not_found") {
+      return "No encuentro una inscripción activa asociada a esta conversación en la agenda vinculada. No voy a crear otra automáticamente: lo dejo para que el equipo compruebe qué ha ocurrido.";
+    }
+    if (result?.status === "ambiguous") {
+      return "Veo más de una inscripción activa y no quiero darte el estado de la equivocada. El equipo de Maternaly lo revisará contigo sin modificar ninguna reserva.";
+    }
+    return "Ahora mismo no he podido comprobar el estado de tu inscripción con seguridad. No he creado ni modificado ninguna reserva y el equipo de Maternaly lo revisará.";
   }
 
   private renderBookingServiceSelection(
@@ -882,6 +963,12 @@ export class MaternalyCopyRenderer {
     }
 
     if (result.status === "manual_validation_required" && result.selectedSession) {
+      if (result.error === "charla_outside_week_1_20") {
+        return "Esta charla está dirigida a embarazadas que estarán entre las semanas 1 y 20 en la fecha de la sesión. Con los datos que me has dado, esa fecha queda fuera de ese tramo, así que no he reservado ninguna plaza. El equipo de Maternaly puede orientarte personalmente hacia la opción adecuada.";
+      }
+      if (result.error === "charla_invalid_pregnancy_dates") {
+        return "No he podido comprobar de forma segura que la fecha encaje en el tramo de semanas 1 a 20 de la charla, así que no he reservado ninguna plaza. El equipo de Maternaly revisará contigo la fecha probable de parto antes de continuar.";
+      }
       const option = resolveCharlaOption(result.selectedSession);
       const preference = [
         option?.location ?? result.selectedSession.location,
@@ -890,8 +977,8 @@ export class MaternalyCopyRenderer {
       ].filter(Boolean).join(", ");
       return [
         `Gracias, ya tengo tus datos y tu preferencia: ${preference}.`,
-        "Esa convocatoria figura en el calendario de Maternaly, pero aún no tiene una sesión operativa vinculada en la agenda. No he hecho una inscripción automática para evitar asignarte otra sede o fecha por error.",
-        `La solicitud queda pendiente de validación manual por el equipo. Si quieres contactar directamente, puedes escribir o llamar al ${MATERNALY_CONTACT.phone}, o escribir a ${MATERNALY_CONTACT.email}.`,
+        "No he podido confirmar la inscripción en la agenda ahora mismo, así que no voy a decirte que la plaza está reservada.",
+        `La solicitud queda pendiente de revisión por el equipo. Si quieres contactar directamente, puedes escribir o llamar al ${MATERNALY_CONTACT.phone}, o escribir a ${MATERNALY_CONTACT.email}.`,
       ].join("\n\n");
     }
 
@@ -899,10 +986,25 @@ export class MaternalyCopyRenderer {
     const blocked = result.plan?.blocked || !writeResult?.ok;
     if (blocked) {
       if (result.selectedSession?.full || result.plan?.blockedReasons.includes("session_full")) {
-        return "Ahora mismo esa sesión aparece sin plazas libres. Puedo dejarte en lista de espera o pasar la solicitud al equipo para revisar otra opción.";
+        return "Ahora mismo esa sesión aparece sin plazas libres. Puedo mostrarte otras fechas disponibles; si ninguna encaja, el equipo puede revisar contigo otra opción.";
       }
 
       return "Ahora mismo no puedo dejar la solicitud cerrada con seguridad. La dejo pendiente para que el equipo de Maternaly la revise con cuidado.";
+    }
+
+    if (normalizeCopy(result.plan?.existingRegistrationSheetStatus ?? "") === "lista espera") {
+      return "Ya encuentro tu inscripción en la lista de espera de esa sesión. No he creado una segunda reserva ni te he confirmado una plaza; el equipo de Maternaly te avisará si puede incorporarte.";
+    }
+
+    if (
+      writeResult?.mode === "live" &&
+      writeResult.registrationPersisted &&
+      writeResult.registrationStatus === "confirmada"
+    ) {
+      if (result.serviceKey === "charla_embarazo_1_20" && result.selectedSession) {
+        return this.renderCharlaRegistrationResult(result);
+      }
+      return "Tu inscripción ya figura activa y confirmada en la agenda. No he creado una segunda reserva.";
     }
 
     if (result.serviceKey === "charla_embarazo_1_20" && result.selectedSession) {
@@ -930,7 +1032,7 @@ export class MaternalyCopyRenderer {
     }
 
     if (result.sessions.every((session) => session.full)) {
-      return "Ahora mismo las sesiones de ese servicio aparecen sin plazas libres. Puedo dejarte en lista de espera o pasar la solicitud al equipo para revisar otra opción.";
+      return "Ahora mismo las sesiones publicadas de ese servicio aparecen sin plazas libres. No puedo darte de alta en lista de espera automáticamente desde este chat; el equipo puede revisar contigo otra opción.";
     }
 
     const serviceName = service?.name ?? MATERNALY_NORMALIZED_SERVICES[result.serviceKey].label;
@@ -1029,9 +1131,9 @@ export class MaternalyCopyRenderer {
     const session = result.selectedSession!;
     const option = resolveCharlaOption(session);
     const dateAndTime = `${formatSpanishDate(session.date)} a las ${session.startTime ?? option?.startTime ?? "hora indicada"}`;
-    const liveApplied = result.writeResult?.mode === "live" && result.writeResult.applied;
-    const opening = liveApplied
-      ? "Perfecto, tu preinscripción ha quedado registrada y pendiente de validación por el equipo."
+    const liveConfirmed = isConfirmedLiveCharlaWrite(result);
+    const opening = liveConfirmed
+      ? "Perfecto, tu reserva ha quedado confirmada."
       : "Perfecto, solicitud preparada para que el equipo la revise y valide.";
     const contact = `Si necesitas cualquier cosa, puedes contactar con Maternaly por teléfono o WhatsApp en el ${MATERNALY_CONTACT.phone}, o escribir a ${MATERNALY_CONTACT.email}.`;
 
@@ -1042,7 +1144,23 @@ export class MaternalyCopyRenderer {
       return `${opening}\n\nCharla informativa presencial en Bilbao: ${dateAndTime}.\nDirección: ${option.address}\n\n${contact}`;
     }
     if (option?.id === "online") {
-      return `${opening}\n\nCharla informativa online en directo por Zoom: ${dateAndTime}. Recibirás las claves para conectarte antes del inicio.\n\n${contact}`;
+      const joinUrl = safeOnlineJoinUrl(session.onlineJoinUrl);
+      const accessCode = session.onlineAccessCode?.trim();
+      const accessLines = [
+        joinUrl ? `Enlace de acceso: ${joinUrl}` : undefined,
+        accessCode ? `Clave de acceso: ${accessCode}` : undefined,
+      ].filter((line): line is string => Boolean(line));
+      const pendingAccessCopy = !joinUrl && !accessCode
+        ? "El equipo te enviará las claves de acceso (enlace y clave) antes del inicio."
+        : !joinUrl
+          ? "El equipo te enviará el enlace de acceso pendiente antes del inicio."
+          : !accessCode
+            ? "El equipo te enviará la clave de acceso pendiente antes del inicio."
+            : undefined;
+      const accessCopy = [...accessLines, pendingAccessCopy]
+        .filter((line): line is string => Boolean(line))
+        .join("\n");
+      return `${opening}\n\nCharla informativa online en directo por Zoom: ${dateAndTime}.\n${accessCopy}\n\n${contact}`;
     }
 
     return `${opening}\n\nCharla informativa: ${dateAndTime}.\n\n${contact}`;

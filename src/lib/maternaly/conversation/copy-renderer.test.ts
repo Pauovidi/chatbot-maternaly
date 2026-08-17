@@ -61,6 +61,31 @@ function charlaSession(input: {
 }
 
 describe("MaternalyCopyRenderer availability guardrails", () => {
+  it("does not promise that a reminder was cancelled when that step failed", () => {
+    const reply = new MaternalyCopyRenderer().render({
+      decision: { action: "cancel_registration" },
+      cancellationResult: { status: "cancelled" },
+      reminderCancellationStatus: "failed",
+    }) ?? "";
+
+    expect(reply).toMatch(/he cancelado tu inscripci[oó]n/i);
+    expect(reply).toMatch(/no he podido verificar.*recordatorio/i);
+    expect(reply).not.toMatch(/no recibir[aá]s el recordatorio/i);
+  });
+
+  it("warns when the registration is cancelled after the reminder stopped being pending", () => {
+    const reply = new MaternalyCopyRenderer().render({
+      decision: { action: "cancel_registration" },
+      cancellationResult: { status: "cancelled" },
+      reminderCancellationStatus: "not_pending",
+    }) ?? "";
+
+    expect(reply).toMatch(/he cancelado tu inscripci[oó]n/i);
+    expect(reply).toMatch(/podr[ií]a encontrarse en proceso de env[ií]o/i);
+    expect(reply).toMatch(/es posible que a[uú]n recibas/i);
+    expect(reply).not.toMatch(/cancelado.*recordatorio correctamente/i);
+  });
+
   it("renders sessions instead of availability fallback when sessions are present", () => {
     const renderer = new MaternalyCopyRenderer();
     const toolResult: MaternalyCopyToolResult = {
@@ -310,7 +335,7 @@ describe("MaternalyCopyRenderer availability guardrails", () => {
     expect(reply).toMatch(/Jos[eé] Luis Goyoaga 32[\s\S]*timbre 112/i);
   });
 
-  it("uses pending-pre-registration wording for a live Charla result", () => {
+  it("confirms a live Charla registration after the append succeeds", () => {
     const renderer = new MaternalyCopyRenderer();
     const reply = renderer.render({
       decision: { action: "normalized_registration", serviceKey: "charla_embarazo_1_20" },
@@ -332,10 +357,140 @@ describe("MaternalyCopyRenderer availability guardrails", () => {
       },
     }) ?? "";
 
-    expect(reply).toMatch(/preinscripci[oó]n.*registrada.*pendiente de validaci[oó]n/i);
-    expect(reply).not.toMatch(/plaza confirmada/i);
+    expect(reply).toMatch(/reserva.*confirmada/i);
+    expect(reply).not.toMatch(/preinscripci[oó]n|pendiente de validaci[oó]n/i);
     expect(reply).toMatch(/online en directo por Zoom/i);
-    expect(reply).toMatch(/claves.*antes del inicio/i);
+    expect(reply).toMatch(/enlace.*clave.*antes del inicio/i);
+  });
+
+  it("reports an existing active BLW row as confirmed instead of pending", () => {
+    const renderer = new MaternalyCopyRenderer();
+    const selectedSession = {
+      ...charlaSession({
+        id: "sesion_blw_bilbao_20260925",
+        groupId: "grupo_blw_bilbao",
+        location: "Bilbao",
+        modality: "presencial",
+        date: "2026-09-25",
+        startTime: "17:00",
+      }),
+      serviceKey: "taller_blw" as const,
+      serviceLabel: "Taller BLW",
+    };
+    const reply = renderer.render({
+      decision: { action: "normalized_registration", serviceKey: "taller_blw" },
+      toolResult: {
+        status: "write_result",
+        serviceKey: "taller_blw",
+        sessions: [selectedSession],
+        selectedSession,
+        missingFields: [],
+        plan: { blocked: false, blockedReasons: [] },
+        writeResult: {
+          ok: true,
+          mode: "live",
+          applied: false,
+          registrationPersisted: true,
+          registrationStatus: "confirmada",
+        },
+      },
+    }) ?? "";
+
+    expect(reply).toMatch(/activa y confirmada/i);
+    expect(reply).not.toMatch(/pendiente|no queda cerrada/i);
+  });
+
+  it("uses only reliable online access data from the selected session", () => {
+    const renderer = new MaternalyCopyRenderer();
+    const session = charlaSession({
+      id: "sesion_charla_online_20260810",
+      groupId: "grupo_charla_online",
+      location: "online",
+      modality: "online",
+      date: "2026-08-10",
+      startTime: "19:00",
+    });
+    session.onlineJoinUrl = "https://zoom.example.test/j/123456";
+    session.onlineAccessCode = "MATERNALY-26";
+
+    const reply = renderer.render({
+      decision: { action: "normalized_registration", serviceKey: "charla_embarazo_1_20" },
+      toolResult: {
+        status: "write_result",
+        serviceKey: "charla_embarazo_1_20",
+        sessions: [],
+        selectedSession: session,
+        missingFields: [],
+        plan: { blocked: false, blockedReasons: [] },
+        writeResult: { ok: true, mode: "live", applied: true },
+      },
+    }) ?? "";
+
+    expect(reply).toContain("Enlace de acceso: https://zoom.example.test/j/123456");
+    expect(reply).toContain("Clave de acceso: MATERNALY-26");
+    expect(reply).not.toMatch(/te enviar[aá].*enlace/i);
+  });
+
+  it.each([
+    {
+      label: "only a reliable link",
+      joinUrl: "https://zoom.example.test/j/123456",
+      accessCode: undefined,
+      expectedData: "Enlace de acceso: https://zoom.example.test/j/123456",
+      expectedPending: /enviará la clave de acceso pendiente/i,
+      forbiddenData: /Clave de acceso:/i,
+    },
+    {
+      label: "only an access code",
+      joinUrl: undefined,
+      accessCode: "MATERNALY-26",
+      expectedData: "Clave de acceso: MATERNALY-26",
+      expectedPending: /enviará el enlace de acceso pendiente/i,
+      forbiddenData: /Enlace de acceso:/i,
+    },
+    {
+      label: "an insecure link and an access code",
+      joinUrl: "http://zoom.example.test/j/123456",
+      accessCode: "MATERNALY-26",
+      expectedData: "Clave de acceso: MATERNALY-26",
+      expectedPending: /enviará el enlace de acceso pendiente/i,
+      forbiddenData: /http:\/\//i,
+    },
+  ])("does not present partial online credentials as sufficient with $label", ({
+    joinUrl,
+    accessCode,
+    expectedData,
+    expectedPending,
+    forbiddenData,
+  }) => {
+    const renderer = new MaternalyCopyRenderer();
+    const session = charlaSession({
+      id: "sesion_charla_online_20260810",
+      groupId: "grupo_charla_online",
+      location: "online",
+      modality: "online",
+      date: "2026-08-10",
+      startTime: "19:00",
+    });
+    session.onlineJoinUrl = joinUrl;
+    session.onlineAccessCode = accessCode;
+
+    const reply = renderer.render({
+      decision: { action: "normalized_registration", serviceKey: "charla_embarazo_1_20" },
+      toolResult: {
+        status: "write_result",
+        serviceKey: "charla_embarazo_1_20",
+        sessions: [],
+        selectedSession: session,
+        missingFields: [],
+        plan: { blocked: false, blockedReasons: [] },
+        writeResult: { ok: true, mode: "live", applied: true },
+      },
+    }) ?? "";
+
+    expect(reply).toContain(expectedData);
+    expect(reply).toMatch(expectedPending);
+    expect(reply).not.toMatch(forbiddenData);
   });
 
   it("keeps reset copy technical even when the same acknowledgement was already sent", () => {

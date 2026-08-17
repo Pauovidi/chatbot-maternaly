@@ -7,7 +7,13 @@ import {
   readTwilioWhatsAppConfig,
   sendTwilioWhatsAppText,
 } from "@/lib/hotel/twilio/client";
-import { handleInboundMaternalyWhatsApp } from "@/lib/maternaly/conversation/twilio-inbound";
+import {
+  handleInboundMaternalyWhatsApp,
+  recordMaternalyOutboundDeliveryUncertain,
+  recordMaternalyServiceMediaDispatchOutcome,
+  type MaternalyServiceMediaDispatchOutcome,
+} from "@/lib/maternaly/conversation/twilio-inbound";
+import { buildMaternalyMediaMessageResponse } from "@/lib/maternaly/conversation/outbox";
 import {
   MATERNALY_SAFE_FALLBACK,
   containsLegacyHotelKnowledge,
@@ -147,21 +153,113 @@ function logTwilioWebhook(event: Record<string, unknown>) {
   console.info("[twilio:webhook]", JSON.stringify(event));
 }
 
+async function recordMediaDispatchSafely(
+  input: MaternalyServiceMediaDispatchOutcome,
+): Promise<void> {
+  try {
+    await recordMaternalyServiceMediaDispatchOutcome(input);
+  } catch (error) {
+    logTwilioWebhook({
+      result: "media_dispatch_observability_failed",
+      conversationId: input.conversationId,
+      messageId: input.messageId,
+      outcome: input.outcome,
+      transport: input.transport,
+      errorType: error instanceof Error ? error.name : typeof error,
+    });
+  }
+}
+
+async function recordOutboundDeliveryUncertainSafely(input: {
+  conversationId: string;
+  messageId: string;
+  error?: string;
+}): Promise<void> {
+  try {
+    await recordMaternalyOutboundDeliveryUncertain({
+      ...input,
+      transport: "twilio_rest_api",
+    });
+  } catch (error) {
+    logTwilioWebhook({
+      result: "outbound_delivery_reconciliation_persistence_failed",
+      conversationId: input.conversationId,
+      messageId: input.messageId,
+      errorType: error instanceof Error ? error.name : typeof error,
+    });
+  }
+}
+
 async function deliverTwilioReply(input: {
   to: string;
   body: string;
   mediaUrl?: string;
-}): Promise<{ delivered: boolean; sidPresent: boolean; error?: string }> {
+}): Promise<{ delivered: boolean; sidPresent: boolean; ambiguous: boolean; error?: string }> {
   const config = readTwilioWhatsAppConfig();
   if (config.mock) {
-    return { delivered: false, sidPresent: false };
+    return { delivered: false, sidPresent: false, ambiguous: false };
   }
 
   const result = await sendTwilioWhatsAppText(input, config);
   return {
     delivered: result.ok,
     sidPresent: Boolean(result.sid),
+    ambiguous: Boolean(result.ambiguous),
     error: result.error,
+  };
+}
+
+async function deliverTwilioReplySequence(input: {
+  to: string;
+  body: string;
+  mediaUrl?: string;
+  mediaPrefaceText?: string;
+}): Promise<{
+  delivered: boolean;
+  sidPresent: boolean;
+  prefaceDelivered: boolean;
+  messagesDelivered: number;
+  ambiguous: boolean;
+  error?: string;
+}> {
+  const prefaceText = input.mediaUrl ? input.mediaPrefaceText?.trim() : undefined;
+  if (!prefaceText) {
+    const delivery = await deliverTwilioReply({
+      to: input.to,
+      body: input.body,
+      mediaUrl: input.mediaUrl,
+    });
+    return {
+      ...delivery,
+      prefaceDelivered: false,
+      messagesDelivered: delivery.delivered ? 1 : 0,
+    };
+  }
+
+  const preface = await deliverTwilioReply({
+    to: input.to,
+    body: prefaceText,
+  });
+  if (!preface.delivered) {
+    return {
+      ...preface,
+      prefaceDelivered: false,
+      messagesDelivered: 0,
+    };
+  }
+
+  const poster = await deliverTwilioReply({
+    to: input.to,
+    body: input.body,
+    mediaUrl: input.mediaUrl,
+  });
+  return {
+    delivered: poster.delivered,
+    sidPresent: preface.sidPresent || poster.sidPresent,
+    prefaceDelivered: true,
+    messagesDelivered: poster.delivered ? 2 : 1,
+    ambiguous: poster.ambiguous,
+    error: poster.error,
   };
 }
 
@@ -294,22 +392,111 @@ export async function POST(request: Request) {
       const outboundBody = containsLegacyHotelKnowledge(result.botReply.body)
         ? MATERNALY_SAFE_FALLBACK
         : result.botReply.body;
-      const delivery = await deliverTwilioReply({
+      const outboundMedia = result.outboundMedia?.[0];
+      const delivery = await deliverTwilioReplySequence({
         to: from,
         body: outboundBody,
-        mediaUrl: result.outboundMedia?.[0]?.url,
+        mediaUrl: outboundMedia?.url,
+        mediaPrefaceText: outboundMedia?.prefaceText,
       });
       logTwilioWebhook({
         ...requestLog,
-        result: delivery.delivered ? "outbound_queued" : "outbound_api_fallback_to_twiml",
+        result: delivery.delivered
+          ? "outbound_queued"
+          : delivery.ambiguous
+            ? "outbound_delivery_ambiguous"
+            : "outbound_api_fallback_to_twiml",
         conversationId: result.conversation.id,
-        deliveryMode: delivery.delivered ? "twilio_rest_api" : "twiml",
+        deliveryMode: delivery.delivered
+          ? "twilio_rest_api"
+          : delivery.ambiguous
+            ? "twilio_rest_api_ambiguous"
+            : "twiml",
         outboundSidPresent: delivery.sidPresent,
+        prefaceDelivered: delivery.prefaceDelivered,
+        messagesDelivered: delivery.messagesDelivered,
         error: delivery.error,
       });
       if (delivery.delivered) {
+        if (outboundMedia) {
+          await recordMediaDispatchSafely({
+            conversationId: result.conversation.id,
+            messageId: result.botReply.id,
+            media: [outboundMedia],
+            outcome: "queued",
+            transport: "twilio_rest_api",
+            prefaceTransport: outboundMedia.prefaceText
+              ? "twilio_rest_api"
+              : "not_required",
+            posterTransport: "twilio_rest_api",
+            providerSidPresent: delivery.sidPresent,
+          });
+        }
         return new NextResponse(buildTwilioMessageResponse(), {
           headers: TWILIO_XML_HEADERS,
+        });
+      }
+      if (delivery.ambiguous) {
+        await recordOutboundDeliveryUncertainSafely({
+          conversationId: result.conversation.id,
+          messageId: result.botReply.id,
+          error: delivery.error,
+        });
+        if (outboundMedia) {
+          await recordMediaDispatchSafely({
+            conversationId: result.conversation.id,
+            messageId: result.botReply.id,
+            media: [outboundMedia],
+            outcome: "failed",
+            transport: "twilio_rest_api",
+            prefaceTransport: delivery.prefaceDelivered
+              ? "twilio_rest_api"
+              : outboundMedia.prefaceText
+                ? "twilio_rest_api"
+                : "not_required",
+            posterTransport: "twilio_rest_api",
+            providerSidPresent: delivery.sidPresent,
+            error: `${delivery.error ?? "twilio_delivery_ambiguous"}; no TwiML fallback to avoid duplicate delivery`,
+          });
+        }
+        return new NextResponse(buildTwilioMessageResponse(), {
+          headers: TWILIO_XML_HEADERS,
+        });
+      }
+      if (delivery.prefaceDelivered && outboundMedia) {
+        const posterTwiml = buildSafeMaternalyTwilioResponse(
+          buildMaternalyMediaMessageResponse(outboundBody, outboundMedia.url),
+        );
+        await recordMediaDispatchSafely({
+          conversationId: result.conversation.id,
+          messageId: result.botReply.id,
+          media: [outboundMedia],
+          outcome: posterTwiml.includes("<Media>") ? "queued" : "failed",
+          transport: "twiml",
+          prefaceTransport: "twilio_rest_api",
+          posterTransport: "twiml",
+          providerSidPresent: delivery.sidPresent,
+          error: delivery.error,
+        });
+        return new NextResponse(
+          posterTwiml,
+          { headers: TWILIO_XML_HEADERS },
+        );
+      }
+
+      if (outboundMedia) {
+        const queuedViaTwiml = safeTwiml.includes("<Media>")
+          && safeTwiml.includes(outboundMedia.url);
+        await recordMediaDispatchSafely({
+          conversationId: result.conversation.id,
+          messageId: result.botReply.id,
+          media: [outboundMedia],
+          outcome: queuedViaTwiml ? "queued" : "failed",
+          transport: "twiml",
+          prefaceTransport: outboundMedia.prefaceText ? "twiml" : "not_required",
+          posterTransport: "twiml",
+          providerSidPresent: delivery.sidPresent,
+          error: delivery.error,
         });
       }
     }
@@ -334,6 +521,17 @@ export async function POST(request: Request) {
         result: "fallback_outbound_queued",
         deliveryMode: "twilio_rest_api",
         outboundSidPresent: delivery.sidPresent,
+      });
+      return new NextResponse(buildTwilioMessageResponse(), {
+        headers: TWILIO_XML_HEADERS,
+      });
+    }
+    if (delivery.ambiguous) {
+      logTwilioWebhook({
+        ...requestLog,
+        result: "fallback_delivery_ambiguous",
+        deliveryMode: "twilio_rest_api_ambiguous",
+        error: delivery.error,
       });
       return new NextResponse(buildTwilioMessageResponse(), {
         headers: TWILIO_XML_HEADERS,

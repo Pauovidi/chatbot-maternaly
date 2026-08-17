@@ -12,6 +12,7 @@ export interface MaternalyOutboundMedia {
   serviceId: "charla_embarazo_1_20" | "taller_blw";
   alt: string;
   url: string;
+  prefaceText?: string;
   triggerKind?: "catalog" | "explicit_service" | "contextual_service";
 }
 
@@ -76,6 +77,18 @@ function buildMaternalyTwiml(
     return buildTwilioMessageResponse(text);
   }
 
-  const mediaNodes = `<Media>${escapeXml(media[0].url)}</Media>`;
-  return `<?xml version="1.0" encoding="UTF-8"?><Response><Message><Body>${escapeXml(text)}</Body>${mediaNodes}</Message></Response>`;
+  const posterMessage = buildMaternalyMediaMessageNode(text, media[0].url);
+  const prefaceText = media[0].prefaceText?.trim();
+  const prefaceMessage = prefaceText
+    ? `<Message><Body>${escapeXml(prefaceText)}</Body></Message>`
+    : "";
+  return `<?xml version="1.0" encoding="UTF-8"?><Response>${prefaceMessage}${posterMessage}</Response>`;
+}
+
+function buildMaternalyMediaMessageNode(text: string, mediaUrl: string): string {
+  return `<Message><Body>${escapeXml(text)}</Body><Media>${escapeXml(mediaUrl)}</Media></Message>`;
+}
+
+export function buildMaternalyMediaMessageResponse(text: string, mediaUrl: string): string {
+  return `<?xml version="1.0" encoding="UTF-8"?><Response>${buildMaternalyMediaMessageNode(text, mediaUrl)}</Response>`;
 }

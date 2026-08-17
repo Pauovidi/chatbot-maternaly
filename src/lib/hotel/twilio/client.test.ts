@@ -127,10 +127,11 @@ describe("twilio whatsapp client", () => {
     fetchMock.mockRestore();
   });
 
-  it("returns a non-throwing failure when the network request fails", async () => {
+  it("marks a definite pre-send network failure as safe for fallback", async () => {
+    const cause = Object.assign(new Error("dns lookup failed"), { code: "ENOTFOUND" });
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
-      .mockRejectedValueOnce(new Error("network down"));
+      .mockRejectedValueOnce(Object.assign(new TypeError("fetch failed"), { cause }));
 
     const result = await sendTwilioWhatsAppText(
       { to: "+34612345678", body: "Hola" },
@@ -146,7 +147,66 @@ describe("twilio whatsapp client", () => {
     expect(fetchMock).toHaveBeenCalledOnce();
     expect(result.ok).toBe(false);
     expect(result.mode).toBe("real");
+    expect(result.ambiguous).toBe(false);
     expect(result.error).toBe("Twilio network request failed.");
+    fetchMock.mockRestore();
+  });
+
+  it("marks a connection reset as ambiguous after the POST may have been accepted", async () => {
+    const cause = Object.assign(new Error("connection reset"), { code: "ECONNRESET" });
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(
+      Object.assign(new TypeError("fetch failed"), { cause }),
+    );
+
+    await expect(
+      sendTwilioWhatsAppText(
+        { to: "+34612345678", body: "Hola" },
+        {
+          accountSid: "AC_test",
+          authToken: "token",
+          from: "+15551234567",
+          mock: false,
+          providerMode: "real",
+        },
+      ),
+    ).resolves.toMatchObject({
+      ok: false,
+      mode: "real",
+      ambiguous: true,
+    });
+    fetchMock.mockRestore();
+  });
+
+  it("aborts a stalled Twilio request before the webhook can hang indefinitely", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementationOnce(
+      (_url, init) => new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => {
+          const error = new Error("aborted");
+          error.name = "AbortError";
+          reject(error);
+        });
+      }),
+    );
+
+    const result = await sendTwilioWhatsAppText(
+      { to: "+34612345678", body: "Hola" },
+      {
+        accountSid: "AC_test",
+        authToken: "token",
+        from: "+15551234567",
+        mock: false,
+        providerMode: "real",
+        requestTimeoutMs: 5,
+      },
+    );
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(result).toEqual({
+      ok: false,
+      mode: "real",
+      ambiguous: true,
+      error: "Twilio request timed out.",
+    });
     fetchMock.mockRestore();
   });
 });

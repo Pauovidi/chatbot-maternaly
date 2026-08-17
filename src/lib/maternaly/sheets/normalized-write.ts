@@ -5,17 +5,23 @@ import {
   type NormalizedServiceSheetSnapshot,
   type NormalizedSheetsClient,
 } from "@/lib/maternaly/sheets/normalized-client";
-import type { NormalizedAvailableSession } from "@/lib/maternaly/sheets/normalized-availability";
+import {
+  registrationIsOpen,
+  type NormalizedAvailableSession,
+} from "@/lib/maternaly/sheets/normalized-availability";
 import {
   MATERNALY_NORMALIZED_SERVICES,
   NORMALIZED_COLUMN_ALIASES,
   getCell,
   hasColumn,
+  humanNormalize,
   normalizeSheetText,
   normalizePhoneForMatch,
+  registrationStatusDomain,
   rowsToObjects,
   type MaternalyNormalizedServiceKey,
   type NormalizedColumnKey,
+  type NormalizedRow,
 } from "@/lib/maternaly/sheets/normalized-template";
 
 export interface NormalizedRegistrationDraft {
@@ -45,10 +51,13 @@ export interface NormalizedRegistrationWritePlan {
   idempotencyKey: string;
   blocked: boolean;
   blockedReasons: string[];
+  alreadyPersisted: boolean;
+  registrationStatus: "preinscrita" | "confirmada";
+  existingRegistrationSheetStatus?: string;
   operations: NormalizedRegistrationWriteOperation[];
   session: Pick<
     NormalizedAvailableSession,
-    "sessionId" | "groupId" | "date" | "startTime" | "availableSeats" | "availabilityStatus"
+    "sessionId" | "groupId" | "date" | "startTime" | "capacityTotal" | "availableSeats" | "availabilityStatus"
   >;
 }
 
@@ -56,6 +65,9 @@ export interface NormalizedRegistrationWriteResult {
   ok: boolean;
   applied: boolean;
   mode: "dry_run" | "live";
+  registrationPersisted: boolean;
+  registrationStatus?: "preinscrita" | "confirmada";
+  registrationId?: string;
   blockedReason?: string;
   plan: NormalizedRegistrationWritePlan;
   updatedRanges: string[];
@@ -122,26 +134,119 @@ function findClient(snapshot: NormalizedServiceSheetSnapshot, phone?: string) {
   );
 }
 
-function hasExistingRegistration(
-  snapshot: NormalizedServiceSheetSnapshot,
-  input: { idempotencyKey: string; registrationId: string },
+function normalizedPersistedRegistrationStatus(
+  value: string,
+): "preinscrita" | "confirmada" {
+  return registrationStatusDomain(value) === "confirmed"
+    ? "confirmada"
+    : "preinscrita";
+}
+
+function sheetRegistrationStatus(
+  value: "preinscrita" | "confirmada",
+): "Activa" | "Pendiente confirmar" {
+  return value === "confirmada" ? "Activa" : "Pendiente confirmar";
+}
+
+export function buildNormalizedRegistrationId(input: {
+  serviceKey: MaternalyNormalizedServiceKey;
+  phone?: string;
+  sessionId: string;
+}): string {
+  return buildSyntheticIds(buildIdempotencyKey(input)).registrationId;
+}
+
+function rowMatchesRegistrationSession(
+  row: NormalizedRow,
+  input: { sessionId: string; groupId: string },
 ): boolean {
-  return snapshot.tabs.Inscripciones.rows.some((row) => {
-    const notes = getCell(row, "notes");
-    return (
-      getCell(row, "idempotencyKey") === input.idempotencyKey ||
-      getCell(row, "registrationId") === input.registrationId ||
-      notes.includes(input.idempotencyKey) ||
-      notes.includes(input.registrationId)
-    );
+  const rowSessionId = getCell(row, "sessionId");
+  const rowGroupId = getCell(row, "groupId");
+  const notesSessionId = /\bsession\s*:\s*([^|\s]+)\b/i.exec(getCell(row, "notes"))?.[1];
+  if (
+    input.groupId &&
+    rowGroupId &&
+    humanNormalize(rowGroupId) === humanNormalize(input.groupId)
+  ) {
+    return true;
+  }
+  if (rowSessionId || notesSessionId) {
+    return humanNormalize(rowSessionId || notesSessionId || "") === humanNormalize(input.sessionId);
+  }
+
+  return Boolean(
+    input.groupId &&
+    humanNormalize(rowGroupId) === humanNormalize(input.groupId),
+  );
+}
+
+function rowMatchesRegistrationIdentity(
+  row: NormalizedRow,
+  input: {
+    idempotencyKey: string;
+    registrationId: string;
+    phone?: string;
+    sessionId: string;
+    groupId: string;
+  },
+): boolean {
+  const notes = getCell(row, "notes");
+  const technicalMatch =
+    getCell(row, "idempotencyKey") === input.idempotencyKey ||
+    getCell(row, "registrationId") === input.registrationId ||
+    notes.includes(input.idempotencyKey) ||
+    notes.includes(input.registrationId);
+  if (technicalMatch) {
+    return true;
+  }
+
+  const normalizedPhone = normalizePhoneForMatch(input.phone ?? "");
+  return Boolean(
+    normalizedPhone &&
+    normalizePhoneForMatch(getCell(row, "phone")) === normalizedPhone &&
+    rowMatchesRegistrationSession(row, input),
+  );
+}
+
+function registrationPeopleCount(row: NormalizedRow): number {
+  const direct = Number.parseInt(getCell(row, "peopleCount"), 10);
+  const notes = /\bpersonas?\s*:\s*(\d+)\b/i.exec(getCell(row, "notes"))?.[1];
+  const notesCount = notes ? Number.parseInt(notes, 10) : Number.NaN;
+  if (Number.isFinite(direct) && direct > 0) {
+    return direct;
+  }
+  if (Number.isFinite(notesCount) && notesCount > 0) {
+    return notesCount;
+  }
+  return getCell(row, "partnerName").trim() ? 2 : 1;
+}
+
+function findExistingRegistration(
+  snapshot: NormalizedServiceSheetSnapshot,
+  input: {
+    idempotencyKey: string;
+    registrationId: string;
+    phone?: string;
+    sessionId: string;
+    groupId: string;
+  },
+): NormalizedRow | undefined {
+  return snapshot.tabs.Inscripciones.rows.find((row) => {
+    if (!registrationIsOpen(getCell(row, "status"))) {
+      return false;
+    }
+    return rowMatchesRegistrationIdentity(row, input);
   });
 }
 
-async function hasExistingRegistrationInSheet(input: {
+async function findExistingRegistrationInSheet(input: {
   client: NormalizedSheetsClient;
   sheetId: string;
   idempotencyKey: string;
-}): Promise<boolean> {
+  phone?: string;
+  sessionId: string;
+  groupId: string;
+}): Promise<NormalizedRow | undefined> {
   const parsed = rowsToObjects(
     await input.client.readTabRows(input.sheetId, "Inscripciones"),
     { tab: "Inscripciones" },
@@ -151,13 +256,10 @@ async function hasExistingRegistrationInSheet(input: {
   }
 
   const registrationId = buildSyntheticIds(input.idempotencyKey).registrationId;
-  return parsed.rows.some((row) => {
-    const notes = getCell(row, "notes");
+  return parsed.rows.find((row) => {
     return (
-      getCell(row, "idempotencyKey") === input.idempotencyKey ||
-      getCell(row, "registrationId") === registrationId ||
-      notes.includes(input.idempotencyKey) ||
-      notes.includes(registrationId)
+      registrationIsOpen(getCell(row, "status")) &&
+      rowMatchesRegistrationIdentity(row, { ...input, registrationId })
     );
   });
 }
@@ -242,12 +344,14 @@ function formatMissingColumns(
   ].join(":");
 }
 
-function requiredColumnsPresent(snapshot: NormalizedServiceSheetSnapshot): string[] {
+function requiredColumnsPresent(
+  snapshot: NormalizedServiceSheetSnapshot,
+  tabs: NormalizedRegistrationWriteOperation["tab"][],
+): string[] {
   const errors: string[] = [];
 
-  for (const [tab, requirements] of Object.entries(WRITE_COLUMN_REQUIREMENTS) as Array<
-    [NormalizedRegistrationWriteOperation["tab"], ColumnRequirement[]]
-  >) {
+  for (const tab of tabs) {
+    const requirements = WRITE_COLUMN_REQUIREMENTS[tab];
     const headers = snapshot.tabs[tab].headers;
     const missing = requirements.filter((requirement) => !hasAnyColumn(headers, requirement.alternatives));
     if (missing.length > 0) {
@@ -293,6 +397,7 @@ function baseValues(input: {
   registrationId: string;
   interactionId: string;
   createdAt: string;
+  registrationStatus: "preinscrita" | "confirmada";
 }) {
   const service = MATERNALY_NORMALIZED_SERVICES[input.draft.serviceKey];
   const { firstName, lastName } = splitFullName(input.draft.fullName);
@@ -307,6 +412,7 @@ function baseValues(input: {
   const paymentStatus = input.draft.serviceKey === "charla_embarazo_1_20"
     ? "no_aplica"
     : "pendiente";
+  const persistedSheetStatus = sheetRegistrationStatus(input.registrationStatus);
 
   return {
     serviceId: input.workbookServiceId,
@@ -330,7 +436,7 @@ function baseValues(input: {
     fppOrDueDate: input.draft.fppOrDueDate,
     partnerName: input.draft.partnerName,
     source,
-    status: "preinscrita",
+    status: persistedSheetStatus,
     paymentStatus,
     price,
     notes,
@@ -363,9 +469,9 @@ function baseValues(input: {
     pareja_nombre: input.draft.partnerName,
     canal_origen: source,
     canal: source,
-    estado: "Preinscrita",
+    estado: persistedSheetStatus,
     estado_cliente: "lead",
-    estado_inscripcion: "preinscrita",
+    estado_inscripcion: persistedSheetStatus,
     estado_pago: paymentStatus,
     precio_acordado: price,
     observaciones: notes,
@@ -402,24 +508,67 @@ export function buildRegistrationWritePlan(input: {
     config.liveSheetsWriteEnabled &&
     normalizedConfig.writeMode === "live";
   const allowlisted = normalizedConfig.sheetIds.includes(input.snapshot.sheetId);
+  const existingRegistration = findExistingRegistration(input.snapshot, {
+    idempotencyKey,
+    registrationId: generatedIds.registrationId,
+    phone: input.draft.phone,
+    sessionId: input.session.sessionId,
+    groupId: input.session.groupId,
+  });
+  const alreadyPersisted = Boolean(existingRegistration);
+  const persistedStatus = existingRegistration
+    ? normalizedPersistedRegistrationStatus(getCell(existingRegistration, "status"))
+    : undefined;
+  const persistedRegistrationId = existingRegistration
+    ? getCell(existingRegistration, "registrationId") || generatedIds.registrationId
+    : generatedIds.registrationId;
+  const existingRegistrationDetailsMismatch = Boolean(
+    existingRegistration &&
+    (registrationPeopleCount(existingRegistration) !== input.draft.peopleCount ||
+      (input.draft.partnerName?.trim() &&
+        humanNormalize(getCell(existingRegistration, "partnerName")) !==
+          humanNormalize(input.draft.partnerName))),
+  );
+  const validPeopleCount = input.draft.peopleCount === 1 || input.draft.peopleCount === 2;
+  const interactionColumnsReady = requiredColumnsPresent(
+    input.snapshot,
+    ["Interacciones_Chatbot"],
+  ).length === 0;
   const blockedReasons = [
     !normalizedConfig.enabled ? "normalized_sheets_disabled" : "",
     !input.draft.fullName?.trim() ? "missing_full_name" : "",
     !input.draft.phone?.trim() ? "missing_phone" : "",
-    input.session.full ? "session_full" : "",
-    input.session.availableSeats !== undefined && input.session.availableSeats < input.draft.peopleCount
+    !validPeopleCount ? "invalid_people_count" : "",
+    existingRegistrationDetailsMismatch ? "existing_registration_details_mismatch" : "",
+    !alreadyPersisted && input.session.full ? "session_full" : "",
+    !alreadyPersisted &&
+    input.session.availableSeats !== undefined &&
+    input.session.availableSeats < input.draft.peopleCount
       ? "not_enough_available_seats"
       : "",
-    input.session.availabilityStatus === "unknown_capacity" ? "unknown_capacity_requires_manual_review" : "",
-    hasExistingRegistration(input.snapshot, {
-      idempotencyKey,
-      registrationId: generatedIds.registrationId,
-    })
-      ? "duplicate_idempotency_key"
+    !alreadyPersisted && input.session.availabilityStatus === "unknown_capacity"
+      ? "unknown_capacity_requires_manual_review"
       : "",
     !allowlisted ? "sheet_not_allowlisted" : "",
-    ...requiredColumnsPresent(input.snapshot),
+    ...(!alreadyPersisted
+      ? requiredColumnsPresent(input.snapshot, ["Clientes_Local", "Inscripciones"])
+      : []),
   ].filter(Boolean);
+
+  const clientExists = Boolean(existingClient);
+  const blocked = blockedReasons.length > 0;
+  const confirmsCharlaRegistration = input.draft.serviceKey === "charla_embarazo_1_20" &&
+    ((alreadyPersisted && !existingRegistrationDetailsMismatch && persistedStatus === "confirmada") ||
+      (!alreadyPersisted && liveFlagsReady && allowlisted && !blocked));
+  const registrationStatus = persistedStatus ?? (confirmsCharlaRegistration ? "confirmada" : "preinscrita");
+  const result = blocked ? "blocked" : confirmsCharlaRegistration ? "confirmed" : "prepared";
+  const blockedReasonText = blockedReasons.join("|");
+  const registrationEvent = confirmsCharlaRegistration
+    ? "maternaly_registration_confirmed"
+    : "maternaly_registration_write_plan";
+  const interactionEvent = confirmsCharlaRegistration
+    ? "maternaly_registration_confirmed"
+    : "maternaly_normalized_registration_write_plan";
 
   const base = baseValues({
     draft: input.draft,
@@ -427,14 +576,11 @@ export function buildRegistrationWritePlan(input: {
     workbookServiceId: getNormalizedWorkbookServiceId(input.snapshot),
     idempotencyKey,
     clientId,
-    registrationId: generatedIds.registrationId,
+    registrationId: persistedRegistrationId,
     interactionId: generatedIds.interactionId,
     createdAt: new Date().toISOString(),
+    registrationStatus,
   });
-  const clientExists = Boolean(existingClient);
-  const blocked = blockedReasons.length > 0;
-  const result = blocked ? "blocked" : "prepared";
-  const blockedReasonText = blockedReasons.join("|");
 
   return {
     serviceKey: input.draft.serviceKey,
@@ -444,10 +590,15 @@ export function buildRegistrationWritePlan(input: {
     idempotencyKey,
     blocked,
     blockedReasons,
+    alreadyPersisted,
+    registrationStatus,
+    existingRegistrationSheetStatus: existingRegistration
+      ? getCell(existingRegistration, "status")
+      : undefined,
     operations: [
       {
         tab: "Clientes_Local",
-        operation: clientExists || blocked ? "noop" : "append",
+        operation: clientExists || blocked || alreadyPersisted ? "noop" : "append",
         values: {
           ...base,
           status: "lead",
@@ -461,28 +612,28 @@ export function buildRegistrationWritePlan(input: {
       },
       {
         tab: "Inscripciones",
-        operation: blocked ? "noop" : "append",
+        operation: blocked || alreadyPersisted ? "noop" : "append",
         values: {
           ...base,
-          status: "preinscrita",
-          estado: "Preinscrita",
-          estado_inscripcion: "preinscrita",
-          event: "maternaly_registration_write_plan",
-          accion_realizada: "maternaly_registration_write_plan",
+          status: sheetRegistrationStatus(registrationStatus),
+          estado: sheetRegistrationStatus(registrationStatus),
+          estado_inscripcion: sheetRegistrationStatus(registrationStatus),
+          event: registrationEvent,
+          accion_realizada: registrationEvent,
           result,
           resultado: result,
         },
       },
       {
         tab: "Interacciones_Chatbot",
-        operation: "append",
+        operation: alreadyPersisted || !interactionColumnsReady ? "noop" : "append",
         values: {
           ...base,
           status: result,
           estado: result,
-          event: blocked ? "maternaly_normalized_registration_blocked" : "maternaly_normalized_registration_write_plan",
-          evento: blocked ? "maternaly_normalized_registration_blocked" : "maternaly_normalized_registration_write_plan",
-          accion_realizada: blocked ? "maternaly_normalized_registration_blocked" : "maternaly_normalized_registration_write_plan",
+          event: blocked ? "maternaly_normalized_registration_blocked" : interactionEvent,
+          evento: blocked ? "maternaly_normalized_registration_blocked" : interactionEvent,
+          accion_realizada: blocked ? "maternaly_normalized_registration_blocked" : interactionEvent,
           result,
           resultado: result,
           requiresHuman: blocked ? "si" : "no",
@@ -500,6 +651,7 @@ export function buildRegistrationWritePlan(input: {
       groupId: input.session.groupId,
       date: input.session.date,
       startTime: input.session.startTime,
+      capacityTotal: input.session.capacityTotal,
       availableSeats: input.session.availableSeats,
       availabilityStatus: input.session.availabilityStatus,
     },
@@ -511,11 +663,18 @@ export async function applyRegistrationWritePlan(input: {
   client: NormalizedSheetsClient;
   plan: NormalizedRegistrationWritePlan;
 }): Promise<NormalizedRegistrationWriteResult> {
+  const plannedRegistrationId = String(
+    input.plan.operations.find((operation) => operation.tab === "Inscripciones")?.values.registrationId ??
+      "",
+  ).trim() || undefined;
   if (input.plan.mode !== "live") {
     return {
       ok: true,
       applied: false,
       mode: input.plan.mode,
+      registrationPersisted: input.plan.alreadyPersisted,
+      registrationStatus: input.plan.alreadyPersisted ? input.plan.registrationStatus : undefined,
+      registrationId: input.plan.alreadyPersisted ? plannedRegistrationId : undefined,
       blockedReason: input.plan.blockedReasons.join(" | ") || undefined,
       plan: input.plan,
       updatedRanges: [],
@@ -530,6 +689,9 @@ export async function applyRegistrationWritePlan(input: {
       ok: false,
       applied: false,
       mode: "live",
+      registrationPersisted: input.plan.alreadyPersisted,
+      registrationStatus: input.plan.alreadyPersisted ? input.plan.registrationStatus : undefined,
+      registrationId: input.plan.alreadyPersisted ? plannedRegistrationId : undefined,
       blockedReason: input.plan.blockedReasons.join(" | ") || "live_write_not_allowed",
       plan: input.plan,
       updatedRanges: [],
@@ -541,18 +703,82 @@ export async function applyRegistrationWritePlan(input: {
 
   const lockKey = `${input.plan.sheetId}:${input.plan.idempotencyKey}`;
   return withRegistrationWriteLock<NormalizedRegistrationWriteResult>(lockKey, async () => {
-    if (
-      await hasExistingRegistrationInSheet({
-        client: input.client,
-        sheetId: input.plan.sheetId,
-        idempotencyKey: input.plan.idempotencyKey,
-      })
-    ) {
+    const registrationValues = input.plan.operations.find(
+      (operation) => operation.tab === "Inscripciones",
+    )?.values;
+    const registrationPhone = String(registrationValues?.phone ?? "");
+    const requestedPeopleCount = Number.parseInt(
+      String(registrationValues?.peopleCount ?? registrationValues?.people_count ?? ""),
+      10,
+    );
+    const requestedPartnerName = String(
+      registrationValues?.partnerName ?? registrationValues?.pareja_nombre ?? "",
+    ).trim();
+    const registrationDetailsMismatch = (row: NormalizedRow) =>
+      (Number.isFinite(requestedPeopleCount) &&
+        registrationPeopleCount(row) !== requestedPeopleCount) ||
+      (requestedPartnerName &&
+        humanNormalize(getCell(row, "partnerName")) !== humanNormalize(requestedPartnerName));
+    const existingRegistration = await findExistingRegistrationInSheet({
+      client: input.client,
+      sheetId: input.plan.sheetId,
+      idempotencyKey: input.plan.idempotencyKey,
+      phone: registrationPhone,
+      sessionId: input.plan.session.sessionId,
+      groupId: input.plan.session.groupId,
+    });
+    if (existingRegistration) {
+      const registrationStatus = normalizedPersistedRegistrationStatus(
+        getCell(existingRegistration, "status"),
+      );
+      const registrationId = getCell(existingRegistration, "registrationId") ||
+        buildNormalizedRegistrationId({
+          serviceKey: input.plan.serviceKey,
+          phone: registrationPhone,
+          sessionId: input.plan.session.sessionId,
+        });
+      if (registrationDetailsMismatch(existingRegistration)) {
+        return {
+          ok: false,
+          applied: false,
+          mode: "live",
+          registrationPersisted: true,
+          registrationStatus,
+          registrationId,
+          blockedReason: "existing_registration_details_mismatch_on_recheck",
+          plan: input.plan,
+          updatedRanges: [],
+          formattedRanges: [],
+          formatApplied: false,
+          formatWarnings: [],
+        };
+      }
       return {
         ok: true,
         applied: false,
         mode: "live",
-        blockedReason: "duplicate_idempotency_key",
+        registrationPersisted: true,
+        registrationStatus,
+        registrationId,
+        plan: input.plan,
+        updatedRanges: [],
+        formattedRanges: [],
+        formatApplied: false,
+        formatWarnings: [],
+      };
+    }
+
+    const finiteCapacity = input.plan.session.capacityTotal;
+    if (
+      finiteCapacity !== undefined &&
+      !input.client.appendRegistrationRowIfCapacityAllows
+    ) {
+      return {
+        ok: false,
+        applied: false,
+        mode: "live",
+        registrationPersisted: false,
+        blockedReason: "atomic_capacity_guard_unavailable",
         plan: input.plan,
         updatedRanges: [],
         formattedRanges: [],
@@ -564,17 +790,109 @@ export async function applyRegistrationWritePlan(input: {
     const updatedRanges: string[] = [];
     const formattedRanges: string[] = [];
     const formatWarnings: string[] = [];
+    let registrationPersisted = false;
+    let persistedRegistrationStatus: "preinscrita" | "confirmada" | undefined;
+    let persistedRegistrationId: string | undefined;
     for (const operation of input.plan.operations) {
       if (operation.operation !== "append") {
         continue;
       }
 
       const headers = input.snapshot.tabs[operation.tab].headers;
-      const result = await input.client.appendRow(
-        input.plan.sheetId,
-        operation.tab,
-        valuesForHeaders(headers, operation.values),
-      );
+      let result;
+      try {
+        const values = valuesForHeaders(headers, operation.values);
+        if (
+          operation.tab === "Inscripciones" &&
+          finiteCapacity !== undefined &&
+          input.client.appendRegistrationRowIfCapacityAllows
+        ) {
+          const guarded = await input.client.appendRegistrationRowIfCapacityAllows(
+            input.plan.sheetId,
+            "Inscripciones",
+            values,
+            {
+              sessionId: input.plan.session.sessionId,
+              groupId: input.plan.session.groupId,
+              capacityTotal: finiteCapacity,
+              peopleCount: Number.isFinite(requestedPeopleCount) ? requestedPeopleCount : 1,
+            },
+          );
+          if (!guarded.applied || !guarded.result) {
+            return {
+              ok: false,
+              applied: false,
+              mode: "live",
+              registrationPersisted: false,
+              blockedReason: guarded.reason ?? "session_full_on_atomic_append",
+              plan: input.plan,
+              updatedRanges,
+              formattedRanges,
+              formatApplied: false,
+              formatWarnings,
+            };
+          }
+          result = guarded.result;
+        } else {
+          result = await input.client.appendRow(
+            input.plan.sheetId,
+            operation.tab,
+            values,
+          );
+        }
+      } catch (error) {
+        if (operation.tab === "Inscripciones") {
+          const reconciledRegistration = await findExistingRegistrationInSheet({
+            client: input.client,
+            sheetId: input.plan.sheetId,
+            idempotencyKey: input.plan.idempotencyKey,
+            phone: registrationPhone,
+            sessionId: input.plan.session.sessionId,
+            groupId: input.plan.session.groupId,
+          });
+          if (!reconciledRegistration) {
+            throw error;
+          }
+
+          persistedRegistrationStatus = normalizedPersistedRegistrationStatus(
+            getCell(reconciledRegistration, "status"),
+          );
+          persistedRegistrationId = getCell(reconciledRegistration, "registrationId") ||
+            plannedRegistrationId;
+          if (registrationDetailsMismatch(reconciledRegistration)) {
+            return {
+              ok: false,
+              applied: false,
+              mode: "live",
+              registrationPersisted: true,
+              registrationStatus: persistedRegistrationStatus,
+              registrationId: persistedRegistrationId,
+              blockedReason: "existing_registration_details_mismatch_after_ambiguous_append",
+              plan: input.plan,
+              updatedRanges,
+              formattedRanges,
+              formatApplied: false,
+              formatWarnings,
+            };
+          }
+
+          registrationPersisted = true;
+          const warning = error instanceof Error ? error.message : "append_response_lost";
+          formatWarnings.push(`Inscripciones:append_reconciled:${warning}`);
+          continue;
+        }
+        if (operation.tab !== "Interacciones_Chatbot" || !registrationPersisted) {
+          throw error;
+        }
+        const warning = error instanceof Error ? error.message : "append_failed";
+        formatWarnings.push(`Interacciones_Chatbot:append_failed:${warning}`);
+        continue;
+      }
+      if (operation.tab === "Inscripciones") {
+        registrationPersisted = true;
+        persistedRegistrationStatus = input.plan.registrationStatus;
+        persistedRegistrationId = plannedRegistrationId;
+      }
       if (result.updatedRange) {
         updatedRanges.push(result.updatedRange);
       }
@@ -588,8 +906,11 @@ export async function applyRegistrationWritePlan(input: {
 
     return {
       ok: true,
-      applied: updatedRanges.length > 0,
+      applied: registrationPersisted,
       mode: "live",
+      registrationPersisted,
+      registrationStatus: registrationPersisted ? persistedRegistrationStatus : undefined,
+      registrationId: registrationPersisted ? persistedRegistrationId : undefined,
       plan: input.plan,
       updatedRanges,
       formattedRanges,

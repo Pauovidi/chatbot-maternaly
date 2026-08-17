@@ -89,6 +89,9 @@ Migraciones actuales:
 - `003_operational_state.sql`
 - `004_maternaly_operational_models.sql`
 - `005_maternaly_contacts_handoffs.sql`
+- `006_maternaly_reminders.sql`
+- `007_maternaly_reminder_cancel_race.sql`
+- `008_maternaly_reminder_sending_fence.sql`
 
 Modelos cubiertos:
 
@@ -103,6 +106,43 @@ Modelos cubiertos:
 - `maternaly_invoice_events`
 - `maternaly_sheet_audit_logs`
 - `maternaly_llm_interpretation_events`
+- `maternaly_reminders`
+
+## 5.1 Recordatorios de Charla a 48 horas
+
+Mantenerlos desactivados hasta tener aplicadas las migraciones `006`, `007` y `008` y dos
+plantillas de WhatsApp aprobadas por Twilio (una online y otra presencial):
+
+```text
+MATERNALY_REMINDERS_ENABLED=true
+MATERNALY_REMINDER_DISPATCH_BATCH_SIZE=50
+MATERNALY_REMINDER_TWILIO_CONTENT_SID_ONLINE=HX...
+MATERNALY_REMINDER_TWILIO_CONTENT_SID_PRESENCIAL=HX...
+MATERNALY_ADMIN_TASK_TOKEN=<secreto-largo>
+```
+
+La comprobacion de disponibilidad antes de cada envio usa como fuente de verdad
+el Sheet normalizado de Charla. Por eso `reminders.ready=true` exige tambien
+`MATERNALY_NORMALIZED_SHEETS_ENABLED=true`, que
+`MATERNALY_NORMALIZED_SERVICE_IDS` incluya `charla_embarazo_1_20`,
+`MATERNALY_CHARLA_EMBARAZO_SHEET_ID` y unas credenciales de Google Sheets
+configuradas. El health solo muestra los nombres de los requisitos ausentes;
+nunca sus valores.
+
+La tarea recurrente de EasyPanel debe hacer `POST` cada pocos minutos a:
+
+```text
+https://<dominio-maternaly>/api/maternaly/ops/reminders/dispatch
+```
+
+enviando `Authorization: Bearer <MATERNALY_ADMIN_TASK_TOKEN>` (o la cabecera
+`x-maternaly-admin-task-token`). El endpoint se bloquea con `503` y enumera la
+configuracion ausente antes de abrir Postgres o Twilio. No activar el cron hasta
+que `GET /api/health` muestre `reminders.ready=true`.
+
+En las filas online de la pestaña `Sesiones`, completar `enlace_zoom`,
+`id_reunion` y `clave_acceso`. `id_reunion` puede omitirse si el enlace contiene
+el identificador en la forma `/j/<id>`; nunca se inventan credenciales ausentes.
 
 ## 6. Checklist post-deploy
 

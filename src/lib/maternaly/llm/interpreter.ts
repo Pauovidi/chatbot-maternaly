@@ -27,10 +27,11 @@ export const MATERNALY_OPENAI_SYSTEM_PROMPT = [
   "Interpreta slots útiles y no inventes disponibilidad, plazas, pagos ni facturas.",
   "Una revelación de contexto personal como el mes o la semana de embarazo no es por sí sola una petición de reserva ni de disponibilidad. Extrae pregnancy_month o pregnancy_week, pero usa needs_availability_lookup=false salvo que el turno pida explícitamente fechas, plazas, reserva o responda a un dato pendiente de una inscripción activa.",
   "Diferencia información general, interés, inscripción, selección de sesión, datos de inscripción, confirmación, pago, factura, humano, privacidad y reset.",
+  "Una pregunta sobre si una reserva ya está confirmada o cuál es su estado usa intent=registration_status_query; es una consulta de solo lectura y nunca inicia ni confirma otra inscripción.",
   "Incluye service_question_focus estructurado cuando aplique: benefits, contents, duration, eligibility, schedule, pricing, start_week, locations, booking, general, clinical_risk o unknown.",
   "Si falta un dato, márcalo en missing_fields; no te bloquees ni inventes datos.",
   "Dudas clínicas o diagnósticas deben marcar should_handoff=true.",
-  "Cancelaciones, cambios de fecha o sede, reagendamientos, devoluciones, pagos, facturas y justificantes deben marcar should_handoff=true.",
+  "Una cancelación explícita debe incluir safety_flags=cancel_registration_request para que la capa de herramientas pueda localizar y cancelar con seguridad la inscripción. Cambios de fecha o sede, reagendamientos, devoluciones, pagos, facturas y justificantes deben marcar should_handoff=true.",
   "JSON schema: { intent, slots, service_question_focus, needs_availability_lookup, confidence, missing_fields, should_handoff, safety_flags }.",
 ].join(" ");
 
@@ -59,6 +60,7 @@ export type MaternalyIntent =
   | "registration_slot_selected"
   | "registration_data_provided"
   | "registration_confirm"
+  | "registration_status_query"
   | "payment_question"
   | "invoice_question"
   | "handoff_request"
@@ -113,6 +115,25 @@ export interface StructuredIntent {
   missing_fields: string[];
   should_handoff: boolean;
   safety_flags: string[];
+  classification_source?:
+    | "deterministic"
+    | "deterministic_fast_path"
+    | "deterministic_override"
+    | "deterministic_fallback"
+    | "openai";
+  classification_fallback_reason?: string;
+}
+
+function withClassificationSource(
+  intent: StructuredIntent,
+  classificationSource: NonNullable<StructuredIntent["classification_source"]>,
+  classificationFallbackReason?: string,
+): StructuredIntent {
+  return {
+    ...intent,
+    classification_source: classificationSource,
+    classification_fallback_reason: classificationFallbackReason,
+  };
 }
 
 export type MaternalyServiceQuestionFocus =
@@ -159,6 +180,7 @@ const ALLOWED_INTENTS: MaternalyIntent[] = [
   "registration_slot_selected",
   "registration_data_provided",
   "registration_confirm",
+  "registration_status_query",
   "payment_question",
   "invoice_question",
   "handoff_request",
@@ -315,10 +337,115 @@ function asksForInformationBeforeBooking(text: string): boolean {
 
 function asksToBookAppointment(text: string): boolean {
   return (
+    /\b(?:quiero|necesito|busco|deseo|me\s+gustaria)\b[^.!?]{0,30}\b(?:una\s+)?citas?\b/.test(
+      text,
+    ) ||
     /\b(?:agend|concert|pedir|solicitar|sacar|coger|reservar)\w*\b[^.!?]{0,45}\bcitas?\b/.test(
       text,
     ) ||
     /\bcitas?\b[^.!?]{0,45}\b(?:agend|concert|pedir|solicitar|sacar|coger|reservar)\w*\b/.test(
+      text,
+    )
+  );
+}
+
+const CANCELLATION_ACTION_SOURCE =
+  "(?:cancelar(?:me|nos|la|lo|las|los)?|cancel(?:a|e)(?:me|nos|la|lo|las|los)?|cancelad|anular(?:me|nos|la|lo|las|los)?|anul(?:a|e)(?:me|nos|la|lo|las|los)?|anulad|darme\\s+de\\s+baja|darse\\s+de\\s+baja|me\\s+doy\\s+de\\s+baja|dame\\s+de\\s+baja(?:\\s+de\\s+la\\s+charla)?|quiero\\s+la\\s+baja|(?:borrar|borra(?:me)?|eliminar|elimina(?:me)?)\\s+(?:mi|la)\\s+(?:inscripcion|reserva|plaza)|(?:quitar|quita(?:me)?)\\s+(?:mi|la)\\s+(?:inscripcion|reserva|plaza)|(?:liberar|libera(?:me)?)\\s+(?:mi|la)\\s+plaza|(?:ya\\s+)?no\\s+quiero\\s+(?:mi|la)\\s+(?:plaza|reserva|inscripcion)|(?:finalmente\\s+)?no\\s+(?:voy\\s+a\\s+poder|voy\\s+a|podre|puedo)\\s+(?:asistir|acudir|ir)|no\\s+voy\\s+a\\s+ir)";
+const CANCELLATION_REQUEST_PATTERN = new RegExp(`\\b${CANCELLATION_ACTION_SOURCE}\\b`);
+
+function isNegatedCancellationRequest(text: string): boolean {
+  const match = CANCELLATION_REQUEST_PATTERN.exec(text);
+  if (!match) {
+    return false;
+  }
+
+  const before = text.slice(Math.max(0, match.index - 55), match.index);
+  return /\bno(?:\s+(?:quiero|deseo|necesito|voy\s+a|pienso|pretendo|me\s+gustaria|quiero\s+que))?\s*$/.test(
+    before,
+  );
+}
+
+function isInformationalCancellationQuestion(text: string): boolean {
+  if (!CANCELLATION_REQUEST_PATTERN.test(text)) {
+    return false;
+  }
+
+  return (
+    new RegExp(
+      `\\b(?:si|en\\s+caso\\s+de\\s+que)\\s+(?:yo\\s+)?(?:quisiera|quisiese|quisieramos|tuviera|tuviese|necesitara|necesitase)\\b[^.!?]{0,70}\\b${CANCELLATION_ACTION_SOURCE}\\b`,
+    ).test(text) ||
+    new RegExp(
+      `\\b(?:hipoteticamente|en\\s+teoria)\\b[^.!?]{0,70}\\b${CANCELLATION_ACTION_SOURCE}\\b`,
+    ).test(text) ||
+    (/[?¿]/.test(text) &&
+      new RegExp(`\\bcomo\\b[^.!?]{0,50}\\b${CANCELLATION_ACTION_SOURCE}\\b`).test(text)) ||
+    new RegExp(
+      `\\bcomo\\s+(?:puedo|podria|se\\s+puede|hago\\s+para|tendria\\s+que)\\s+${CANCELLATION_ACTION_SOURCE}\\b`,
+    ).test(text) ||
+    new RegExp(
+      `\\b(?:puedo|podria|se\\s+puede)\\s+${CANCELLATION_ACTION_SOURCE}\\b`,
+    ).test(text) ||
+    new RegExp(
+      `\\bque\\s+pasa\\s+si\\b[^.!?]{0,60}\\b${CANCELLATION_ACTION_SOURCE}\\b`,
+    ).test(text) ||
+    new RegExp(
+      `\\bque\\s+(?:tengo|hay)\\s+que\\s+hacer\\s+para\\s+${CANCELLATION_ACTION_SOURCE}\\b`,
+    ).test(text) ||
+    new RegExp(
+      `\\b(?:cual|que)\\s+es\\s+(?:el\\s+)?(?:proceso|procedimiento)\\b[^.!?]{0,60}\\b${CANCELLATION_ACTION_SOURCE}\\b`,
+    ).test(text)
+  );
+}
+
+function isCommunicationsOptOut(text: string): boolean {
+  const communicationsScope =
+    /\b(?:mensajes?|comunicaciones?|newsletter|bolet[ií]n|publicidad|promociones?|correos?|emails?)\b/.test(
+      text,
+    );
+  const optOutAction =
+    /\b(?:darme\s+de\s+baja|dame\s+de\s+baja|me\s+doy\s+de\s+baja|quiero\s+la\s+baja|baja\s+de|dejar\s+de\s+recibir|no\s+quiero\s+recibir|cancel\w*|anul\w*|quit\w*|elimin\w*)\b/.test(
+      text,
+    );
+  if (!communicationsScope || !optOutAction) {
+    return false;
+  }
+
+  const explicitlyPreservesRegistration =
+    /\b(?:mantengo|mantener|conservo|conservar)\b[^.!?]{0,35}\b(?:plaza|reserva|inscripci[oó]n|cita)\b/.test(
+      text,
+    ) ||
+    /\bno\s+(?:quiero\s+)?(?:darme\s+de\s+baja\s+)?de\s+la\s+(?:plaza|reserva|inscripci[oó]n|cita|charla)\b/.test(
+      text,
+    );
+  const explicitRegistrationCancellation =
+    /\b(?:cancel\w*|anul\w*|borr\w*|elimin\w*|quit\w*|liber\w*)\b[^.!?]{0,35}\b(?:plaza|reserva|inscripci[oó]n|cita|charla)\b/.test(
+      text,
+    );
+
+  return explicitlyPreservesRegistration || !explicitRegistrationCancellation;
+}
+
+function isExplicitCancellationRequest(text: string): boolean {
+  return (
+    CANCELLATION_REQUEST_PATTERN.test(text) &&
+    !isCommunicationsOptOut(text) &&
+    !isNegatedCancellationRequest(text) &&
+    !isInformationalCancellationQuestion(text)
+  );
+}
+
+function isRegistrationStatusQuery(text: string): boolean {
+  return (
+    /\b(?:esta|sigue|continua)\b[^.!?]{0,45}\b(?:confirmad[ao]|activ[ao]|reservad[ao])\b[^.!?]{0,25}\b(?:reserva|inscripcion|plaza|cita)?\b/.test(
+      text,
+    ) ||
+    /\b(?:reserva|inscripcion|plaza|cita)\b[^.!?]{0,45}\b(?:esta|sigue|continua)\b[^.!?]{0,25}\b(?:confirmad[ao]|activ[ao]|reservad[ao])\b/.test(
+      text,
+    ) ||
+    /\b(?:comprobar|consultar|saber|ver)\b[^.!?]{0,45}\b(?:estado|confirmacion)\b[^.!?]{0,35}\b(?:reserva|inscripcion|plaza|cita)\b/.test(
+      text,
+    ) ||
+    /\b(?:estado|confirmacion)\b[^.!?]{0,35}\b(?:de\s+)?(?:mi|la)\s+(?:reserva|inscripcion|plaza|cita)\b/.test(
       text,
     )
   );
@@ -433,8 +560,26 @@ function isAvailabilityPreferenceContinuation(
   text: string,
   context: MaternalyInterpretationContext,
 ): boolean {
-  if (context.active_stage !== "choosing_session" || !detectModality(text)) {
+  if (
+    context.active_stage !== "choosing_session" ||
+    (!detectModality(text) && !detectLocation(text))
+  ) {
     return false;
+  }
+
+  const statesCorrection =
+    !/[?¿]/.test(text) &&
+    (/(?:\bno\s+(?:online|presencial|bilbao|erandio)\b)[^.!?]{0,45}\b(?:mejor|prefiero|quiero|sino|en\s+vez\s+de)?\s*(?:online|presencial|bilbao|erandio)\b/.test(
+      text,
+    ) ||
+      /\b(?:prefiero|mejor|quiero|elijo|escojo|me\s+quedo\s+con)\b[^.!?]{0,45}\b(?:online|presencial|bilbao|erandio)\b[^.!?]{0,45}\bno\s+(?:online|presencial|bilbao|erandio)\b/.test(
+        text,
+      ) ||
+      /\b(?:en\s+)?(?:online|presencial|bilbao|erandio)\b[^.!?]{0,45}\bno\s+(?:online|presencial|bilbao|erandio)\b/.test(
+        text,
+      ));
+  if (statesCorrection) {
+    return true;
   }
 
   const compactText = text
@@ -604,7 +749,7 @@ function compact(value: unknown): string | undefined {
 
 function validPeopleCount(value: unknown): number | undefined {
   const number = typeof value === "number" ? value : Number.parseInt(String(value ?? ""), 10);
-  return Number.isFinite(number) && number > 0 && number <= 4 ? number : undefined;
+  return number === 1 || number === 2 ? number : undefined;
 }
 
 function validPregnancyWeek(value: unknown): number | undefined {
@@ -770,6 +915,28 @@ function isContextualContinuation(text: string): boolean {
   );
 }
 
+function resumesActiveRegistration(
+  text: string,
+  context: MaternalyInterpretationContext,
+): boolean {
+  if (
+    !["choosing_session", "collecting_contact", "write_planned", "blocked"].includes(
+      context.active_stage ?? "",
+    ) ||
+    !context.active_normalized_service_key
+  ) {
+    return false;
+  }
+
+  const compactText = text
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return /^(?:quiero\s+)?(?:continuar|seguir|retomar|volver)\s+(?:con|a)\s+(?:la|mi|una)?\s*(?:cita|reserva|inscripcion|preinscripcion)$/.test(
+    compactText,
+  );
+}
+
 function alternateActiveService(
   activeServiceId: MaternalyServiceId | undefined,
 ): ReturnType<typeof getKnowledgeService> {
@@ -840,7 +1007,11 @@ function detectNormalizedServiceKey(serviceId?: string): MaternalyNormalizedServ
 }
 
 function detectLocation(text: string): string | undefined {
-  return [
+  if (hasAmbiguousSessionPreference(text)) {
+    return undefined;
+  }
+
+  return selectPreferredLiteral(text, [
     "bilbao",
     "erandio",
     "bec",
@@ -850,26 +1021,174 @@ function detectLocation(text: string): string | undefined {
     "hydra",
     "beup",
     "online",
-  ].find((item) => text.includes(normalize(item)));
+  ]);
 }
 
 function detectModality(text: string): "presencial" | "online" | undefined {
-  if (/\bonline\b/.test(text)) {
-    return "online";
+  if (hasAmbiguousSessionPreference(text)) {
+    return undefined;
   }
 
-  if (/\bpresencial(?:es)?\b/.test(text) || /\bbilbao\b|\berandio\b/.test(text)) {
+  const explicit = selectPreferredLiteral(text, ["online", "presenciales", "presencial"]);
+  if (explicit === "online") {
+    return "online";
+  }
+  if (explicit === "presencial" || explicit === "presenciales") {
+    return "presencial";
+  }
+
+  const location = detectLocation(text);
+  if (location && location !== "online") {
     return "presencial";
   }
 
   return undefined;
 }
 
-function extractDateLike(message: string): string | undefined {
-  return (
-    message.match(/\b\d{4}-\d{2}-\d{2}\b/)?.[0] ??
-    message.match(/\b\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?\b/)?.[0]
+function hasAmbiguousSessionPreference(text: string): boolean {
+  return /\b(?:online|presencial|bilbao|erandio)\b\s+(?:o|u)\s+\b(?:online|presencial|bilbao|erandio)\b/.test(
+    text,
   );
+}
+
+function selectPreferredLiteral(text: string, values: string[]): string | undefined {
+  const alternatives = values
+    .map((value) => normalize(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+    .sort((left, right) => right.length - left.length)
+    .join("|");
+  const pattern = new RegExp(`\\b(?:${alternatives})\\b`, "g");
+  const matches = Array.from(text.matchAll(pattern)).map((match) => ({
+    value: match[0],
+    start: match.index ?? 0,
+    end: (match.index ?? 0) + match[0].length,
+  }));
+  const nonNegated = matches.filter((match) => {
+    const before = text.slice(Math.max(0, match.start - 35), match.start);
+    const after = text.slice(match.end, match.end + 10);
+    return !(
+      /\b(?:no|sin)(?:\s+(?:quiero|prefiero|mejor))?\s*$/.test(before) ||
+      /^\s*(?:no|tampoco)\b/.test(after)
+    );
+  });
+  if (nonNegated.length === 0) {
+    return undefined;
+  }
+
+  const explicitlyPreferred = nonNegated.filter((match) => {
+    const before = text.slice(Math.max(0, match.start - 55), match.start);
+    return /\b(?:prefiero|mejor|quiero|elijo|escojo|sino|en\s+vez\s+de|me\s+quedo\s+con)\b[^.!?;:]*$/.test(
+      before,
+    );
+  });
+  return (explicitlyPreferred.at(-1) ?? nonNegated[0])?.value;
+}
+
+const SPANISH_DAY_NUMBERS: Record<string, number> = {
+  uno: 1,
+  primero: 1,
+  dos: 2,
+  tres: 3,
+  cuatro: 4,
+  cinco: 5,
+  seis: 6,
+  siete: 7,
+  ocho: 8,
+  nueve: 9,
+  diez: 10,
+  once: 11,
+  doce: 12,
+  trece: 13,
+  catorce: 14,
+  quince: 15,
+  dieciseis: 16,
+  diecisiete: 17,
+  dieciocho: 18,
+  diecinueve: 19,
+  veinte: 20,
+  veintiuno: 21,
+  veintidos: 22,
+  veintitres: 23,
+  veinticuatro: 24,
+  veinticinco: 25,
+  veintiseis: 26,
+  veintisiete: 27,
+  veintiocho: 28,
+  veintinueve: 29,
+  treinta: 30,
+  "treinta y uno": 31,
+};
+
+const SPANISH_MONTH_NUMBERS: Record<string, number> = {
+  ene: 1,
+  feb: 2,
+  mar: 3,
+  abr: 4,
+  may: 5,
+  jun: 6,
+  jul: 7,
+  ago: 8,
+  sep: 9,
+  set: 9,
+  oct: 10,
+  nov: 11,
+  dic: 12,
+};
+
+const SPANISH_DAY_TOKEN =
+  "(?:\\d{1,2}|treinta\\s+y\\s+uno|veintiuno|veintidos|veintitres|veinticuatro|veinticinco|veintiseis|veintisiete|veintiocho|veintinueve|dieciseis|diecisiete|dieciocho|diecinueve|catorce|quince|trece|doce|once|veinte|treinta|diez|nueve|ocho|siete|seis|cinco|cuatro|tres|dos|primero|uno)";
+
+function contextualIsoDate(day: number, month: number, explicitYear?: number): string | undefined {
+  const now = new Date();
+  let year = explicitYear ?? now.getUTCFullYear();
+  const build = (candidateYear: number) => {
+    const date = new Date(Date.UTC(candidateYear, month - 1, day));
+    if (
+      date.getUTCFullYear() !== candidateYear ||
+      date.getUTCMonth() !== month - 1 ||
+      date.getUTCDate() !== day
+    ) {
+      return undefined;
+    }
+    return `${candidateYear}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+  };
+
+  let candidate = build(year);
+  if (!candidate) {
+    return undefined;
+  }
+  if (!explicitYear) {
+    const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+    if (new Date(`${candidate}T00:00:00.000Z`).getTime() < today.getTime()) {
+      year += 1;
+      candidate = build(year);
+    }
+  }
+  return candidate;
+}
+
+function extractDateLike(message: string): string | undefined {
+  const explicit =
+    message.match(/\b\d{4}-\d{2}-\d{2}\b/)?.[0] ??
+    message.match(/\b\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?\b/)?.[0];
+  if (explicit) {
+    return explicit;
+  }
+
+  const natural = normalize(message).match(
+    new RegExp(
+      `\\b(${SPANISH_DAY_TOKEN})\\s+(?:de\\s+)?(ene(?:ro)?|feb(?:rero)?|mar(?:zo)?|abr(?:il)?|may(?:o)?|jun(?:io)?|jul(?:io)?|ago(?:sto)?|sep(?:tiembre)?|set(?:iembre)?|oct(?:ubre)?|nov(?:iembre)?|dic(?:iembre)?)\\b\\.?(?:\\s+(?:de\\s+)?(\\d{4}))?`,
+    ),
+  );
+  if (!natural) {
+    return undefined;
+  }
+
+  const day = /^\d+$/.test(natural[1])
+    ? Number.parseInt(natural[1], 10)
+    : SPANISH_DAY_NUMBERS[natural[1].replace(/\s+/g, " ")];
+  const month = SPANISH_MONTH_NUMBERS[natural[2].slice(0, 3)];
+  const year = natural[3] ? Number.parseInt(natural[3], 10) : undefined;
+  return contextualIsoDate(day, month, year);
 }
 
 function extractEmail(message: string): string | undefined {
@@ -882,14 +1201,36 @@ function extractPhone(message: string): string | undefined {
 }
 
 function extractFullName(message: string): string | undefined {
-  const withoutContact = message
-    .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, "")
-    .replace(/(?:\+?\d[\d\s().-]{6,}\d)/g, "")
-    .replace(/\b(?:telefono|teléfono|email|correo|personas?|pareja|fpp|fecha probable|fecha nacimiento|beb[eé]).*$/i, "")
-    .trim();
-  const match = withoutContact.match(
-    /\b(?:(?:soy|me llamo|nombre(?:\s+y\s+apellidos)?[:\s]+)\s*)([A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+(?:\s+[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+){1,5})/i,
+  const prefix = /\b(?:soy|me\s+llamo|mi\s+nombre\s+es|nombre(?:\s+y\s+apellidos)?)\s*:?\s+/i.exec(
+    message,
   );
+  if (!prefix || prefix.index === undefined) {
+    return undefined;
+  }
+
+  const remainder = message.slice(prefix.index + prefix[0].length).trim();
+  const quoted = remainder.match(/^["'“«]([^"'”»]+)["'”»]/)?.[1];
+  const candidateSource = quoted ?? (() => {
+    const boundaries = [
+      /[,;!?]/,
+      /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i,
+      /(?:\+?\d[\d\s().-]{6,}\d)/,
+      /\s+y\s+(?:mi\s+)?(?:pareja|acompa[nñ]ante)\b/i,
+      /\s+(?:y\s+)?(?:mi\s+)?(?:email|correo|tel[eé]fono|telefono|fpp|fecha\s+probable|fecha\s+de\s+nacimiento)\b/i,
+      /\s+y\s+(?:voy|vengo|vamos|somos|iremos|vendremos|acudiremos|asistiremos|quiero|necesito|prefiero)\b/i,
+    ]
+      .map((pattern) => remainder.search(pattern))
+      .filter((index) => index >= 0);
+    const end = boundaries.length > 0 ? Math.min(...boundaries) : remainder.length;
+    return remainder.slice(0, end);
+  })();
+  const candidate = candidateSource
+    .replace(/^\s*["'“”«»]+|["'“”«»]+\s*$/g, "")
+    .replace(/\s+y(?:\s+mi)?\s*$/i, "")
+    .replace(/[.,;:!?]+$/g, "")
+    .trim();
+  const nameToken = "(?:[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]\\.|[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+)";
+  const match = candidate.match(new RegExp(`^(${nameToken}(?:\\s+${nameToken}){1,5})$`, "i"));
   return match?.[1]?.trim();
 }
 
@@ -899,10 +1240,11 @@ function extractPartnerName(message: string): string | undefined {
 }
 
 function inferPeopleCount(text: string): number | undefined {
+  const companion = "(?:pareja|chic[oa]|novi[oa]|marido|mujer|espos[oa]|acompanante)";
   if (
-    /\ben\s+pareja\b|\b(?:yo\s+y\s+mi\s+pareja|mi\s+pareja\s+y\s+yo)\b|\b(?:somos|iremos|vamos|acudiremos|vendremos|seremos)\s+(?:los\s+)?dos\b|\b(?:dos|2)\s*(?:personas?|asistentes?)\b/.test(
-      text,
-    )
+    new RegExp(
+      `\\ben\\s+pareja\\b|\\b(?:yo\\s+y\\s+mi\\s+${companion}|mi\\s+${companion}\\s+y\\s+yo)\\b|\\b(?:somos|iremos|vamos|venimos|acudiremos|asistiremos|vendremos|seremos)(?:\\s+(?:mi\\s+${companion}\\s+y\\s+yo|yo\\s+y\\s+mi\\s+${companion}))?\\s+(?:ambos|ambas|los\\s+dos|las\\s+dos)\\b|\\b(?:somos|iremos|vamos|venimos|acudiremos|asistiremos|vendremos|seremos)\\s+(?:(?:los|las)\\s+)?dos\\b|\\b(?:somos|iremos|vamos|venimos|acudiremos|asistiremos|vendremos|seremos)\\s+(?:mi\\s+${companion}\\s+y\\s+yo|yo\\s+y\\s+mi\\s+${companion})\\b|\\b(?:(?:al\\s+final|finalmente|tambien)\\s+)?(?:viene|vendra|vendrá|asiste|asistira|asistirá|acude|acudira|acudirá)\\s+mi\\s+${companion}\\b|\\b(?:quiero|vamos\\s+a)\\s+(?:anadir|añadir|sumar|incluir)\\s+(?:a\\s+)?mi\\s+${companion}\\b|\\b(?:dos|2)\\s*(?:personas?|asistentes?)\\b`,
+    ).test(text)
   ) {
     return 2;
   }
@@ -940,7 +1282,7 @@ function contextualPendingPeopleCount(
     return 2;
   }
   if (
-    /^(?:yo\s+y\s+mi\s+pareja|mi\s+pareja\s+y\s+yo|(?:iremos|vamos|acudiremos|vendremos)\s+(?:mi\s+pareja\s+y\s+yo|yo\s+y\s+mi\s+pareja))$/.test(
+    /^(?:(?:(?:somos|iremos|vamos|venimos|acudiremos|asistiremos|vendremos|seremos)\s+)?(?:yo\s+y\s+mi\s+(?:pareja|chic[oa]|novi[oa]|marido|mujer|espos[oa]|acompanante)|mi\s+(?:pareja|chic[oa]|novi[oa]|marido|mujer|espos[oa]|acompanante)\s+y\s+yo)|(?:somos|iremos|vamos|venimos|acudiremos|asistiremos|vendremos|seremos)\s+(?:ambos|ambas|los\s+dos|las\s+dos))$/.test(
       compactText,
     )
   ) {
@@ -1090,14 +1432,14 @@ export class LlmIntentClassifier {
     // para el webhook de WhatsApp. Las respuestas a un campo que el propio
     // flujo acaba de preguntar tampoco deben reinterpretarse fuera de contexto.
     if (isExplicitAgendaLookup || isPendingRegistrationFieldAnswer) {
-      return deterministic;
+      return withClassificationSource(deterministic, "deterministic_fast_path");
     }
 
     if (env.LLM_PROVIDER === "openai" && env.OPENAI_API_KEY) {
       return this.classifyWithOpenAi(message, context, env);
     }
 
-    return deterministic;
+    return withClassificationSource(deterministic, "deterministic");
   }
 
   classifyWithMock(
@@ -1109,8 +1451,11 @@ export class LlmIntentClassifier {
     const journeyStage = detectJourneyStage({ text, explicitService, context });
     const contextualReservationAnswer = reservationCtaAnswer(text, context);
     const pendingPeopleCount = contextualPendingPeopleCount(text, context);
+    const resumesRegistration = resumesActiveRegistration(text, context);
     const activeContextService = getKnowledgeService(
-      context.active_service_id ?? context.active_normalized_service_key,
+      resumesRegistration
+        ? context.active_normalized_service_key ?? context.active_service_id
+        : context.active_service_id ?? context.active_normalized_service_key,
     );
     const charlaTimePreference = detectCharlaCtaTimePreference(
       text,
@@ -1133,10 +1478,33 @@ export class LlmIntentClassifier {
     const pureGreeting = isPureGreeting(text);
     const asksForOtherActiveService = /\b(?:la|el)\s+otr[ao]\b/.test(text);
     const compactSessionChoice = text.replace(/[¿?¡!.,;:]/g, " ").replace(/\s+/g, " ").trim();
+    const ordinalSessionChoice =
+      context.active_stage === "choosing_session" &&
+      (/^(?:la\s+)?(?:primera|segunda|tercera|cuarta|quinta|sexta|septima|octava|novena)$/.test(
+        compactSessionChoice,
+      ) ||
+        /\b(?:prefiero|mejor|elijo|escojo|quiero|me\s+quedo\s+con)\s+(?:la\s+)?(?:primera|segunda|tercera|cuarta|quinta|sexta|septima|octava|novena)\b/.test(
+          text,
+        ));
+    const dayOnlySessionChoice =
+      context.active_stage === "choosing_session" &&
+      new RegExp(`^(?:la\\s+)?del\\s+${SPANISH_DAY_TOKEN}$`).test(compactSessionChoice);
+    const answersPendingDateField = Boolean(
+      context.active_stage === "collecting_contact" &&
+        (context.pending_fields?.some((field) =>
+          field === "fppOrDueDate" || field === "babyBirthDate"
+        ) ||
+          /\b(?:fpp|fecha\s+(?:probable\s+)?(?:de\s+)?parto|salgo\s+de\s+cuentas|fecha\s+(?:de\s+)?nacimiento)\b/.test(
+            text,
+          )),
+    );
     const selectedSession =
       pendingPeopleCount === undefined &&
+      !answersPendingDateField &&
       (/\bopci[oó]n\s*([1-9])\b/.test(text) ||
         /^[1-9]$/.test(compactSessionChoice) ||
+        ordinalSessionChoice ||
+        dayOnlySessionChoice ||
         Boolean(extractDateLike(message)) ||
         /\b\d{1,2}\s+(?:de\s+)?(?:enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre)(?:\s+de\s+\d{4})?\b/.test(
           text,
@@ -1150,6 +1518,7 @@ export class LlmIntentClassifier {
         : contextualReservationAnswer ||
             selectsActiveSession ||
             availabilityPreferenceContinuation ||
+            asksToBookAppointment(text) ||
             isContextualContinuation(text) ||
             asksForGeneralOverview(text) ||
             correctsAnAvailabilityAnswer(text) ||
@@ -1158,8 +1527,9 @@ export class LlmIntentClassifier {
             )
           ? activeContextService
           : null;
-    const service = catalogModalityQuery || journeyStage ? null : explicitService ?? contextualService;
-    const serviceScope: MaternalyServiceScope = catalogModalityQuery || journeyStage
+    const journeyStageOnly = Boolean(journeyStage && !explicitService);
+    const service = catalogModalityQuery || journeyStageOnly ? null : explicitService ?? contextualService;
+    const serviceScope: MaternalyServiceScope = catalogModalityQuery || journeyStageOnly
       ? "catalog"
       : explicitService
         ? "explicit"
@@ -1189,10 +1559,15 @@ export class LlmIntentClassifier {
     const wantsBookingFocus = wantsRegistration;
     const wantsPayment = /\b(pago|pagar|link|enlace)\b/.test(text);
     const wantsInvoice = /(factura|justificante)/.test(text);
-    const cancelOrReschedule =
-      /(cancel|anular|darme de baja|darse de baja|\bbaja\b|cambiar(?:\s+de|\s+la)?\s+fecha|cambio(?:\s+de|\s+la)?\s+fecha|reagend|mover(?:\s+la)?\s+cita|no puedo ir|cambiar(?:\s+de|\s+la)?\s+sede)/.test(text);
+    const cancellationRequest = isExplicitCancellationRequest(text);
+    const communicationsOptOut = isCommunicationsOptOut(text);
+    const registrationStatusQuery = isRegistrationStatusQuery(text);
+    const rescheduleRequest =
+      /(cambiar(?:\s+de|\s+la)?\s+fecha|cambio(?:\s+de|\s+la)?\s+fecha|reagend|mover(?:\s+la)?\s+cita|me\s+viene\s+mal\s+(?:la\s+)?cita|cambiar(?:\s+de|\s+la)?\s+sede)/.test(text);
+    const cancelOrReschedule = cancellationRequest || rescheduleRequest;
     const paymentOrInvoiceHandoff = /(devolucion|devolución|factura|justificante|\bpago\b|pagar|link de pago|enlace de pago)/.test(text);
-    const stopRequest = /\b(?:stop|parar|no\s+seguir|no\s+me\s+escrib|no\s+quiero\s+mensajes|baja\s+comunicaciones)\b/.test(text);
+    const stopRequest = communicationsOptOut ||
+      /\b(?:stop|parar|no\s+seguir|no\s+me\s+escrib|no\s+quiero\s+mensajes|baja\s+comunicaciones)\b/.test(text);
     const explicitHumanRequest =
       /\bhablar\s+con\b|\b(?:quiero|necesito|prefiero|puedo|podria)\b[^.!?]{0,55}\b(?:persona\s+humana|human[oa]|equipo|matrona|profesional|alguien)\b|\b(?:llamadme|llamame|que\s+me\s+llame|que\s+me\s+llamen)\b/.test(
         text,
@@ -1210,13 +1585,18 @@ export class LlmIntentClassifier {
       );
     const peopleCount = asksAboutCompanionEligibility
       ? undefined
-      : pendingPeopleCount ?? inferPeopleCount(text);
+      : validPeopleCount(pendingPeopleCount ?? inferPeopleCount(text));
     const pregnancyWeek = extractNumber(text, /\b(\d{1,2})\s*(semanas|semana)\b/);
     const pregnancyMonth = extractPregnancyMonth(text);
     const fullName = extractFullName(message);
     const phone = extractPhone(message);
     const email = extractEmail(message);
-    const hasExplicitContactData = Boolean(fullName || phone || email);
+    const extractedDate = extractDateLike(message);
+    const fppOrDueDate = /fpp|fecha probable|parto|salgo\s+de\s+cuentas/.test(text)
+      ? extractedDate
+      : undefined;
+    const babyBirthDate = /beb[eé]|nacimiento/.test(text) ? extractedDate : undefined;
+    const hasExplicitContactData = Boolean(fullName || phone || email || fppOrDueDate || babyBirthDate);
     const clinicalSignal =
       /(dolor\s+fuerte|sangrado|fiebre|contracciones?\s+fuertes?|no\s+noto\s+al\s+beb[eé]|p[eé]rdida\s+de\s+l[ií]quido|mareo\s+fuerte|desmayo|urgente|me\s+encuentro\s+muy\s+mal|diagn[oó]stico\s+(?:m[eé]dico|cl[ií]nico|personalizado|de mi|del resultado)|contraindicaci[oó]n|malestar\s+importante|mastitis)/.test(
         text,
@@ -1236,7 +1616,7 @@ export class LlmIntentClassifier {
     });
     const hasContactData = Boolean(
       hasExplicitContactData ||
-        (peopleCount && ["general", "booking", "unknown"].includes(serviceQuestionFocus)),
+        peopleCount,
     );
     const explicitOverview = asksForGeneralOverview(text);
     const correctionTurn = correctsAnAvailabilityAnswer(text);
@@ -1250,7 +1630,7 @@ export class LlmIntentClassifier {
         !shouldAnswerWithServiceInformation &&
         (wantsAvailability || wantsRegistration || availabilityPreferenceContinuation),
     );
-    const stabilizedQuestionFocus = journeyStage
+    const stabilizedQuestionFocus = journeyStageOnly
       ? "general"
       : availabilityPreferenceContinuation
         ? "schedule"
@@ -1271,7 +1651,7 @@ export class LlmIntentClassifier {
       journey_stage: journeyStage,
       location,
       modality: modality ?? (contextualService ? context.modality : undefined),
-      preferred_date: extractDateLike(message),
+      preferred_date: extractedDate,
       preferred_time:
         charlaTimePreference?.startTime ??
         (text.includes("mañana") || text.includes("manana")
@@ -1286,8 +1666,8 @@ export class LlmIntentClassifier {
       partner_name: extractPartnerName(message),
       pregnancy_week: pregnancyWeek,
       pregnancy_month: pregnancyMonth,
-      fpp_or_due_date: /fpp|fecha probable|parto/.test(text) ? extractDateLike(message) : undefined,
-      baby_birth_date: /beb[eé]|nacimiento/.test(text) ? extractDateLike(message) : undefined,
+      fpp_or_due_date: fppOrDueDate,
+      baby_birth_date: babyBirthDate,
       observations: text.includes("prueba_bot_codex_no_cliente_real")
         ? "PRUEBA_BOT_CODEX_NO_CLIENTE_REAL"
         : undefined,
@@ -1315,12 +1695,14 @@ export class LlmIntentClassifier {
               : wantsPayment
                 ? "payment_question"
                 : "handoff_request"
+            : registrationStatusQuery
+              ? "registration_status_query"
             : wantsInvoice
               ? "invoice_question"
               : wantsPayment && !wantsRegistration
                 ? "payment_question"
-                : journeyStage
-                  ? "service_discovery"
+              : journeyStageOnly
+                   ? "service_discovery"
                 : selectedSession && serviceKey
                   ? "registration_slot_selected"
                   : availabilityPreferenceContinuation && serviceKey
@@ -1361,6 +1743,7 @@ export class LlmIntentClassifier {
       people_count: peopleCount,
       needs_availability_lookup: Boolean(
         serviceKey &&
+          !registrationStatusQuery &&
           !shouldAnswerWithServiceInformation &&
           (wantsAvailability ||
             wantsRegistration ||
@@ -1379,6 +1762,7 @@ export class LlmIntentClassifier {
       missing_fields: [],
       should_handoff: handoff || clinical === true,
       safety_flags: [
+        cancellationRequest ? "cancel_registration_request" : "",
         cancelOrReschedule ? "handoff_cancel_or_reschedule" : "",
         paymentOrInvoiceHandoff ? "handoff_payment_or_invoice" : "",
         stopRequest ? "stop_requested_no_follow_up" : "",
@@ -1429,17 +1813,25 @@ export class LlmIntentClassifier {
           },
         }),
       });
-    } catch {
-      return this.classifyWithMock(message, context);
+    } catch (error) {
+      return withClassificationSource(
+        this.classifyWithMock(message, context),
+        "deterministic_fallback",
+        error instanceof Error && error.name === "AbortError" ? "openai_timeout" : "openai_fetch_error",
+      );
     } finally {
       clearTimeout(timeoutId);
     }
 
     if (!response.ok) {
-      return this.classifyWithMock(message, context);
+      return withClassificationSource(
+        this.classifyWithMock(message, context),
+        "deterministic_fallback",
+        `openai_http_${response.status}`,
+      );
     }
 
-    const payload = (await response.json()) as {
+    let payload: {
       output_text?: string;
       output?: Array<{
         content?: Array<{
@@ -1448,6 +1840,15 @@ export class LlmIntentClassifier {
         }>;
       }>;
     };
+    try {
+      payload = (await response.json()) as typeof payload;
+    } catch {
+      return withClassificationSource(
+        this.classifyWithMock(message, context),
+        "deterministic_fallback",
+        "openai_invalid_http_json",
+      );
+    }
     const outputText =
       payload.output_text ??
       payload.output
@@ -1467,7 +1868,12 @@ export class LlmIntentClassifier {
           (context.active_stage === "choosing_booking_service" &&
             deterministic.service_candidate !== undefined) ||
           deterministic.slots.journey_stage !== undefined ||
-          asksToBookAppointment(normalizedMessage) ||
+        asksToBookAppointment(normalizedMessage) ||
+        isExplicitCancellationRequest(normalizedMessage) ||
+        isRegistrationStatusQuery(normalizedMessage) ||
+        isCommunicationsOptOut(normalizedMessage) ||
+        isNegatedCancellationRequest(normalizedMessage) ||
+        isInformationalCancellationQuestion(normalizedMessage) ||
         reservationCtaAnswer(normalizedMessage, context) !== undefined ||
         contextualPendingPeopleCount(normalizedMessage, context) !== undefined ||
         isAvailabilityPreferenceContinuation(normalizedMessage, context) ||
@@ -1481,9 +1887,16 @@ export class LlmIntentClassifier {
         (deterministic.intent === "service_question" &&
           /\b(?:online|presencial|modalidad)\b/.test(normalizedMessage));
 
-      return mustHonorCurrentTurn ? deterministic : parsed;
+      return withClassificationSource(
+        mustHonorCurrentTurn ? deterministic : parsed,
+        mustHonorCurrentTurn ? "deterministic_override" : "openai",
+      );
     } catch {
-      return this.classifyWithMock(message, context);
+      return withClassificationSource(
+        this.classifyWithMock(message, context),
+        "deterministic_fallback",
+        "openai_invalid_structured_output",
+      );
     }
   }
 }

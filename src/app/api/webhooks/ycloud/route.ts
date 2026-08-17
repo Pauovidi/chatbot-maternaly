@@ -2,7 +2,10 @@ import { NextResponse } from "next/server";
 import {
   redactConversationSensitiveText,
 } from "@/lib/hotel/conversations/service";
-import { handleInboundMaternalyWhatsApp } from "@/lib/maternaly/conversation/twilio-inbound";
+import {
+  handleInboundMaternalyWhatsApp,
+  recordMaternalyServiceMediaDispatchOutcome,
+} from "@/lib/maternaly/conversation/twilio-inbound";
 import { YCloudProvider } from "@/lib/maternaly/whatsapp/provider";
 
 export const runtime = "nodejs";
@@ -66,6 +69,26 @@ export async function POST(request: Request) {
     });
     mediaResults.push(delivery);
     textDeliveredWithMedia ||= index === 0 && delivery.ok;
+    if (result.botReply) {
+      try {
+        await recordMaternalyServiceMediaDispatchOutcome({
+          conversationId: result.conversation.id,
+          messageId: result.botReply.id,
+          media: [item],
+          outcome: delivery.ok ? "queued" : "failed",
+          transport: "ycloud_api",
+          prefaceTransport: "not_required",
+          posterTransport: "ycloud_api",
+          providerSidPresent: Boolean(delivery.messageId),
+          error: delivery.error,
+        });
+      } catch (error) {
+        console.error("[ycloud:webhook] media dispatch observability failed", {
+          conversationId: result.conversation.id,
+          errorType: error instanceof Error ? error.name : typeof error,
+        });
+      }
+    }
   }
 
   const textResult = result.botReply && !textDeliveredWithMedia

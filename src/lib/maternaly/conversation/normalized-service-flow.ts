@@ -6,6 +6,7 @@ import {
 import { findKnowledgeService } from "@/lib/maternaly/knowledge/catalog";
 import type { NormalizedSheetsClient } from "@/lib/maternaly/sheets/normalized-client";
 import type { MaternalyNormalizedServiceKey } from "@/lib/maternaly/sheets/normalized-template";
+import type { MaternalyReminderLifecycle } from "@/lib/maternaly/reminders/lifecycle";
 
 export interface NormalizedFlowEvent {
   eventType: string;
@@ -30,6 +31,7 @@ export async function advanceNormalizedServiceFlow(input: {
   message: string;
   client?: NormalizedSheetsClient;
   env?: NodeJS.ProcessEnv;
+  reminderLifecycle?: MaternalyReminderLifecycle;
 }): Promise<NormalizedServiceFlowResult> {
   const serviceKey = detectNormalizedServiceKey(input.message) ?? input.conversation.maternalyNormalizedFlow?.serviceKey;
   if (!serviceKey) {
@@ -37,8 +39,22 @@ export async function advanceNormalizedServiceFlow(input: {
   }
 
   const adapter = input.client
-    ? new MaternalyCoreAdapter(undefined, undefined, undefined, new MaternalyToolExecutor(input.client))
-    : new MaternalyCoreAdapter();
+    ? new MaternalyCoreAdapter(
+        undefined,
+        undefined,
+        undefined,
+        new MaternalyToolExecutor(input.client),
+        undefined,
+        input.reminderLifecycle,
+      )
+    : new MaternalyCoreAdapter(
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        input.reminderLifecycle,
+      );
   const result = await adapter.handle({
     conversation: input.conversation,
     inbound: {

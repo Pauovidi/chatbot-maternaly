@@ -33,6 +33,23 @@ const optionalSecrets = [
 
 const warnings = [];
 const missing = [];
+const contentSidPattern = /^HX[a-fA-F0-9]{32}$/;
+
+function hasGoogleSheetsCredentials() {
+  return Boolean(
+    process.env.GOOGLE_SERVICE_ACCOUNT_JSON_BASE64?.trim() ||
+      process.env.GOOGLE_APPLICATION_CREDENTIALS?.trim() ||
+      process.env.MATERNALY_GOOGLE_SHEETS_SERVICE_ACCOUNT_JSON?.trim() ||
+      process.env.HOTEL_GOOGLE_SHEETS_SERVICE_ACCOUNT_JSON?.trim() ||
+      process.env.GOOGLE_SERVICE_ACCOUNT_JSON?.trim() ||
+      (process.env.MATERNALY_GOOGLE_SHEETS_SERVICE_ACCOUNT_EMAIL?.trim() &&
+        process.env.MATERNALY_GOOGLE_SHEETS_PRIVATE_KEY?.trim()) ||
+      (process.env.HOTEL_GOOGLE_SHEETS_SERVICE_ACCOUNT_EMAIL?.trim() &&
+        process.env.HOTEL_GOOGLE_SHEETS_PRIVATE_KEY?.trim()) ||
+      (process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL?.trim() &&
+        process.env.GOOGLE_PRIVATE_KEY?.trim()),
+  );
+}
 
 for (const key of Object.keys(requiredNonSecret)) {
   if (!process.env[key]?.trim()) {
@@ -103,6 +120,46 @@ if (process.env.WHATSAPP_PROVIDER === "twilio") {
 
 if (process.env.LLM_PROVIDER === "openai" && !process.env.OPENAI_API_KEY?.trim()) {
   missing.push("OPENAI_API_KEY when LLM_PROVIDER=openai");
+}
+
+if (["1", "true", "yes", "on"].includes(process.env.MATERNALY_REMINDERS_ENABLED?.trim().toLowerCase())) {
+  if (!process.env.MATERNALY_ADMIN_TASK_TOKEN?.trim()) {
+    missing.push("MATERNALY_ADMIN_TASK_TOKEN when MATERNALY_REMINDERS_ENABLED=true");
+  }
+  for (const key of [
+    "MATERNALY_REMINDER_TWILIO_CONTENT_SID_ONLINE",
+    "MATERNALY_REMINDER_TWILIO_CONTENT_SID_PRESENCIAL",
+  ]) {
+    const value = process.env[key]?.trim();
+    if (!value || !contentSidPattern.test(value)) {
+      missing.push(`${key} with a valid Twilio ContentSid`);
+    }
+  }
+  if (!process.env.TWILIO_ACCOUNT_SID?.trim()) {
+    missing.push("TWILIO_ACCOUNT_SID for Maternaly reminders");
+  }
+  if (!process.env.TWILIO_AUTH_TOKEN?.trim()) {
+    missing.push("TWILIO_AUTH_TOKEN for Maternaly reminders");
+  }
+  if (!process.env.TWILIO_WHATSAPP_FROM?.trim() && !process.env.TWILIO_MESSAGING_SERVICE_SID?.trim()) {
+    missing.push("TWILIO_WHATSAPP_FROM or TWILIO_MESSAGING_SERVICE_SID for Maternaly reminders");
+  }
+  if (process.env.MATERNALY_NORMALIZED_SHEETS_ENABLED !== "true") {
+    missing.push("MATERNALY_NORMALIZED_SHEETS_ENABLED=true for Maternaly reminders");
+  }
+  const normalizedServices = (process.env.MATERNALY_NORMALIZED_SERVICE_IDS || "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+  if (!normalizedServices.includes("charla_embarazo_1_20")) {
+    missing.push("MATERNALY_NORMALIZED_SERVICE_IDS including charla_embarazo_1_20");
+  }
+  if (!process.env.MATERNALY_CHARLA_EMBARAZO_SHEET_ID?.trim()) {
+    missing.push("MATERNALY_CHARLA_EMBARAZO_SHEET_ID for Maternaly reminders");
+  }
+  if (!hasGoogleSheetsCredentials()) {
+    missing.push("Google Sheets service account credentials for Maternaly reminders");
+  }
 }
 
 console.log("[info] Required non-secret shape:");

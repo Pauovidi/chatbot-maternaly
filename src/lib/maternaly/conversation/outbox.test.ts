@@ -17,6 +17,7 @@ describe("Maternaly conversation outbox", () => {
           serviceId: "taller_blw",
           alt: "Cartel BLW",
           url: "https://maternaly.example.test/maternaly/services/taller-blw.jpeg",
+          prefaceText: "Te paso la información del taller BLW para que sepas en qué consiste.",
         },
         {
           serviceId: "charla_embarazo_1_20",
@@ -26,11 +27,18 @@ describe("Maternaly conversation outbox", () => {
       ],
     });
 
+    expect(result.twiml).toContain(
+      "<Body>Te paso la información del taller BLW para que sepas en qué consiste.</Body>",
+    );
     expect(result.twiml).toContain("<Body>Información de BLW &amp; seguridad</Body>");
     expect(result.twiml).toContain(
       "<Media>https://maternaly.example.test/maternaly/services/taller-blw.jpeg</Media>",
     );
     expect(result.twiml).not.toContain("charla-informativa-embarazo.jpeg");
+    expect(result.twiml.match(/<Message>/g)).toHaveLength(2);
+    expect(result.twiml.indexOf("Te paso la información")).toBeLessThan(
+      result.twiml.indexOf("<Media>"),
+    );
     expect(result.media.map((item) => item.serviceId)).toEqual(["taller_blw"]);
   });
 });

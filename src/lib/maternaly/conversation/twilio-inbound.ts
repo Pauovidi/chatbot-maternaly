@@ -12,7 +12,13 @@ import { MaternalyConversationOutbox, type MaternalyOutboundMedia } from "@/lib/
 import { readMaternalyRuntimeConfig } from "@/lib/maternaly/config/env";
 import { resolveMaternalyServiceMedia } from "@/lib/maternaly/conversation/service-media";
 import type { NormalizedSheetsClient } from "@/lib/maternaly/sheets/normalized-client";
+import {
+  createMaternalyReminderLifecycle,
+  type MaternalyReminderLifecycle,
+} from "@/lib/maternaly/reminders/lifecycle";
+import { PostgresMaternalyReminderRepository } from "@/lib/maternaly/reminders/postgres-repository";
 import { MATERNALY_SAFE_FALLBACK, ensureMaternalySafeReply } from "./response-engine";
+import { withMaternalyConversationTurnLock } from "./turn-lock";
 
 function nowIso() {
   return new Date().toISOString();
@@ -52,6 +58,116 @@ function createEvent(conversationId: string, eventType: string, payload?: unknow
     createdAt: nowIso(),
     at: nowIso(),
   };
+}
+
+export type MaternalyServiceMediaDispatchTransport =
+  | "twilio_rest_api"
+  | "twiml"
+  | "ycloud_api";
+
+export interface MaternalyServiceMediaDispatchOutcome {
+  conversationId: string;
+  messageId: string;
+  media: readonly {
+    serviceId?: string;
+    triggerKind?: MaternalyOutboundMedia["triggerKind"];
+  }[];
+  outcome: "queued" | "failed";
+  transport: MaternalyServiceMediaDispatchTransport;
+  prefaceTransport?: MaternalyServiceMediaDispatchTransport | "not_required";
+  posterTransport?: MaternalyServiceMediaDispatchTransport;
+  providerSidPresent?: boolean;
+  error?: string;
+}
+
+export async function recordMaternalyServiceMediaDispatchOutcome(
+  input: MaternalyServiceMediaDispatchOutcome,
+  store: ConversationStore = getConversationStore(),
+): Promise<void> {
+  const eventType = input.outcome === "queued"
+    ? "maternaly_service_media_dispatched"
+    : "maternaly_service_media_dispatch_failed";
+
+  for (const item of input.media) {
+    if (
+      item.serviceId !== "charla_embarazo_1_20"
+      && item.serviceId !== "taller_blw"
+    ) {
+      continue;
+    }
+    const current = await store.getById(input.conversationId);
+    const alreadyRecorded = current?.events.some((event) => {
+      if (event.eventType !== eventType || typeof event.payload !== "object" || !event.payload) {
+        return false;
+      }
+      const payload = event.payload as { messageId?: unknown; serviceId?: unknown };
+      return payload.messageId === input.messageId && payload.serviceId === item.serviceId;
+    });
+    if (alreadyRecorded) {
+      continue;
+    }
+
+    await store.addEvent(
+      createEvent(input.conversationId, eventType, {
+        serviceId: item.serviceId,
+        triggerKind: item.triggerKind,
+        source: "maternaly_service_media",
+        messageId: input.messageId,
+        deliveryState: input.outcome,
+        transport: input.transport,
+        prefaceTransport: input.prefaceTransport,
+        posterTransport: input.posterTransport,
+        providerSidPresent: input.providerSidPresent,
+        error: input.error?.slice(0, 300),
+      }),
+    );
+  }
+}
+
+export async function recordMaternalyOutboundDeliveryUncertain(
+  input: {
+    conversationId: string;
+    messageId: string;
+    transport: "twilio_rest_api";
+    error?: string;
+  },
+  store: ConversationStore = getConversationStore(),
+): Promise<void> {
+  const current = await store.getById(input.conversationId);
+  if (!current) {
+    throw new Error("conversation_not_found_for_delivery_reconciliation");
+  }
+  const alreadyRecorded = current.events.some((event) => {
+    if (
+      event.eventType !== "maternaly_outbound_delivery_uncertain" ||
+      typeof event.payload !== "object" ||
+      !event.payload
+    ) {
+      return false;
+    }
+    return (event.payload as { messageId?: unknown }).messageId === input.messageId;
+  });
+  if (alreadyRecorded) {
+    return;
+  }
+
+  await store.replaceConversation({
+    ...current,
+    mode: "human",
+    humanRequested: true,
+    requiresManualReview: true,
+    maternalyReviewStatus: "manual_review_required",
+    updatedAt: nowIso(),
+  });
+  await store.addEvent(
+    createEvent(input.conversationId, "maternaly_outbound_delivery_uncertain", {
+      messageId: input.messageId,
+      transport: input.transport,
+      deliveryState: "uncertain",
+      requiresManualReview: true,
+      error: input.error?.slice(0, 300),
+    }),
+  );
 }
 
 async function getOrCreateMaternalyConversation(
@@ -121,19 +237,58 @@ async function getOrCreateMaternalyConversation(
   return (await store.getById(record.id)) ?? record;
 }
 
-function createCoreAdapter(client?: NormalizedSheetsClient) {
+function createRuntimeReminderLifecycle(
+  env: NodeJS.ProcessEnv,
+): MaternalyReminderLifecycle | undefined {
+  if (!env.DATABASE_URL?.trim()) {
+    return undefined;
+  }
+  return createMaternalyReminderLifecycle(
+    PostgresMaternalyReminderRepository.fromEnv(env),
+  );
+}
+
+function createCoreAdapter(
+  client?: NormalizedSheetsClient,
+  reminderLifecycle?: MaternalyReminderLifecycle,
+) {
   return client
-    ? new MaternalyCoreAdapter(undefined, undefined, undefined, new MaternalyToolExecutor(client))
-    : new MaternalyCoreAdapter();
+    ? new MaternalyCoreAdapter(
+        undefined,
+        undefined,
+        undefined,
+        new MaternalyToolExecutor(client),
+        undefined,
+        reminderLifecycle,
+      )
+    : new MaternalyCoreAdapter(undefined, undefined, undefined, undefined, undefined, reminderLifecycle);
+}
+
+export interface HandleInboundMaternalyWhatsAppOptions {
+  normalizedSheetsClient?: NormalizedSheetsClient;
+  normalizedEnv?: NodeJS.ProcessEnv;
+  reminderLifecycle?: MaternalyReminderLifecycle;
 }
 
 export async function handleInboundMaternalyWhatsApp(
   payload: InboundWhatsAppPayload,
   store: ConversationStore = getConversationStore(),
-  options: {
-    normalizedSheetsClient?: NormalizedSheetsClient;
-    normalizedEnv?: NodeJS.ProcessEnv;
-  } = {},
+  options: HandleInboundMaternalyWhatsAppOptions = {},
+): Promise<InboundResult> {
+  const env = options.normalizedEnv ?? process.env;
+  return withMaternalyConversationTurnLock(
+    {
+      conversationKey: normalizePhone(payload.from).phoneNormalized,
+      env,
+    },
+    () => handleInboundMaternalyWhatsAppUnlocked(payload, store, options),
+  );
+}
+
+async function handleInboundMaternalyWhatsAppUnlocked(
+  payload: InboundWhatsAppPayload,
+  store: ConversationStore,
+  options: HandleInboundMaternalyWhatsAppOptions,
 ): Promise<InboundResult> {
   const conversation = await getOrCreateMaternalyConversation(store, payload);
   const safeBody = redactConversationSensitiveText(payload.body);
@@ -154,18 +309,28 @@ export async function handleInboundMaternalyWhatsApp(
     }
   }
 
-  const inbound = await store.addMessage(
-    createMessage({
+  const inboundDraft = createMessage({
       conversationId: conversation.id,
       direction: "inbound",
       senderType: "user",
       externalMessageSid: payload.messageSid,
       body: safeBody,
       rawPayload: payload.rawPayload,
-    }),
-  );
+    });
+  const inbound = await store.addMessage(inboundDraft);
+  if (inbound.id !== inboundDraft.id) {
+    return {
+      conversation: (await store.getById(conversation.id)) ?? conversation,
+      inbound,
+      twiml: outbox.buildEmpty({ provider }).twiml,
+    };
+  }
   const latest = (await store.getById(conversation.id)) ?? conversation;
-  const adapter = createCoreAdapter(options.normalizedSheetsClient);
+  const runtimeEnv = options.normalizedEnv ?? process.env;
+  const adapter = createCoreAdapter(
+    options.normalizedSheetsClient,
+    options.reminderLifecycle ?? createRuntimeReminderLifecycle(runtimeEnv),
+  );
   const core = await adapter.handle({
     conversation: latest,
     inbound: {
@@ -176,7 +341,7 @@ export async function handleInboundMaternalyWhatsApp(
       messageSid: payload.messageSid,
       displayName: payload.displayName,
     },
-    env: options.normalizedEnv,
+    env: runtimeEnv,
   });
 
   console.info(
@@ -292,10 +457,13 @@ export async function handleInboundMaternalyWhatsApp(
   );
   for (const item of dispatchedMedia) {
     await store.addEvent(
-      createEvent(latest.id, "maternaly_service_media_dispatched", {
+      createEvent(latest.id, "maternaly_service_media_dispatch_attempted", {
         serviceId: item.serviceId,
         triggerKind: item.triggerKind,
         source: "maternaly_service_media",
+        messageId: botReply.id,
+        deliveryState: "attempted",
+        provider,
       }),
     );
   }

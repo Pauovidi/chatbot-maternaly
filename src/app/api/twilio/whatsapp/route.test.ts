@@ -2,7 +2,10 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { resetConversationStoreForTests } from "@/lib/hotel/conversations/file-store";
+import {
+  getConversationStore,
+  resetConversationStoreForTests,
+} from "@/lib/hotel/conversations/file-store";
 import { MATERNALY_KNOWLEDGE_SERVICES } from "@/lib/maternaly/knowledge/catalog";
 import { POST } from "./route";
 
@@ -13,7 +16,9 @@ let tempDir: string;
 let storePath: string;
 
 function extractMessage(twiml: string): string {
-  return twiml.match(/<Message>([\s\S]*?)<\/Message>/)?.[1] ?? "";
+  return Array.from(twiml.matchAll(/<Message>([\s\S]*?)<\/Message>/g))
+    .map((match) => match[1])
+    .join("\n");
 }
 
 function extractMedia(twiml: string): string[] {
@@ -51,6 +56,13 @@ async function postTwilio(input: {
     text,
     message: extractMessage(text),
   };
+}
+
+async function mediaDispatchEvents(phone = "34600000123") {
+  const conversation = await getConversationStore().getByPhone(phone);
+  return conversation?.events.filter((event) =>
+    event.eventType.startsWith("maternaly_service_media_dispatch"),
+  ) ?? [];
 }
 
 beforeEach(async () => {
@@ -139,18 +151,181 @@ describe("Maternaly Twilio WhatsApp route", () => {
     expect(body.get("Body")).toMatch(/Maternaly|asistente virtual/i);
   });
 
+  it("queues the service notice before the poster in two ordered Twilio sends", async () => {
+    vi.stubEnv("TWILIO_ACCOUNT_SID", "AC_test");
+    vi.stubEnv("TWILIO_AUTH_TOKEN", "token");
+    vi.stubEnv("TWILIO_WHATSAPP_FROM", "whatsapp:+14155238886");
+    vi.stubEnv("HOTEL_CONVERSATIONS_MOCK_TWILIO", "false");
+    const eventsSeenBeforeAccept: string[][] = [];
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockImplementationOnce(async () => {
+        eventsSeenBeforeAccept.push(
+          (await mediaDispatchEvents()).map((event) => event.eventType),
+        );
+        return new Response(JSON.stringify({ sid: "SM_PREFACE" }), { status: 200 });
+      })
+      .mockImplementationOnce(async () => {
+        eventsSeenBeforeAccept.push(
+          (await mediaDispatchEvents()).map((event) => event.eventType),
+        );
+        return new Response(JSON.stringify({ sid: "SM_POSTER" }), { status: 200 });
+      });
+
+    const result = await postTwilio({
+      body: "Quiero información de la charla informativa",
+      sid: "SM_DIRECT_MEDIA_SEQUENCE",
+    });
+    const firstBody = fetchMock.mock.calls[0]?.[1]?.body as URLSearchParams;
+    const secondBody = fetchMock.mock.calls[1]?.[1]?.body as URLSearchParams;
+
+    expect(result.text).toBe('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(firstBody.get("Body")).toBe(
+      "Te paso la información de la charla para que sepas en qué consiste.",
+    );
+    expect(firstBody.get("MediaUrl")).toBeNull();
+    expect(secondBody.get("Body")).toMatch(/charla informativa|embarazo/i);
+    expect(secondBody.get("MediaUrl")).toBe(
+      "https://maternaly.example.test/maternaly/services/charla-informativa-embarazo.jpeg",
+    );
+    expect(eventsSeenBeforeAccept).toEqual([
+      ["maternaly_service_media_dispatch_attempted"],
+      ["maternaly_service_media_dispatch_attempted"],
+    ]);
+    const mediaEvents = await mediaDispatchEvents();
+    expect(mediaEvents.map((event) => event.eventType)).toEqual([
+      "maternaly_service_media_dispatch_attempted",
+      "maternaly_service_media_dispatched",
+    ]);
+    expect(mediaEvents[1]?.payload).toEqual(expect.objectContaining({
+      deliveryState: "queued",
+      transport: "twilio_rest_api",
+      prefaceTransport: "twilio_rest_api",
+      posterTransport: "twilio_rest_api",
+    }));
+  });
+
+  it("falls back with only the poster when the notice was already delivered", async () => {
+    vi.stubEnv("TWILIO_ACCOUNT_SID", "AC_test");
+    vi.stubEnv("TWILIO_AUTH_TOKEN", "token");
+    vi.stubEnv("TWILIO_WHATSAPP_FROM", "whatsapp:+14155238886");
+    vi.stubEnv("HOTEL_CONVERSATIONS_MOCK_TWILIO", "false");
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ sid: "SM_PREFACE_ONLY" }), { status: 200 }),
+      )
+      .mockResolvedValueOnce(new Response("request rejected", { status: 400 }));
+
+    const result = await postTwilio({
+      body: "Quiero información de la charla informativa",
+      sid: "SM_DIRECT_MEDIA_PARTIAL_FALLBACK",
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(result.text.match(/<Message>/g)).toHaveLength(1);
+    expect(result.text).not.toContain("Te paso la información de la charla");
+    expect(extractMedia(result.text)).toEqual([
+      "https://maternaly.example.test/maternaly/services/charla-informativa-embarazo.jpeg",
+    ]);
+    const mediaEvents = await mediaDispatchEvents();
+    expect(mediaEvents.map((event) => event.eventType)).toEqual([
+      "maternaly_service_media_dispatch_attempted",
+      "maternaly_service_media_dispatched",
+    ]);
+    expect(mediaEvents[1]?.payload).toEqual(expect.objectContaining({
+      deliveryState: "queued",
+      transport: "twiml",
+      prefaceTransport: "twilio_rest_api",
+      posterTransport: "twiml",
+    }));
+  });
+
   it("falls back to visible TwiML when direct Twilio delivery fails", async () => {
     vi.stubEnv("TWILIO_ACCOUNT_SID", "AC_test");
     vi.stubEnv("TWILIO_AUTH_TOKEN", "token");
     vi.stubEnv("TWILIO_WHATSAPP_FROM", "whatsapp:+14155238886");
     vi.stubEnv("HOTEL_CONVERSATIONS_MOCK_TWILIO", "false");
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
-      new Response("upstream failed", { status: 500 }),
+      new Response("request rejected", { status: 400 }),
     );
 
     const result = await postTwilio({
       body: "hola",
       sid: "SM_DIRECT_DELIVERY_FALLBACK",
+    });
+
+    expect(result.response.status).toBe(200);
+    expect(result.text).toContain("<Message>");
+    expect(result.message).toMatch(/Maternaly|asistente virtual/i);
+  });
+
+  it("does not duplicate a reply through TwiML when the direct POST result is ambiguous", async () => {
+    vi.stubEnv("TWILIO_ACCOUNT_SID", "AC_test");
+    vi.stubEnv("TWILIO_AUTH_TOKEN", "token");
+    vi.stubEnv("TWILIO_WHATSAPP_FROM", "whatsapp:+14155238886");
+    vi.stubEnv("HOTEL_CONVERSATIONS_MOCK_TWILIO", "false");
+    const cause = Object.assign(new Error("connection reset"), { code: "ECONNRESET" });
+    vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(
+      Object.assign(new TypeError("fetch failed"), { cause }),
+    );
+
+    const result = await postTwilio({
+      body: "hola",
+      sid: "SM_DIRECT_DELIVERY_AMBIGUOUS",
+    });
+
+    expect(result.response.status).toBe(200);
+    expect(result.text).toBe('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
+    expect(result.text).not.toContain("<Message>");
+    const conversation = await getConversationStore().getByPhone("34600000123");
+    expect(conversation).toMatchObject({
+      mode: "human",
+      humanRequested: true,
+      requiresManualReview: true,
+      maternalyReviewStatus: "manual_review_required",
+    });
+    expect(conversation?.events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ eventType: "maternaly_outbound_delivery_uncertain" }),
+      ]),
+    );
+  });
+
+  it("does not duplicate a reply when Twilio returns an ambiguous 5xx", async () => {
+    vi.stubEnv("TWILIO_ACCOUNT_SID", "AC_test");
+    vi.stubEnv("TWILIO_AUTH_TOKEN", "token");
+    vi.stubEnv("TWILIO_WHATSAPP_FROM", "whatsapp:+14155238886");
+    vi.stubEnv("HOTEL_CONVERSATIONS_MOCK_TWILIO", "false");
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response("upstream failed", { status: 503 }),
+    );
+
+    const result = await postTwilio({
+      body: "hola",
+      sid: "SM_DIRECT_DELIVERY_AMBIGUOUS_5XX",
+    });
+
+    expect(result.text).toBe('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
+    const conversation = await getConversationStore().getByPhone("34600000123");
+    expect(conversation).toMatchObject({
+      mode: "human",
+      requiresManualReview: true,
+    });
+  });
+
+  it("uses visible TwiML when the direct POST definitely failed before sending", async () => {
+    vi.stubEnv("TWILIO_ACCOUNT_SID", "AC_test");
+    vi.stubEnv("TWILIO_AUTH_TOKEN", "token");
+    vi.stubEnv("TWILIO_WHATSAPP_FROM", "whatsapp:+14155238886");
+    vi.stubEnv("HOTEL_CONVERSATIONS_MOCK_TWILIO", "false");
+    const cause = Object.assign(new Error("dns lookup failed"), { code: "ENOTFOUND" });
+    vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(
+      Object.assign(new TypeError("fetch failed"), { cause }),
+    );
+
+    const result = await postTwilio({
+      body: "hola",
+      sid: "SM_DIRECT_DELIVERY_PRESEND_FAILURE",
     });
 
     expect(result.response.status).toBe(200);
@@ -248,6 +423,10 @@ describe("Maternaly Twilio WhatsApp route", () => {
     expect(extractMedia(first.text)).toEqual([
       "https://maternaly.example.test/maternaly/services/taller-blw.jpeg",
     ]);
+    expect(first.text.match(/<Message>/g)).toHaveLength(2);
+    expect(first.text.indexOf("Te paso la información del taller BLW")).toBeLessThan(
+      first.text.indexOf("<Media>"),
+    );
     expect(extractMedia(second.text)).toEqual([]);
   });
 

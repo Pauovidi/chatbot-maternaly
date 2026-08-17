@@ -1,4 +1,5 @@
 import type { ConversationRecord, MaternalyNormalizedFlowState } from "@/lib/hotel/conversations/types";
+import { readMaternalyRuntimeConfig } from "@/lib/maternaly/config/env";
 import {
   MaternalyCopyRenderer,
   ensureDistinctMaternalyReply,
@@ -30,12 +31,23 @@ import {
 } from "@/lib/maternaly/sheets/normalized-service-availability";
 import {
   applyRegistrationWritePlan,
+  buildNormalizedRegistrationId,
   buildRegistrationWritePlan,
   type NormalizedRegistrationWritePlan,
   type NormalizedRegistrationWriteResult,
 } from "@/lib/maternaly/sheets/normalized-write";
 import {
+  cancelNormalizedRegistration,
+  type CancelNormalizedRegistrationResult,
+  lookupActiveNormalizedRegistration,
+  type LookupNormalizedRegistrationResult,
+} from "@/lib/maternaly/sheets/normalized-registration-management";
+import { withNormalizedRegistrationSessionLock } from "@/lib/maternaly/sheets/normalized-registration-lock";
+import { buildConfirmedCharlaReminderInput } from "@/lib/maternaly/reminders/charla-integration";
+import type { MaternalyReminderLifecycle } from "@/lib/maternaly/reminders/lifecycle";
+import {
   humanNormalize,
+  registrationStatusDomain,
   type MaternalyNormalizedServiceKey,
 } from "@/lib/maternaly/sheets/normalized-template";
 
@@ -100,6 +112,8 @@ export interface MaternalyAuthorityTurnTrace {
     serviceCandidate?: string;
     serviceQuestionFocus: StructuredIntent["service_question_focus"];
     locationPreference?: string;
+    classificationSource?: StructuredIntent["classification_source"];
+    classificationFallbackReason?: string;
     shouldHandoff: boolean;
     safetyFlags: string[];
   };
@@ -142,6 +156,8 @@ type PolicyAction =
   | "silent_human"
   | "reset"
   | "handoff"
+  | "cancel_registration"
+  | "reservation_status"
   | "privacy"
   | "payment"
   | "invoice"
@@ -195,6 +211,18 @@ interface ContextualRegistrationDiagnostics {
   partnerNameSkipped: boolean;
   dateMappedTo?: "babyBirthDate" | "fppOrDueDate";
   changed: boolean;
+}
+
+function isConfirmedRegistrationWrite(
+  toolResult: NormalizedToolResult | undefined,
+): boolean {
+  return Boolean(
+    toolResult?.status === "write_result" &&
+    toolResult.writeResult?.ok &&
+    toolResult.writeResult.mode === "live" &&
+    toolResult.writeResult.registrationPersisted &&
+    toolResult.writeResult.registrationStatus === "confirmada",
+  );
 }
 
 function nowIso() {
@@ -259,10 +287,6 @@ function summarizeState(state: MaternalyNormalizedFlowState | undefined) {
     modality: state?.modality,
     pendingFields: state?.pendingFields ?? [],
   };
-}
-
-function inferOpenAiCall(env: NodeJS.ProcessEnv | undefined): boolean {
-  return (env?.LLM_PROVIDER ?? process.env.LLM_PROVIDER) === "openai" && Boolean(env?.OPENAI_API_KEY ?? process.env.OPENAI_API_KEY);
 }
 
 export function normalizeInboundWhatsappPhone(value: string | undefined): string | undefined {
@@ -337,18 +361,97 @@ function normalizeDateLike(value: string | undefined): string | undefined {
   return `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 }
 
-function extractDateFromMessage(message: string): string | undefined {
-  const numericDate = normalizeDateLike(
-    message.match(/\b\d{4}-\d{2}-\d{2}\b/)?.[0] ??
-      message.match(/\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b/)?.[0],
+const SPANISH_DAY_NUMBERS: Record<string, number> = {
+  uno: 1,
+  primero: 1,
+  dos: 2,
+  tres: 3,
+  cuatro: 4,
+  cinco: 5,
+  seis: 6,
+  siete: 7,
+  ocho: 8,
+  nueve: 9,
+  diez: 10,
+  once: 11,
+  doce: 12,
+  trece: 13,
+  catorce: 14,
+  quince: 15,
+  dieciseis: 16,
+  diecisiete: 17,
+  dieciocho: 18,
+  diecinueve: 19,
+  veinte: 20,
+  veintiuno: 21,
+  veintidos: 22,
+  veintitres: 23,
+  veinticuatro: 24,
+  veinticinco: 25,
+  veintiseis: 26,
+  veintisiete: 27,
+  veintiocho: 28,
+  veintinueve: 29,
+  treinta: 30,
+  "treinta y uno": 31,
+};
+
+const SPANISH_DAY_TOKEN =
+  "(?:\\d{1,2}|treinta\\s+y\\s+uno|veintiuno|veintidos|veintitres|veinticuatro|veinticinco|veintiseis|veintisiete|veintiocho|veintinueve|dieciseis|diecisiete|dieciocho|diecinueve|catorce|quince|trece|doce|once|veinte|treinta|diez|nueve|ocho|siete|seis|cinco|cuatro|tres|dos|primero|uno)";
+
+function contextualDateLike(
+  day: number,
+  month: number,
+  explicitYear: number | undefined,
+  now = new Date(),
+): string | undefined {
+  let year = explicitYear ?? now.getUTCFullYear();
+  let candidate = normalizeDateLike(
+    `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`,
   );
+  if (!candidate) {
+    return undefined;
+  }
+
+  if (!explicitYear) {
+    const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+    const candidateDate = new Date(`${candidate}T00:00:00.000Z`);
+    if (candidateDate.getTime() < today.getTime()) {
+      year += 1;
+      candidate = normalizeDateLike(
+        `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`,
+      );
+    }
+  }
+
+  return candidate;
+}
+
+function extractDateFromMessage(message: string): string | undefined {
+  const isoDate = normalizeDateLike(message.match(/\b\d{4}-\d{2}-\d{2}\b/)?.[0]);
+  if (isoDate) {
+    return isoDate;
+  }
+
+  const numericParts = message.match(/\b(\d{1,2})[/-](\d{1,2})(?:[/-](\d{2,4}))?\b/);
+  const numericDate = numericParts
+    ? contextualDateLike(
+        Number.parseInt(numericParts[1], 10),
+        Number.parseInt(numericParts[2], 10),
+        numericParts[3]
+          ? Number.parseInt(numericParts[3].length === 2 ? `20${numericParts[3]}` : numericParts[3], 10)
+          : undefined,
+      )
+    : undefined;
   if (numericDate) {
     return numericDate;
   }
 
   const text = normalize(message);
   const textualDate = text.match(
-    /\b(\d{1,2})\s*(?:de\s+)?(ene(?:ro)?|feb(?:rero)?|mar(?:zo)?|abr(?:il)?|may(?:o)?|jun(?:io)?|jul(?:io)?|ago(?:sto)?|sep(?:tiembre)?|set(?:iembre)?|oct(?:ubre)?|nov(?:iembre)?|dic(?:iembre)?)(?:\s*(?:de\s+)?(\d{4}))?\b/,
+    new RegExp(
+      `\\b(${SPANISH_DAY_TOKEN})\\s*(?:de\\s+)?(ene(?:ro)?|feb(?:rero)?|mar(?:zo)?|abr(?:il)?|may(?:o)?|jun(?:io)?|jul(?:io)?|ago(?:sto)?|sep(?:tiembre)?|set(?:iembre)?|oct(?:ubre)?|nov(?:iembre)?|dic(?:iembre)?)(?:\\s*(?:de\\s+)?(\\d{4}))?\\b`,
+    ),
   );
   if (!textualDate) {
     return undefined;
@@ -369,29 +472,12 @@ function extractDateFromMessage(message: string): string | undefined {
     nov: 11,
     dic: 12,
   };
-  const day = Number(textualDate[1]);
+  const normalizedDay = textualDate[1].replace(/\s+/g, " ");
+  const day = /^\d+$/.test(normalizedDay)
+    ? Number.parseInt(normalizedDay, 10)
+    : SPANISH_DAY_NUMBERS[normalizedDay];
   const month = monthByPrefix[textualDate[2].slice(0, 3)];
-  const now = new Date();
-  let year = textualDate[3] ? Number(textualDate[3]) : now.getUTCFullYear();
-  let candidate = normalizeDateLike(
-    `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`,
-  );
-  if (!candidate) {
-    return undefined;
-  }
-
-  if (!textualDate[3]) {
-    const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
-    const candidateDate = new Date(`${candidate}T00:00:00.000Z`);
-    if (candidateDate.getTime() < today.getTime()) {
-      year += 1;
-      candidate = normalizeDateLike(
-        `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`,
-      );
-    }
-  }
-
-  return candidate;
+  return contextualDateLike(day, month, textualDate[3] ? Number(textualDate[3]) : undefined);
 }
 
 function isFutureDate(isoDate: string): boolean {
@@ -410,7 +496,7 @@ function extractPersonSegmentAfterPrefix(message: string, prefix: RegExp): strin
 
   const remainder = message.slice(prefixMatch.index + prefixMatch[0].length).trim();
   const boundaryPatterns = [
-    /[,;.!?]/,
+    /[,;!?]/,
     /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i,
     /(?:\+?\d[\d\s().-]{6,}\d)/,
     /\b\d{4}-\d{2}-\d{2}\b|\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b/,
@@ -439,7 +525,7 @@ function normalizeFullNameCandidate(
   }
 
   const normalized = normalize(candidate);
-  const tokens = candidate.match(/[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+/g) ?? [];
+  const tokens = candidate.match(/[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+\.?/g) ?? [];
   const nonNameTokens = new Set([
     "ahora",
     "bien",
@@ -475,18 +561,18 @@ function normalizeFullNameCandidate(
     "y",
   ]);
   const nameParticles = new Set(["de", "del", "la", "las", "los"]);
-  const normalizedTokens = tokens.map((token) => normalize(token));
+  const normalizedTokens = tokens.map((token) => normalize(token.replace(/\.$/, "")));
   const hasValidParticles = normalizedTokens.every(
     (token, index) =>
       !nameParticles.has(token) || (index > 0 && index < normalizedTokens.length - 1),
   );
   const hasStrongBareNameShape =
     !options.requireCapitalized ||
-    (tokens.length <= 4 &&
+    (tokens.length <= 6 &&
       tokens.every(
         (token, index) =>
           nameParticles.has(normalizedTokens[index]) ||
-          /^[A-ZÁÉÍÓÚÜÑ][A-Za-zÁÉÍÓÚÜÑáéíóúüñ]*$/.test(token),
+          /^[A-ZÁÉÍÓÚÜÑ](?:[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]*|\.)$/.test(token),
       ));
   if (
     tokens.length < 2 ||
@@ -494,7 +580,7 @@ function normalizeFullNameCandidate(
     normalizedTokens.some((token) => nonNameTokens.has(token)) ||
     !hasValidParticles ||
     !hasStrongBareNameShape ||
-    !/^[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+(?:[ '\-][A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+){1,5}$/.test(candidate) ||
+    !/^[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+\.?(?:[ '\-][A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+\.?){1,5}$/.test(candidate) ||
     /\b(?:embarazad[ao]|gestacion|semanas?|mes(?:es)?|por cierto)\b/.test(normalized)
   ) {
     return undefined;
@@ -525,7 +611,12 @@ function extractContextualFullName(
     const phoneIndex = message.search(/(?:\+?\d[\d\s().-]{6,}\d)/);
     const dateIndex = message.search(/\b\d{4}-\d{2}-\d{2}\b|\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b/);
     const commaIndex = message.indexOf(",");
-    const limits = [emailIndex, phoneIndex, dateIndex, commaIndex].filter((index) => index >= 0);
+    const nextFieldIndex = message.search(
+      /\s+(?:(?:y\s+)?mi\s+)?(?:pareja|acompa[nñ]ante)\b|\s+(?:fpp|fecha\s+(?:probable\s+)?(?:de\s+)?parto|salgo\s+de\s+cuentas)\b/i,
+    );
+    const limits = [emailIndex, phoneIndex, dateIndex, commaIndex, nextFieldIndex].filter(
+      (index) => index >= 0,
+    );
     const end = limits.length > 0 ? Math.min(...limits) : message.length;
     return message.slice(0, end);
   })();
@@ -537,10 +628,11 @@ function extractContextualFullName(
 
 function inferContextualPeopleCount(message: string): number | undefined {
   const text = normalize(message);
+  const companion = "(?:pareja|chic[oa]|novi[oa]|marido|mujer|espos[oa]|acompanante)";
   if (
-    /\b(?:voy|vengo|vamos)\s+en\s+pareja\b|\b(?:yo\s+y\s+mi\s+pareja|mi\s+pareja\s+y\s+yo)\b|\bsomos\s+dos\b|\b2\s*personas?\b|\bdos\s+personas?\b/.test(
-      text,
-    )
+    new RegExp(
+      `\\b(?:voy|vengo|vamos|venimos)\\s+en\\s+pareja\\b|\\b(?:yo\\s+y\\s+mi\\s+${companion}|mi\\s+${companion}\\s+y\\s+yo)\\b|\\b(?:somos|iremos|vamos|venimos|acudiremos|asistiremos|vendremos|seremos)\\s+(?:mi\\s+${companion}\\s+y\\s+yo|yo\\s+y\\s+mi\\s+${companion}|ambos|ambas|los\\s+dos|las\\s+dos|dos)\\b|\\b2\\s*personas?\\b|\\bdos\\s+personas?\\b`,
+    ).test(text)
   ) {
     return 2;
   }
@@ -583,8 +675,10 @@ function isSessionSelectionReply(message: string, previous?: MaternalyNormalized
   return /\bopcion\s*[1-9]\b/.test(text) ||
     /\b(?:bilbao|erandio|online)\b/.test(text) ||
     /\b\d{1,2}\s+(?:de\s+)?(?:enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre)\b/.test(text) ||
+    new RegExp(`^(?:la\\s+)?del\\s+${SPANISH_DAY_TOKEN}$`).test(text) ||
     /^(?:opcion\s*)?[1-9]$/.test(text) ||
-    /^(?:la\s+)?(?:primera|segunda|tercera|cuarta|quinta|sexta|septima|octava|novena)$/.test(text);
+    /^(?:la\s+)?(?:primera|segunda|tercera|cuarta|quinta|sexta|septima|octava|novena)$/.test(text) ||
+    /\b(?:prefiero|mejor|elijo|escojo|quiero|me\s+quedo\s+con)\s+(?:la\s+)?(?:primera|segunda|tercera|cuarta|quinta|sexta|septima|octava|novena)\b/.test(text);
 }
 
 function normalizePartnerNameCandidate(
@@ -720,7 +814,10 @@ function extractContextualRegistrationSlots(input: {
   const phoneDiscrepancy =
     Boolean(inboundPhone && messagePhone && inboundPhone !== messagePhone);
 
-  if (fullName && !input.previous?.fullName) {
+  // An explicit declaration in the current turn ("no, me llamo...") is the
+  // authoritative correction even if an earlier name was already persisted.
+  // Bare names are still accepted only while fullName is actually pending.
+  if (fullName) {
     contextualSlots.fullName = fullName;
   }
 
@@ -929,7 +1026,6 @@ function stateBaseAfterServiceSwitch(
     fullName: previous.fullName,
     phone: previous.phone,
     email: previous.email,
-    peopleCount: previous.peopleCount,
     updatedAt: nowIso(),
   };
 }
@@ -1211,6 +1307,73 @@ function toPersistedState(state: MaternalyConversationState): MaternalyNormalize
   return persisted as MaternalyNormalizedFlowState;
 }
 
+function asksForAlternativeSessions(message: string): boolean {
+  const text = normalize(message);
+  return /\b(?:que|cuales|ver|hay|muestra(?:me)?)\b[^.!?]{0,35}\b(?:otras?|mas|alternativas?)\s+(?:fechas?|sesiones?|opciones?|citas?)\b/.test(
+    text,
+  ) || /\b(?:otras?|mas|alternativas?)\s+(?:fechas?|sesiones?|opciones?|citas?)\b/.test(text);
+}
+
+const SESSION_ORDINALS: Record<string, number> = {
+  primera: 1,
+  segunda: 2,
+  tercera: 3,
+  cuarta: 4,
+  quinta: 5,
+  sexta: 6,
+  septima: 7,
+  octava: 8,
+  novena: 9,
+};
+
+function preferredSessionOrdinal(text: string): number | undefined {
+  const matches = Array.from(
+    text.matchAll(/\b(?:la\s+)?(primera|segunda|tercera|cuarta|quinta|sexta|septima|octava|novena)\b/g),
+  ).map((match) => ({
+    value: SESSION_ORDINALS[match[1]],
+    start: match.index ?? 0,
+    end: (match.index ?? 0) + match[0].length,
+  }));
+  if (matches.length === 0) {
+    return undefined;
+  }
+
+  const asserted = matches.filter((match) => {
+    const before = text.slice(Math.max(0, match.start - 45), match.start);
+    const after = text.slice(match.end, match.end + 12);
+    return !(/\bno\s*$/.test(before) || /^\s*no\b/.test(after));
+  });
+  const explicitlyPreferred = asserted.filter((match) => {
+    const before = text.slice(Math.max(0, match.start - 60), match.start);
+    return /\b(?:prefiero|mejor|elijo|escojo|quiero|sino|en\s+vez\s+de|me\s+quedo\s+con)\b[^.!?;:]*$/.test(
+      before,
+    );
+  });
+  if (explicitlyPreferred.length > 0) {
+    return explicitlyPreferred.at(-1)?.value;
+  }
+
+  if (
+    asserted.length > 1 &&
+    /\b(?:primera|segunda|tercera|cuarta|quinta|sexta|septima|octava|novena)\b\s+(?:o|u)\s+(?:la\s+)?\b(?:primera|segunda|tercera|cuarta|quinta|sexta|septima|octava|novena)\b/.test(
+      text,
+    )
+  ) {
+    return undefined;
+  }
+
+  return asserted.at(-1)?.value;
+}
+
+function referencedSessionDay(text: string): number | undefined {
+  const match = text.match(new RegExp(`^(?:la\\s+)?del\\s+(${SPANISH_DAY_TOKEN})$`));
+  if (!match) {
+    return undefined;
+  }
+  const token = match[1].replace(/\s+/g, " ");
+  return /^\d+$/.test(token) ? Number.parseInt(token, 10) : SPANISH_DAY_NUMBERS[token];
+}
+
 function chooseSession(
   message: string,
   state: MaternalyNormalizedFlowState,
@@ -1268,25 +1431,23 @@ function chooseSession(
     ? undefined
     : trimmed.match(/^(?:opcion\s*)?([1-9])$/)?.[1] ??
       normalized.match(/\bopcion\s*([1-9])\b/)?.[1] ??
-      (
-        /\b(?:la\s+)?primera\b|\bopcion\s+uno\b/.test(normalized)
-          ? "1"
-          : /\b(?:la\s+)?segunda\b|\bopcion\s+dos\b/.test(normalized)
-            ? "2"
-            : /\b(?:la\s+)?tercera\b|\bopcion\s+tres\b/.test(normalized)
-              ? "3"
-              : /\b(?:la\s+)?cuarta\b|\bopcion\s+cuatro\b/.test(normalized)
-                ? "4"
-                : /\b(?:la\s+)?quinta\b|\bopcion\s+cinco\b/.test(normalized)
-                  ? "5"
-                  : /\b(?:la\s+)?sexta\b|\bopcion\s+seis\b/.test(normalized)
-                    ? "6"
-                    : /\b(?:la\s+)?septima\b|\bopcion\s+siete\b/.test(normalized)
-                      ? "7"
-                      : /\b(?:la\s+)?octava\b|\bopcion\s+ocho\b/.test(normalized)
-                        ? "8"
-                        : undefined
-      );
+      (/\bopcion\s+uno\b/.test(normalized)
+        ? "1"
+        : /\bopcion\s+dos\b/.test(normalized)
+          ? "2"
+          : /\bopcion\s+tres\b/.test(normalized)
+            ? "3"
+            : /\bopcion\s+cuatro\b/.test(normalized)
+              ? "4"
+              : /\bopcion\s+cinco\b/.test(normalized)
+                ? "5"
+                : /\bopcion\s+seis\b/.test(normalized)
+                  ? "6"
+                  : /\bopcion\s+siete\b/.test(normalized)
+                    ? "7"
+                    : /\bopcion\s+ocho\b/.test(normalized)
+                      ? "8"
+                      : preferredSessionOrdinal(normalized)?.toString());
   const isoDate = message.match(/\b\d{4}-\d{2}-\d{2}\b/)?.[0];
   const numericDate = message.match(/\b(\d{1,2})[/-](\d{1,2})(?:[/-](\d{2,4}))?\b/);
   const spanishDate = normalized.match(
@@ -1356,6 +1517,22 @@ function chooseSession(
     }
   }
 
+  const dayOnly = state.stage === "choosing_session" ? referencedSessionDay(trimmed) : undefined;
+  let matchedDayOnly = false;
+  if (dayOnly) {
+    const dayMatches = candidates.filter((session) => {
+      const match = session.date?.match(/^\d{4}-\d{2}-(\d{2})$/);
+      return match ? Number.parseInt(match[1], 10) === dayOnly : false;
+    });
+    if (dayMatches.length === 1) {
+      return dayMatches[0];
+    }
+    if (dayMatches.length > 1) {
+      candidates = dayMatches;
+      matchedDayOnly = true;
+    }
+  }
+
   if (ordinal) {
     const index = Number.parseInt(ordinal, 10) - 1;
     // La Charla se numera sobre exactamente la vista que se ha mostrado. Sin
@@ -1377,18 +1554,16 @@ function chooseSession(
     explicitModality ||
     ordinal ||
     matchedExplicitDate ||
+    matchedDayOnly ||
     unmatchedDateIsSessionChoice,
   );
   if (!hasExplicitChoice && state.selectedSessionId) {
     // Una selección anterior solo se puede reutilizar si continúa siendo
     // compatible con la sede/modalidad vigentes. Esto impide volver a Bilbao
     // después de que la usuaria haya cambiado su preferencia a online.
-    const previous = candidates.find(
+    return candidates.find(
       (session) => session.sessionId === state.selectedSessionId,
     );
-    if (previous) {
-      return previous;
-    }
   }
 
   // La Charla tiene ocho convocatorias contractuales. Nunca se elige una por
@@ -1398,11 +1573,15 @@ function chooseSession(
     return undefined;
   }
 
+  if (unmatchedDateIsSessionChoice) {
+    return undefined;
+  }
+
   if (candidates.length === 1) {
     return candidates[0];
   }
 
-  if (availableSessions.length === 1) {
+  if (!location && !modality && !state.selectedSessionId && availableSessions.length === 1) {
     return availableSessions[0];
   }
 
@@ -1430,6 +1609,45 @@ function requiredFieldsForService(
     !state.peopleCount ? "peopleCount" : "",
     !state.babyBirthDate ? "babyBirthDate" : "",
   ].filter(Boolean);
+}
+
+function parseDateOnlyUtc(value: string | undefined): number | undefined {
+  const text = value?.trim() ?? "";
+  const iso = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text);
+  const local = /^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/.exec(text);
+  const year = Number(iso?.[1] ?? local?.[3]);
+  const month = Number(iso?.[2] ?? local?.[2]);
+  const day = Number(iso?.[3] ?? local?.[1]);
+  if (!year || month < 1 || month > 12 || day < 1 || day > 31) {
+    return undefined;
+  }
+  const timestamp = Date.UTC(year, month - 1, day);
+  const parsed = new Date(timestamp);
+  return parsed.getUTCFullYear() === year &&
+    parsed.getUTCMonth() === month - 1 &&
+    parsed.getUTCDate() === day
+    ? timestamp
+    : undefined;
+}
+
+function charlaEligibilityError(
+  state: MaternalyNormalizedFlowState,
+  session: NormalizedAvailableSession,
+): "charla_outside_week_1_20" | "charla_invalid_pregnancy_dates" | undefined {
+  if ((state.pregnancyWeek ?? 0) > 20 || (state.pregnancyMonth ?? 0) >= 6) {
+    return "charla_outside_week_1_20";
+  }
+
+  const dueDate = parseDateOnlyUtc(state.fppOrDueDate);
+  const sessionDate = parseDateOnlyUtc(session.date);
+  if (dueDate === undefined || sessionDate === undefined) {
+    return "charla_invalid_pregnancy_dates";
+  }
+  const daysUntilDue = Math.round((dueDate - sessionDate) / 86_400_000);
+  const gestationalDaysAtSession = 280 - daysUntilDue;
+  return gestationalDaysAtSession >= 7 && gestationalDaysAtSession < 147
+    ? undefined
+    : "charla_outside_week_1_20";
 }
 
 function notesFromState(state: MaternalyNormalizedFlowState) {
@@ -1490,7 +1708,7 @@ export class MaternalyStateReducer {
     );
 
     const journeyStage = input.intent.slots.journey_stage ?? previous?.journeyStage;
-    const state =
+    const reducedState =
       input.intent.intent === "service_discovery" || input.intent.service_scope === "catalog"
         ? {
             ...(previous ?? { updatedAt: nowIso() }),
@@ -1524,6 +1742,18 @@ export class MaternalyStateReducer {
             updatedAt: nowIso(),
           };
 
+    const alternativeSessionsRequested = asksForAlternativeSessions(input.message);
+    const state = alternativeSessionsRequested
+      ? {
+          ...reducedState,
+          selectedSessionId: undefined,
+          selectedGroupId: undefined,
+          stage: "choosing_session" as const,
+          rescheduleReviewRequired:
+            previous?.stage === "confirmed" || previous?.rescheduleReviewRequired || undefined,
+        }
+      : reducedState;
+
     return { state, diagnostics: contextual.diagnostics };
   }
 }
@@ -1542,6 +1772,34 @@ export class MaternalyConversationPolicy {
 
     if (conversation.mode === "human") {
       return { action: "silent_human", reason: "human_mode" };
+    }
+
+    if (intent.safety_flags.includes("cancel_registration_request")) {
+      return {
+        action: "cancel_registration",
+        serviceKey: state.serviceKey,
+        reason: "explicit_registration_cancellation",
+      };
+    }
+
+    if (intent.intent === "registration_status_query") {
+      return {
+        action: "reservation_status",
+        serviceKey: state.serviceKey,
+        reason: "read_only_registration_status_query",
+      };
+    }
+
+    if (
+      state.rescheduleReviewRequired &&
+      conversation.maternalyNormalizedFlow?.stage !== "confirmed" &&
+      isRegistrationRequestTurn(intent) &&
+      intent.intent !== "availability_request"
+    ) {
+      return {
+        action: "handoff",
+        reason: "confirmed_registration_change_requires_human",
+      };
     }
 
     if (intent.should_handoff || intent.intent === "handoff_request") {
@@ -1699,7 +1957,7 @@ export class MaternalyToolExecutor {
       env,
     });
 
-    if (!availability.ok) {
+    if (!availability.ok || !availability.snapshot) {
       const status =
         availability.reason === "missing_sheet_id"
           ? "not_configured"
@@ -1756,6 +2014,23 @@ export class MaternalyToolExecutor {
       };
     }
 
+    if (input.serviceKey === "charla_embarazo_1_20") {
+      const eligibilityError = charlaEligibilityError(stateWithSelection, selectedSession);
+      if (eligibilityError) {
+        return {
+          status: "manual_validation_required",
+          serviceKey: input.serviceKey,
+          snapshot,
+          sessions,
+          calendarSessions,
+          selectedSession,
+          missingFields: [],
+          availability,
+          error: eligibilityError,
+        };
+      }
+    }
+
     const draft = {
       serviceKey: input.serviceKey,
       fullName: stateWithSelection.fullName,
@@ -1769,16 +2044,140 @@ export class MaternalyToolExecutor {
       notes: notesFromState(stateWithSelection),
     };
 
-    let writeAvailability: NormalizedServiceAvailabilityResult;
     try {
-      writeAvailability = await getNormalizedServiceAvailability({
-        serviceKey: input.serviceKey,
-        client: this.client,
-        env,
-      });
+      return await withNormalizedRegistrationSessionLock(
+        {
+          sheetId: snapshot.sheetId,
+          sessionId: selectedSession.sessionId,
+          mode: readMaternalyRuntimeConfig(env).normalizedSheets.writeMode,
+          env,
+        },
+        async () => {
+          let writeAvailability: NormalizedServiceAvailabilityResult;
+          try {
+            writeAvailability = await getNormalizedServiceAvailability({
+              serviceKey: input.serviceKey,
+              client: this.client,
+              env,
+            });
+          } catch (error) {
+            return {
+              status: "manual_validation_required" as const,
+              serviceKey: input.serviceKey,
+              snapshot,
+              sessions,
+              calendarSessions,
+              selectedSession,
+              missingFields: [],
+              availability,
+              error: error instanceof Error ? error.message : "sheet_read_failed",
+            };
+          }
+
+          if (!writeAvailability.ok || !writeAvailability.snapshot) {
+            return {
+              status: "manual_validation_required" as const,
+              serviceKey: input.serviceKey,
+              snapshot: writeAvailability.snapshot ?? snapshot,
+              sessions: writeAvailability.sessions,
+              calendarSessions: writeAvailability.sessions,
+              selectedSession,
+              missingFields: [],
+              availability: writeAvailability,
+              error: writeAvailability.diagnostics.errorType ?? writeAvailability.reason,
+            };
+          }
+
+          const writeSnapshot = writeAvailability.snapshot;
+          const writeSessions = writeAvailability.sessions;
+          const writeCalendarSessions = writeSessions;
+          const revalidatedSession =
+            writeCalendarSessions.find((candidate) => candidate.sessionId === selectedSession.sessionId) ??
+            writeCalendarSessions.find(
+              (candidate) =>
+                candidate.date === selectedSession.date &&
+                candidate.startTime === selectedSession.startTime &&
+                normalize(candidate.location ?? "") === normalize(selectedSession.location ?? "") &&
+                candidate.modality === selectedSession.modality,
+            );
+
+          if (!revalidatedSession) {
+            return {
+              status: "manual_validation_required" as const,
+              serviceKey: input.serviceKey,
+              snapshot: writeSnapshot,
+              sessions: writeSessions,
+              calendarSessions: writeCalendarSessions,
+              selectedSession,
+              missingFields: [],
+              availability: writeAvailability,
+              error: "selected_session_not_available_on_revalidation",
+            };
+          }
+
+          if (revalidatedSession.sessionId !== selectedSession.sessionId) {
+            return {
+              status: "manual_validation_required" as const,
+              serviceKey: input.serviceKey,
+              snapshot: writeSnapshot,
+              sessions: writeSessions,
+              calendarSessions: writeCalendarSessions,
+              selectedSession,
+              missingFields: [],
+              availability: writeAvailability,
+              error: "selected_session_id_changed_on_revalidation",
+            };
+          }
+
+          if (input.serviceKey === "charla_embarazo_1_20") {
+            const eligibilityError = charlaEligibilityError(
+              stateWithSelection,
+              revalidatedSession,
+            );
+            if (eligibilityError) {
+              return {
+                status: "manual_validation_required" as const,
+                serviceKey: input.serviceKey,
+                snapshot: writeSnapshot,
+                sessions: writeSessions,
+                calendarSessions: writeCalendarSessions,
+                selectedSession: revalidatedSession,
+                missingFields: [],
+                availability: writeAvailability,
+                error: eligibilityError,
+              };
+            }
+          }
+
+          const plan = buildRegistrationWritePlan({
+            snapshot: writeSnapshot,
+            session: revalidatedSession,
+            draft,
+            env,
+          });
+          const writeResult = await applyRegistrationWritePlan({
+            snapshot: writeSnapshot,
+            client: this.client,
+            plan,
+          });
+
+          return {
+            status: "write_result" as const,
+            serviceKey: input.serviceKey,
+            snapshot: writeSnapshot,
+            sessions: writeSessions,
+            calendarSessions: writeCalendarSessions,
+            selectedSession: revalidatedSession,
+            missingFields: [],
+            plan,
+            writeResult,
+            availability: writeAvailability,
+          };
+        },
+      );
     } catch (error) {
       return {
-        status: "read_error",
+        status: "manual_validation_required",
         serviceKey: input.serviceKey,
         snapshot,
         sessions,
@@ -1786,71 +2185,29 @@ export class MaternalyToolExecutor {
         selectedSession,
         missingFields: [],
         availability,
-        error: error instanceof Error ? error.message : "sheet_read_failed",
+        error: error instanceof Error ? error.message : "registration_lock_or_write_failed",
       };
     }
+  }
 
-    if (!writeAvailability.ok || !writeAvailability.snapshot) {
-      return {
-        status: "read_error",
-        serviceKey: input.serviceKey,
-        snapshot: writeAvailability.snapshot ?? snapshot,
-        sessions: writeAvailability.sessions,
-        calendarSessions: writeAvailability.sessions,
-        selectedSession,
-        missingFields: [],
-        availability: writeAvailability,
-        error: writeAvailability.diagnostics.errorType ?? writeAvailability.reason,
-      };
-    }
+  cancelRegistration(input: {
+    phone: string;
+    serviceKey?: MaternalyNormalizedServiceKey;
+    selectedSessionId?: string;
+    selectedGroupId?: string;
+    env?: NodeJS.ProcessEnv;
+  }): Promise<CancelNormalizedRegistrationResult> {
+    return cancelNormalizedRegistration({ ...input, client: this.client });
+  }
 
-    const writeSnapshot = writeAvailability.snapshot;
-    const writeSessions = writeAvailability.sessions;
-    const writeCalendarSessions = writeSessions;
-    const revalidatedSession =
-      writeCalendarSessions.find((candidate) => candidate.sessionId === selectedSession.sessionId) ??
-      writeCalendarSessions.find(
-        (candidate) =>
-          candidate.date === selectedSession.date &&
-          candidate.startTime === selectedSession.startTime &&
-          normalize(candidate.location ?? "") === normalize(selectedSession.location ?? "") &&
-          candidate.modality === selectedSession.modality,
-      );
-
-    if (!revalidatedSession) {
-      return {
-        status: "read_error",
-        serviceKey: input.serviceKey,
-        snapshot: writeSnapshot,
-        sessions: writeSessions,
-        calendarSessions: writeCalendarSessions,
-        selectedSession,
-        missingFields: [],
-        availability: writeAvailability,
-        error: "selected_session_not_available_on_revalidation",
-      };
-    }
-
-    const plan = buildRegistrationWritePlan({
-      snapshot: writeSnapshot,
-      session: revalidatedSession,
-      draft,
-      env,
-    });
-    const writeResult = await applyRegistrationWritePlan({ snapshot: writeSnapshot, client: this.client, plan });
-
-    return {
-      status: "write_result",
-      serviceKey: input.serviceKey,
-      snapshot: writeSnapshot,
-      sessions: writeSessions,
-      calendarSessions: writeCalendarSessions,
-      selectedSession: revalidatedSession,
-      missingFields: [],
-      plan,
-      writeResult,
-      availability: writeAvailability,
-    };
+  lookupRegistration(input: {
+    phone: string;
+    serviceKey?: MaternalyNormalizedServiceKey;
+    selectedSessionId?: string;
+    selectedGroupId?: string;
+    env?: NodeJS.ProcessEnv;
+  }): Promise<LookupNormalizedRegistrationResult> {
+    return lookupActiveNormalizedRegistration({ ...input, client: this.client });
   }
 }
 
@@ -1902,6 +2259,51 @@ function availabilityFallbackReason(toolResult: NormalizedToolResult): string | 
   return undefined;
 }
 
+type ReminderCancellationStatus = "cancelled" | "skipped" | "not_pending" | "failed";
+
+function remindersEnabled(env: NodeJS.ProcessEnv | undefined): boolean {
+  return ["1", "true", "yes", "on"].includes(
+    (env?.MATERNALY_REMINDERS_ENABLED ?? process.env.MATERNALY_REMINDERS_ENABLED ?? "")
+      .trim()
+      .toLowerCase(),
+  );
+}
+
+function registrationIdFromWrite(
+  plan: NormalizedRegistrationWritePlan | undefined,
+  writeResult?: NormalizedRegistrationWriteResult,
+): string | undefined {
+  if (writeResult?.registrationId?.trim()) {
+    return writeResult.registrationId.trim();
+  }
+  const values = plan?.operations.find((operation) => operation.tab === "Inscripciones")?.values;
+  const value = values?.registrationId ?? values?.inscripcion_id;
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function registrationIdFromCancellation(
+  result: CancelNormalizedRegistrationResult,
+  phone?: string,
+): string | undefined {
+  if (result.status !== "cancelled") {
+    return undefined;
+  }
+  if (result.registration.registrationId?.trim()) {
+    return result.registration.registrationId.trim();
+  }
+  if (result.registration.idempotencyKey?.trim()) {
+    return `INS_BOT_${result.registration.idempotencyKey.slice(0, 16).toUpperCase()}`;
+  }
+  if (result.registration.sessionId) {
+    return buildNormalizedRegistrationId({
+      serviceKey: result.registration.serviceKey,
+      phone,
+      sessionId: result.registration.sessionId,
+    });
+  }
+  return undefined;
+}
+
 export class MaternalyCoreAdapter {
   constructor(
     private readonly interpreter = new MaternalyConversationInterpreter(),
@@ -1909,6 +2311,7 @@ export class MaternalyCoreAdapter {
     private readonly policy = new MaternalyConversationPolicy(),
     private readonly toolExecutor = new MaternalyToolExecutor(),
     private readonly renderer = new MaternalyCopyRenderer(),
+    private readonly reminderLifecycle?: MaternalyReminderLifecycle,
   ) {}
 
   async handle(input: {
@@ -1919,7 +2322,6 @@ export class MaternalyCoreAdapter {
     const turnStartedAt = Date.now();
     const turnId = createTurnId();
     const stateBefore = input.conversation.maternalyNormalizedFlow;
-    const openaiCallExpected = inferOpenAiCall(input.env);
     const nluStartedAt = Date.now();
     const interpretedIntent = await this.interpreter.interpret(
       input.inbound.text,
@@ -1959,6 +2361,8 @@ export class MaternalyCoreAdapter {
           serviceCandidate: intent.service_candidate,
           serviceQuestionFocus: intent.service_question_focus,
           locationPreference: intent.location_preference,
+          classificationSource: intent.classification_source,
+          classificationFallbackReason: intent.classification_fallback_reason,
           slots: definedEntries({
             service_id: intent.slots.service_id,
             normalized_service_key: intent.slots.normalized_service_key,
@@ -1983,6 +2387,8 @@ export class MaternalyCoreAdapter {
           serviceCandidate: intent.service_candidate,
           serviceQuestionFocus: intent.service_question_focus,
           locationPreference: intent.location_preference,
+          classificationSource: intent.classification_source,
+          classificationFallbackReason: intent.classification_fallback_reason,
           needsAvailabilityLookup: intent.needs_availability_lookup,
           shouldHandoff: intent.should_handoff,
           safetyFlags: intent.safety_flags,
@@ -2001,6 +2407,10 @@ export class MaternalyCoreAdapter {
     ];
 
     let toolResult: NormalizedToolResult | undefined;
+    let cancellationResult: CancelNormalizedRegistrationResult | undefined;
+    let registrationLookupResult: LookupNormalizedRegistrationResult | undefined;
+    let reminderScheduleNeedsReview = false;
+    let reminderCancellationStatus: ReminderCancellationStatus | undefined;
     let toolsMs = 0;
     let nextState: MaternalyNormalizedFlowState | undefined =
       decision.action === "reset"
@@ -2070,6 +2480,8 @@ export class MaternalyCoreAdapter {
         env: input.env,
       });
       toolsMs = elapsedSince(toolsStartedAt);
+      const confirmedRegistrationWrite = isConfirmedRegistrationWrite(toolResult);
+      const confirmedCharlaWrite = serviceKey === "charla_embarazo_1_20" && confirmedRegistrationWrite;
       const clearUnresolvedCharlaSelection =
         serviceKey === "charla_embarazo_1_20" &&
         toolResult.status === "sessions_available";
@@ -2090,7 +2502,9 @@ export class MaternalyCoreAdapter {
             : toolResult.status === "write_result"
             ? toolResult.plan?.blocked || !toolResult.writeResult?.ok
               ? "blocked"
-              : "write_planned"
+              : confirmedRegistrationWrite
+                ? "confirmed"
+                : "write_planned"
             : toolResult.status === "collecting_fields"
               ? "collecting_contact"
               : toolResult.status === "sessions_available"
@@ -2149,6 +2563,8 @@ export class MaternalyCoreAdapter {
           missingFields: toolResult.missingFields,
           mode: toolResult.writeResult?.mode,
           applied: toolResult.writeResult?.applied,
+          registrationPersisted: toolResult.writeResult?.registrationPersisted,
+          registrationStatus: toolResult.writeResult?.registrationStatus,
           blockedReasons: toolResult.plan?.blockedReasons,
           diagnostics: classifySheetDiagnostics(toolResult),
           error: safeInternalError(toolResult.error),
@@ -2163,19 +2579,237 @@ export class MaternalyCoreAdapter {
           formatWarnings: toolResult.writeResult?.formatWarnings,
         },
       });
+
+      if (confirmedCharlaWrite) {
+        if (!remindersEnabled(input.env)) {
+          events.push({
+            eventType: "maternaly_reminder_schedule_skipped",
+            payload: { reason: "reminders_disabled", serviceKey, sessionId: toolResult.selectedSession?.sessionId },
+          });
+        } else {
+          const reminderStartedAt = Date.now();
+          try {
+            const registrationId = registrationIdFromWrite(
+              toolResult.plan,
+              toolResult.writeResult,
+            );
+            const phoneE164 = normalizeInboundWhatsappPhone(nextState.phone ?? input.inbound.from);
+            if (!this.reminderLifecycle || !registrationId || !phoneE164 || !toolResult.selectedSession) {
+              throw new Error("reminder_lifecycle_or_confirmed_registration_data_unavailable");
+            }
+            const reminderInput = buildConfirmedCharlaReminderInput({
+              registrationId,
+              session: toolResult.selectedSession,
+              phoneE164,
+              conversationId: input.conversation.id,
+            });
+            const scheduled = await this.reminderLifecycle.scheduleCharla(reminderInput);
+            const accessReady =
+              reminderInput.modality === "presencial" || Boolean(reminderInput.onlineAccess);
+            reminderScheduleNeedsReview = !accessReady;
+            events.push({
+              eventType: "maternaly_reminder_scheduled",
+              payload: {
+                reminderId: scheduled.reminder.reminderId,
+                registrationId,
+                sessionId: scheduled.reminder.sessionId,
+                scheduledFor: scheduled.reminder.scheduledFor,
+                created: scheduled.created,
+                supersededCount: scheduled.supersededCount,
+                accessReady,
+              },
+            });
+            if (!accessReady) {
+              events.push({
+                eventType: "maternaly_reminder_access_requires_review",
+                payload: { registrationId, sessionId: scheduled.reminder.sessionId },
+              });
+            }
+          } catch (error) {
+            reminderScheduleNeedsReview = true;
+            events.push({
+              eventType: "maternaly_reminder_schedule_failed",
+              payload: {
+                registrationId: registrationIdFromWrite(
+                  toolResult.plan,
+                  toolResult.writeResult,
+                ),
+                sessionId: toolResult.selectedSession?.sessionId,
+                error: safeInternalError(error instanceof Error ? error.message : String(error)),
+              },
+            });
+          } finally {
+            toolsMs += elapsedSince(reminderStartedAt);
+          }
+        }
+      }
+    }
+
+    if (decision.action === "reservation_status") {
+      const toolsStartedAt = Date.now();
+      registrationLookupResult = await this.toolExecutor.lookupRegistration({
+        phone: input.inbound.from,
+        serviceKey: decision.serviceKey ?? state.serviceKey,
+        selectedSessionId: state.selectedSessionId,
+        selectedGroupId: state.selectedGroupId,
+        env: input.env,
+      });
+      toolsMs += elapsedSince(toolsStartedAt);
+      if (registrationLookupResult.status === "found") {
+        const lookupConfirmed =
+          registrationStatusDomain(registrationLookupResult.registration.status ?? "") ===
+          "confirmed";
+        nextState = {
+          ...toPersistedState(state),
+          serviceKey: registrationLookupResult.registration.serviceKey,
+          stage: lookupConfirmed ? "confirmed" : "write_planned",
+          selectedSessionId:
+            registrationLookupResult.registration.sessionId ?? state.selectedSessionId,
+          selectedGroupId:
+            registrationLookupResult.registration.groupId ?? state.selectedGroupId,
+          pendingFields: [],
+          updatedAt: nowIso(),
+        };
+      } else {
+        nextState = {
+          ...toPersistedState(state),
+          stage:
+            registrationLookupResult.status === "not_found"
+              ? "collecting_service"
+              : "handoff",
+          selectedSessionId: undefined,
+          selectedGroupId: undefined,
+          pendingFields: [],
+          updatedAt: nowIso(),
+        };
+      }
+      events.push({
+        eventType: "maternaly_registration_status_checked",
+        payload: {
+          status: registrationLookupResult.status,
+          serviceKey: decision.serviceKey ?? state.serviceKey,
+          sessionId:
+            registrationLookupResult.status === "found"
+              ? registrationLookupResult.registration.sessionId
+              : state.selectedSessionId,
+        },
+      });
+    }
+
+    if (decision.action === "cancel_registration") {
+      const toolsStartedAt = Date.now();
+      cancellationResult = await this.toolExecutor.cancelRegistration({
+        phone: input.inbound.from,
+        serviceKey: state.serviceKey,
+        selectedSessionId: state.selectedSessionId,
+        selectedGroupId: state.selectedGroupId,
+        env: input.env,
+      });
+      const cancelled = cancellationResult.status === "cancelled";
+      if (cancelled) {
+        const registrationId = registrationIdFromCancellation(
+          cancellationResult,
+          input.inbound.from,
+        );
+        if (!this.reminderLifecycle) {
+          reminderCancellationStatus = remindersEnabled(input.env) ? "failed" : "skipped";
+          if (reminderCancellationStatus === "failed") {
+            events.push({
+              eventType: "maternaly_reminder_cancellation_failed",
+              payload: { registrationId, error: "reminder_lifecycle_unavailable" },
+            });
+          }
+        } else if (!registrationId) {
+          reminderCancellationStatus = "failed";
+          events.push({
+            eventType: "maternaly_reminder_cancellation_failed",
+            payload: { error: "registration_id_unavailable" },
+          });
+        } else {
+          try {
+            const cancelledCount = await this.reminderLifecycle.cancelPendingForRegistration(
+              registrationId,
+            );
+            reminderCancellationStatus = cancelledCount > 0 ? "cancelled" : "not_pending";
+            events.push(
+              cancelledCount > 0
+                ? {
+                    eventType: "maternaly_reminders_cancelled_for_registration",
+                    payload: { registrationId, cancelledCount },
+                  }
+                : {
+                    eventType: "maternaly_reminder_cancellation_not_pending",
+                    payload: { registrationId, cancelledCount },
+                  },
+            );
+          } catch (error) {
+            reminderCancellationStatus = "failed";
+            events.push({
+              eventType: "maternaly_reminder_cancellation_failed",
+              payload: {
+                registrationId,
+                error: safeInternalError(error instanceof Error ? error.message : String(error)),
+              },
+            });
+          }
+        }
+      }
+      toolsMs = elapsedSince(toolsStartedAt);
+      nextState = {
+        ...toPersistedState(state),
+        serviceKey: cancelled ? undefined : state.serviceKey,
+        stage: cancelled ? "collecting_service" : "handoff",
+        selectedSessionId: cancelled ? undefined : state.selectedSessionId,
+        selectedGroupId: cancelled ? undefined : state.selectedGroupId,
+        pendingFields: [],
+        updatedAt: nowIso(),
+      };
+      events.push({
+        eventType: "maternaly_registration_cancellation_executed",
+        payload: {
+          status: cancellationResult.status,
+          serviceKey:
+            cancellationResult.status === "cancelled"
+              ? cancellationResult.registration.serviceKey
+              : state.serviceKey,
+          sessionId:
+            cancellationResult.status === "cancelled"
+              ? cancellationResult.registration.sessionId
+              : state.selectedSessionId,
+          reminderCancellationStatus,
+        },
+      });
     }
 
     const rendererStartedAt = Date.now();
+    const renderIntent =
+      decision.action === "service_info" &&
+      intent.service_scope === "explicit" &&
+      Boolean(intent.slots.pregnancy_month || intent.slots.pregnancy_week)
+        ? {
+            ...intent,
+            pregnancy_month: undefined,
+            pregnancy_week: undefined,
+            slots: {
+              ...intent.slots,
+              pregnancy_month: undefined,
+              pregnancy_week: undefined,
+            },
+          }
+        : intent;
     const renderInput = {
       decision,
       state: nextState,
       toolResult,
+      cancellationResult,
+      registrationLookupResult,
+      reminderCancellationStatus,
       message: input.inbound.text,
     };
     const groundedRender = await this.renderer.renderGrounded(
       {
         ...renderInput,
-        intent,
+        intent: renderIntent,
         recentTurns: buildGroundedCopyTurns(input.conversation),
       },
       input.env ?? process.env,
@@ -2229,10 +2863,21 @@ export class MaternalyCoreAdapter {
         }
       : undefined;
     const service = serviceFromDecision(decision, nextState);
+    const cancellationNeedsHuman =
+      decision.action === "cancel_registration" &&
+      (cancellationResult?.status !== "cancelled" ||
+        reminderCancellationStatus === "failed" ||
+        reminderCancellationStatus === "not_pending");
+    const registrationLookupNeedsHuman =
+      decision.action === "reservation_status" &&
+      registrationLookupResult?.status !== "found";
     const needsHuman =
       decision.action === "handoff" ||
+      cancellationNeedsHuman ||
+      registrationLookupNeedsHuman ||
       toolResult?.status === "manual_validation_required" ||
       (toolResult?.status === "write_result" && Boolean(toolResult.plan?.blocked || !toolResult.writeResult?.ok));
+    const needsReview = needsHuman || reminderScheduleNeedsReview;
     const resetPreservesManualReview =
       decision.action === "reset" &&
       (input.conversation.clientStatus === "blocked" || input.conversation.clientStatus === "ambiguous");
@@ -2283,6 +2928,11 @@ export class MaternalyCoreAdapter {
       humanModeSuppressesAutoresponse:
         input.conversation.mode !== "human" || decision.action === "reset" || !renderedMessage,
     };
+    const nluSource = intent.classification_source;
+    const nluAttemptedOpenAi =
+      nluSource === "openai" ||
+      nluSource === "deterministic_override" ||
+      nluSource === "deterministic_fallback";
     const timing: MaternalyAuthorityTiming = {
       totalDurationMs: elapsedSince(turnStartedAt),
       nluTotalMs,
@@ -2293,9 +2943,11 @@ export class MaternalyCoreAdapter {
       outboxMs: 0,
       persistenceMs: 0,
       eventLogMs: 0,
-      openaiCalls: (openaiCallExpected ? 1 : 0) + (groundedRender?.attempted ? 1 : 0),
-      usedDeterministicFastPath: !openaiCallExpected && !groundedRender?.attempted,
-      usedFallback: groundedRender?.mode === "fallback",
+      openaiCalls: (nluAttemptedOpenAi ? 1 : 0) + (groundedRender?.attempted ? 1 : 0),
+      usedDeterministicFastPath:
+        nluSource === "deterministic_fast_path" && !groundedRender?.attempted,
+      usedFallback:
+        nluSource === "deterministic_fallback" || groundedRender?.mode === "fallback",
     };
     const authorityTrace: MaternalyAuthorityTurnTrace = {
       turnId,
@@ -2304,7 +2956,11 @@ export class MaternalyCoreAdapter {
         "nlu_structured",
         "state_reducer",
         "policy",
-        ...(decision.action === "normalized_registration" ? (["tool_executor"] as const) : []),
+        ...(decision.action === "normalized_registration" ||
+        decision.action === "cancel_registration" ||
+        decision.action === "reservation_status"
+          ? (["tool_executor"] as const)
+          : []),
         "copy_renderer",
         "outbox",
       ],
@@ -2319,6 +2975,8 @@ export class MaternalyCoreAdapter {
         serviceCandidate: intent.service_candidate,
         serviceQuestionFocus: intent.service_question_focus,
         locationPreference: intent.location_preference,
+        classificationSource: intent.classification_source,
+        classificationFallbackReason: intent.classification_fallback_reason,
         shouldHandoff: intent.should_handoff,
         safetyFlags: intent.safety_flags,
       },
@@ -2399,8 +3057,28 @@ export class MaternalyCoreAdapter {
             ? input.conversation.maternalyReservationStatus === "pending"
               ? "none"
               : input.conversation.maternalyReservationStatus ?? "none"
+            : decision.action === "cancel_registration" && cancellationResult?.status === "cancelled"
+              ? "none"
+            : decision.action === "reservation_status"
+              ? registrationLookupResult?.status === "found"
+                ? registrationStatusDomain(
+                    registrationLookupResult.registration.status ?? "",
+                  ) === "confirmed"
+                  ? "confirmed"
+                  : "pending"
+                : registrationLookupResult?.status === "not_found"
+                  ? "none"
+                  : input.conversation.maternalyReservationStatus ?? "none"
             : decision.action === "normalized_registration"
-              ? "pending"
+              ? isConfirmedRegistrationWrite(toolResult)
+                ? "confirmed"
+                : input.conversation.maternalyReservationStatus === "confirmed"
+                  ? "confirmed"
+                  : toolResult?.status === "write_result" &&
+                      !toolResult.plan?.blocked &&
+                      Boolean(toolResult.writeResult?.ok)
+                    ? "pending"
+                    : input.conversation.maternalyReservationStatus ?? "none"
               : input.conversation.maternalyReservationStatus ?? "none",
         maternalyPaymentStatus:
           decision.action === "reset"
@@ -2423,7 +3101,7 @@ export class MaternalyCoreAdapter {
             ? resetPreservesManualReview
               ? input.conversation.maternalyReviewStatus ?? "manual_review_required"
               : "ok"
-            : needsHuman
+            : needsReview
               ? "manual_review_required"
               : input.conversation.maternalyReviewStatus ?? "ok",
         priority:
@@ -2448,7 +3126,7 @@ export class MaternalyCoreAdapter {
             ? resetPreservesManualReview
             : input.conversation.humanRequested,
         requiresManualReview:
-          needsHuman
+          needsReview
             ? true
             : decision.action === "reset"
               ? resetPreservesManualReview
@@ -2461,6 +3139,7 @@ export class MaternalyCoreAdapter {
             ...(input.conversation.tags ?? []),
             "maternaly",
             decision.action === "normalized_registration" ? "normalized-sheets" : "",
+            reminderScheduleNeedsReview ? "reminder-review" : "",
             "policy-copy",
           ].filter(Boolean)),
         ),

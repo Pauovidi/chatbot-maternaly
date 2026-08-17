@@ -5,9 +5,10 @@ import {
 } from "@/lib/hotel/persistence/runtime";
 import { readTwilioWhatsAppConfig } from "@/lib/hotel/twilio/client";
 import { readMaternalyRuntimeConfig } from "@/lib/maternaly/config/env";
+import { readMaternalyReminderRuntimeConfig } from "@/lib/maternaly/reminders/config";
 import { MATERNALY_ORIGINAL_SHEET_IDS, redactSheetId } from "@/lib/maternaly/sheets/copy-real-write";
 
-const REQUIRED_MIGRATION_IDS = [1, 2, 3, 4, 5] as const;
+const REQUIRED_MIGRATION_IDS = [1, 2, 3, 4, 5, 6, 7, 8] as const;
 
 interface DatabaseDiagnostics {
   reachable: boolean | null;
@@ -88,6 +89,7 @@ async function checkDatabaseDiagnostics(
 
 export async function getMaternalyHealth(env: NodeJS.ProcessEnv = process.env) {
   const config = readMaternalyRuntimeConfig(env);
+  const reminders = readMaternalyReminderRuntimeConfig(env);
   const twilioConfig = readTwilioWhatsAppConfig(env);
   const persistence = readHotelPersistenceConfig(env);
   const conversationsStore = readConversationStoreRuntimeConfig(env);
@@ -130,7 +132,8 @@ export async function getMaternalyHealth(env: NodeJS.ProcessEnv = process.env) {
       databaseUrlConfigured &&
       databaseReachable === true &&
       databaseDiagnostics.migrations.ready);
-  const ok = databaseReady && productionReady && panelReady;
+  const remindersHealthSatisfied = !reminders.enabled || reminders.ready;
+  const ok = databaseReady && productionReady && panelReady && remindersHealthSatisfied;
   const twilioWebhookProtected = Boolean(env.TWILIO_WEBHOOK_AUTH_TOKEN?.trim());
   const twilioActiveWithoutWebhookProtection =
     productionLike && config.whatsappProvider === "twilio" && !twilioWebhookProtected;
@@ -244,6 +247,13 @@ export async function getMaternalyHealth(env: NodeJS.ProcessEnv = process.env) {
       liveReady: config.normalizedSheets.liveReady,
       sheetIdsRedacted: config.normalizedSheets.sheetIds.map(redactSheetId),
       lastAuditStatus: null,
+    },
+    reminders: {
+      enabled: reminders.enabled,
+      ready: reminders.ready,
+      leadHours: 48,
+      dispatchRoute: "/api/maternaly/ops/reminders/dispatch",
+      missing: reminders.enabled ? reminders.missing : [],
     },
     demoFlow: {
       testAdnInboundEnabled: false,

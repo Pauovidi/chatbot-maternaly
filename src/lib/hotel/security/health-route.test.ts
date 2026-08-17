@@ -16,6 +16,7 @@ describe("health route", () => {
     process.env.YCLOUD_API_KEY = "super-secret-token";
     process.env.DATABASE_URL = "postgres://user:password@example.test/db";
     process.env.HOTEL_PERSISTENCE_PROVIDER = "postgres";
+    delete process.env.MATERNALY_REMINDERS_ENABLED;
 
     const response = await GET();
     const json = await response.json();
@@ -69,6 +70,9 @@ describe("health route", () => {
       }),
     );
     expect(json.googleSheets.writeEnabled).toBe(false);
+    expect(json.reminders).toEqual(
+      expect.objectContaining({ enabled: false, ready: false, leadHours: 48 }),
+    );
     expect(serialized).not.toContain("super-secret-token");
     expect(serialized).not.toContain("password@example");
   });
@@ -165,6 +169,51 @@ describe("health route", () => {
     );
     expect(json.whatsapp.twilio.warning).toContain("Twilio is active");
     expect(serialized).not.toContain("webhook-secret");
+  });
+
+  it("fails reminder readiness when task auth or the normalized Charla source is missing", async () => {
+    vi.stubEnv("NODE_ENV", "development");
+    process.env.APP_ENV = "development";
+    process.env.MATERNALY_REMINDERS_ENABLED = "true";
+    process.env.TWILIO_ACCOUNT_SID = `AC${"a".repeat(32)}`;
+    process.env.TWILIO_AUTH_TOKEN = "twilio-secret-token";
+    process.env.TWILIO_WHATSAPP_FROM = "+34600999888";
+    process.env.MATERNALY_REMINDER_TWILIO_CONTENT_SID_ONLINE = `HX${"b".repeat(32)}`;
+    process.env.MATERNALY_REMINDER_TWILIO_CONTENT_SID_PRESENCIAL = `HX${"c".repeat(32)}`;
+    delete process.env.MATERNALY_ADMIN_TASK_TOKEN;
+    delete process.env.MATERNALY_NORMALIZED_SHEETS_ENABLED;
+    delete process.env.MATERNALY_CHARLA_EMBARAZO_SHEET_ID;
+    delete process.env.GOOGLE_SERVICE_ACCOUNT_JSON_BASE64;
+    delete process.env.GOOGLE_APPLICATION_CREDENTIALS;
+    delete process.env.MATERNALY_GOOGLE_SHEETS_SERVICE_ACCOUNT_JSON;
+    delete process.env.HOTEL_GOOGLE_SHEETS_SERVICE_ACCOUNT_JSON;
+    delete process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
+    delete process.env.MATERNALY_GOOGLE_SHEETS_SERVICE_ACCOUNT_EMAIL;
+    delete process.env.MATERNALY_GOOGLE_SHEETS_PRIVATE_KEY;
+    delete process.env.HOTEL_GOOGLE_SHEETS_SERVICE_ACCOUNT_EMAIL;
+    delete process.env.HOTEL_GOOGLE_SHEETS_PRIVATE_KEY;
+    delete process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
+    delete process.env.GOOGLE_PRIVATE_KEY;
+    delete process.env.DATABASE_URL;
+
+    const response = await GET();
+    const json = await response.json();
+    const serialized = JSON.stringify(json);
+
+    expect(response.status).toBe(503);
+    expect(json.reminders).toEqual(
+      expect.objectContaining({
+        enabled: true,
+        ready: false,
+        missing: expect.arrayContaining([
+          "MATERNALY_ADMIN_TASK_TOKEN",
+          "MATERNALY_NORMALIZED_SHEETS_ENABLED=true",
+          "MATERNALY_CHARLA_EMBARAZO_SHEET_ID",
+          "Google Sheets service account credentials",
+        ]),
+      }),
+    );
+    expect(serialized).not.toContain("twilio-secret-token");
   });
 
   it("reports normalized Sheets status without full sheet IDs or secrets", async () => {

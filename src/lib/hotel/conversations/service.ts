@@ -57,6 +57,8 @@ export interface InboundResult {
     url: string;
     alt: string;
     serviceId?: string;
+    prefaceText?: string;
+    triggerKind?: "catalog" | "explicit_service" | "contextual_service";
   }>;
   twiml?: string;
 }
