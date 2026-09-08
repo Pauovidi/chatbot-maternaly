@@ -8,7 +8,7 @@ Los cinco lotes del endpoint interno respondieron HTTP 200, pero los 20 casos de
 
 ## Diagnóstico independiente
 
-Una petición mínima a Responses devolvió HTTP 401, código `invalid_api_key`. Una petición mínima independiente a Chat Completions, usado por el recorrido anterior, devolvió el mismo estado y código. Se comprobó únicamente que la variable está presente y que no tiene espacios ni comillas envolventes; no se copiaron valores de credenciales a este informe.
+Una petición mínima a Responses, utilizado tanto por el intérprete anterior como por el nuevo, devolvió HTTP 401, código `invalid_api_key`. Una petición mínima independiente a Chat Completions devolvió el mismo estado y código. Se comprobó únicamente que la variable está presente y que no tiene espacios ni comillas envolventes; no se copiaron valores de credenciales a este informe. El código del intérprete anterior confirma que, ante un estado HTTP no satisfactorio, utiliza el clasificador determinista de respaldo.
 
 La comprobación de salud que informa `configured: true` solo acredita presencia de configuración, no autenticación válida contra OpenAI. El fallo actual no permite concluir cuándo empezó ni atribuirle por sí solo todas las incidencias históricas.
 
