@@ -17,15 +17,19 @@ Un turno con preguntas o ambigüedades no escribe una reserva; puede guardar dat
 - `MATERNALY_DIALOGUE_MODE=off`: comportamiento anterior, valor predeterminado.
 - `MATERNALY_DIALOGUE_MODE=shadow`: evalúa interpretación nueva pero la respuesta y las acciones siguen el recorrido anterior. Añade coste y latencia; no activar globalmente sin revisar resultados.
 - `MATERNALY_DIALOGUE_MODE=active`: nueva interpretación y respuesta conversacional, con las protecciones transaccionales existentes.
-- `MATERNALY_DIALOGUE_MODEL`: opcional; si falta utiliza `LLM_MODEL`. No se cambia el modelo existente como parte de esta entrega.
+- `MATERNALY_DIALOGUE_MODEL`: si falta utiliza `LLM_MODEL`. Tras la comparación real del 8 de septiembre, la configuración seleccionada para la capa nueva es `gpt-5.4-2026-03-05`; las llamadas heredadas mantienen su modelo existente. GPT-5 usa razonamiento `low` en la comprensión, con un máximo de 20 segundos. La respuesta informativa tiene su propio límite de 10 segundos.
 - `MATERNALY_DIALOGUE_EVAL_ENABLED=true`: permite al administrador ejecutar exclusivamente los casos ficticios incorporados. Dejar `false` fuera de evaluaciones.
 
 El endpoint autenticado `POST /api/maternaly/admin/dialogue/evaluate` admite solo un offset de casos predefinidos, hasta cuatro casos por petición y una ejecución simultánea por proceso. No acepta mensajes libres, no consulta conversaciones reales, no escribe en Sheets, no usa persistencia ni envía WhatsApp. Llama al modelo real y tiene coste de API. Nunca devolver credenciales ni respuestas con datos de usuarios en sus resultados.
 
 ## Verificación y límites
 
-Las pruebas unitarias e integradas prueban fronteras de autorización, memoria, recuperación ante fallo y ausencia de escrituras en turnos mixtos. No sustituyen a la evaluación real. La batería semántica incluye 20 casos, 7 inicialmente reservados; si estos casos se utilizan para ajustar el prompt dejan de ser evidencia independiente y debe añadirse un nuevo conjunto no utilizado.
+Las pruebas unitarias e integradas prueban fronteras de autorización, memoria, recuperación ante fallo y ausencia de escrituras en turnos mixtos. No sustituyen a la evaluación real. La batería incluye 60 casos de comprensión, 35 conversaciones de varios turnos y 20 respuestas informativas. Los casos usados para ajustar el comportamiento son regresiones, aunque conserven etiquetas históricas de `holdout`; no son evidencia independiente.
 
-No activar para conversaciones normales antes de examinar los resultados reales y probar conversaciones completas en el canal de pruebas. No se promete comprensión perfecta ni se considera el JSON válido prueba suficiente de comprensión.
+El evaluador `scripts/maternaly-dialogue-live-eval.cjs`, incluido en el contenedor, admite `--suite=understanding|conversation|answers`, `--offset`, `--count` (máximo 40) y `--repeat` (máximo 3). Aísla Sheets en memoria, WhatsApp mock, sin DB ni recordatorios y limita la red a Responses. Sus informes `/tmp/maternaly-dialogue-*.json` son efímeros. Los resultados, fallos y criterios modificados quedan resumidos en `docs/maternaly-dialogue-live-evaluation-2026-09-08.md`.
+
+La prueba integrada de entrada incluye mensajes concurrentes, almacenamiento y SID duplicado con modelo y Sheets simulados. La evaluación real del núcleo no prueba la entrega de Twilio ni una inscripción sobre Sheets real. No se debe presentar como un ensayo completo de extremo a extremo del canal externo.
+
+La activación exige revisar las evaluaciones reales y conversaciones completas aisladas; una prueba manual controlada del canal de WhatsApp sigue siendo necesaria para validar el transporte externo. No se promete comprensión perfecta ni se considera el JSON válido prueba suficiente de comprensión.
 
 Reversión: `MATERNALY_DIALOGUE_MODE=off`, guardar y volver a implementar el servicio. Los campos de memoria son aditivos y compatibles con el recorrido anterior. No se migran ni borran reservas.

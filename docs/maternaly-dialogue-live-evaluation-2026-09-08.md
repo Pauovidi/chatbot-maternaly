@@ -102,6 +102,18 @@ Estos son resultados de regresión, no una garantía estadística de fiabilidad 
 - Las 70 conversaciones contienen 116 turnos: mediana 2.775 ms, p95 5.028 ms y máximo 5.747 ms del núcleo aislado. No incluye latencia de WhatsApp ni Sheets real. Las llamadas incluyen el intérprete nuevo GPT-5.4 y llamadas heredadas a gpt-4o-mini; no se afirma que todo el sistema utilice un único modelo.
 - Revisión local posterior: 1.093 tests superados, uno omitido y uno pendiente; compilación de producción y lint correctos.
 
+## Ronda f79ee09: comprobación del artefacto final
+
+Sin cambiar el prompt ni el modelo respecto a 20375f7:
+
+- 20/20 interpretaciones del bloque final, ahora con cantidad inicial desconocida en `accept_explicit_count` (`1788885818630`).
+- 35/35 conversaciones completas (`1788885921517`), incluyendo la eliminación comprobada del acompañante anterior al pasar a una persona.
+- 3/3 repeticiones adicionales de ese caso de dos turnos (`1788885871584`), sin acompañante residual y exactamente una inscripción simulada por ejecución.
+
+Puerta funcional del núcleo superada para esta batería. Se preparó la activación con `MATERNALY_DIALOGUE_MODE=active`, `MATERNALY_DIALOGUE_MODEL=gpt-5.4-2026-03-05` y `MATERNALY_DIALOGUE_EVAL_ENABLED=false`; la comprobación del servicio después del despliegue se anotará separadamente. No se enviaron mensajes reales ni se escribieron inscripciones reales.
+
+El conjunto final cubre 60 expresiones de comprensión (las primeras 40 repetidas), 35 conversaciones (dos repeticiones previas y otra sobre el artefacto final), 20 respuestas informativas y tres repeticiones adicionales del caso reforzado. Los resultados históricos peores permanecen en este informe; no se cuentan como superados por haber mejorado una revisión posterior.
+
 ## Ejecución inicial comprobada (histórico: credencial ya corregida)
 
 Se ejecutaron los 20 casos ficticios de `dialogue/evaluation.ts` en una instancia temporal del mismo artefacto desplegado, iniciada desde la consola autorizada de EasyPanel. Escuchó únicamente en `127.0.0.1:3001`, con la evaluación habilitada, modo conversacional `off`, proveedor WhatsApp `mock` y escritura de Sheets deshabilitada. El proceso temporal terminó al finalizar la evaluación. No se cambiaron las variables guardadas del servicio principal.
