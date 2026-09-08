@@ -16,6 +16,7 @@ ENV NEXT_TELEMETRY_DISABLED=1
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN npm run build
+RUN ./node_modules/.bin/esbuild scripts/maternaly-dialogue-live-eval.ts --bundle --platform=node --packages=external --outfile=/app/dialogue-live-eval.cjs
 RUN rm -rf .next/standalone/.demo-state \
   .next/standalone/.tokens \
   .next/standalone/.vercel \
@@ -46,6 +47,7 @@ COPY --from=builder --chown=nextjs:nodejs /app/db/migrations ./db/migrations
 COPY --from=builder --chown=nextjs:nodejs /app/scripts/db-migrate.mjs ./scripts/db-migrate.mjs
 COPY --from=builder --chown=nextjs:nodejs /app/scripts/maternaly-sheets-live-write-test.mjs ./scripts/maternaly-sheets-live-write-test.mjs
 COPY --from=builder --chown=nextjs:nodejs /app/scripts/maternaly-sheets-sync-group-tabs.mjs ./scripts/maternaly-sheets-sync-group-tabs.mjs
+COPY --from=builder --chown=nextjs:nodejs /app/dialogue-live-eval.cjs ./scripts/maternaly-dialogue-live-eval.cjs
 
 RUN test -s /app/public/maternaly/services/taller-blw.jpeg \
   && test -s /app/public/maternaly/services/charla-informativa-embarazo.jpeg
