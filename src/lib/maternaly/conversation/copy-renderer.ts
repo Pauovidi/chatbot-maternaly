@@ -629,8 +629,14 @@ export class MaternalyCopyRenderer {
       parts.push("No he podido interpretar bien este mensaje. Conservo lo que ya habíamos hablado y no he realizado ninguna reserva ni cambio. ¿Puedes aclararme qué quieres corregir o resolver?");
     } else {
       if (d.updates.length) {
-        const labels: Record<string, string> = { full_name: "nombre y apellidos", partner_name: "acompañante", people_count: "número de asistentes", fpp_or_due_date: "fecha probable de parto", baby_birth_date: "fecha de nacimiento", pregnancy_week: "semana de embarazo", pregnancy_month: "mes de embarazo", journey_stage: "etapa", location: "sede", modality: "modalidad" };
-        parts.push(`${d.updates.some((u) => u.correction) ? "He actualizado" : "He recogido"}: ${d.updates.map((u) => labels[u.field]).join(", ")}.`);
+        const count = d.updates.find((u) => u.field === "people_count")?.value;
+        const name = d.updates.find((u) => u.field === "full_name")?.value;
+        parts.push(count === "2" ? "Perfecto, vendréis dos."
+          : count === "1" ? "De acuerdo, vendrás sin acompañante."
+          : count ? `Entiendo: queréis acudir ${count} personas.`
+          : name ? `Gracias, ${name}.`
+          : d.updates.some((u) => u.correction) ? "Gracias por la corrección."
+          : "Gracias, tengo en cuenta lo que me indicas.");
       }
       const pendingDataQuestion = d.questions.some((q) => q.focus === "booking" && /falta|pendiente|qu[eé] datos? (?:necesitas|te env[ií]o)|cu[aá]les? son los datos/i.test(q.text));
       if (d.questions.some((q) => q.focus === "privacy")) {
@@ -657,9 +663,11 @@ export class MaternalyCopyRenderer {
         parts.push(input.state?.stage === "confirmed"
           ? "De acuerdo, no he realizado cambios ni he cancelado tu inscripción. Si quieres consultar algo sobre ella, seguimos desde aquí."
           : "De acuerdo, no continúo con la reserva. Podemos seguir con tus dudas cuando quieras.");
-      } else if (input.state?.stage === "collecting_contact" && (d.updates.length || !questions.length || pendingDataQuestion)) {
+      } else if (input.state?.stage === "collecting_contact") {
         const missing = input.state.pendingFields ?? [];
-        parts.push(missing.length ? `Conservo la sesión elegida. Solo me falta: ${missing.map(fieldLabel).join(", ")}.` : "Conservo los datos y la sesión elegida. ¿Quieres que continúe con la solicitud de reserva?");
+        parts.push(missing.length ? `Conservo la sesión elegida. Para continuar, dime ${missing.map(fieldLabel).join(", ")}.` : "Ya tengo los datos y la sesión elegida. ¿Quieres que continúe con la solicitud de reserva?");
+      } else if (input.state?.stage === "choosing_session") {
+        parts.push("Para continuar, dime qué fecha o número de las sesiones que te he mostrado prefieres.");
       } else if (!parts.length) {
         parts.push(input.state?.stage === "confirmed"
           ? "De acuerdo. No he realizado cambios ni he creado otra inscripción. Si tienes alguna duda, seguimos desde aquí."

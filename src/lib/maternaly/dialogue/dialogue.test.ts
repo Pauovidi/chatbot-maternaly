@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildDialogueContext, dialogueIntent, validateDialogue, redactDialogueContact, type DialogueUnderstanding } from "./understanding";
 import { dialogueTestConversation } from "./evaluation";
+import { isolatedDialogueEnv } from "./conversation-evaluation";
 import { validateDialogueAnswer } from "./answer";
 import { MaternalyCoreAdapter, MaternalyToolExecutor } from "@/lib/maternaly/conversation/core";
 import { InMemoryNormalizedSheetsClient, createRealTemplateWorkbook, normalizedTestEnv } from "@/lib/maternaly/sheets/normalized-test-utils";
@@ -79,5 +80,71 @@ describe("semantic dialogue boundary and flow", () => {
     expect(result.state?.selectedSessionId).toBe("sesion_charla_erandio_20260924");
     expect(result.reply).toMatch(/No he podido interpretar/);
     expect(result.reply).not.toMatch(/Soy Ane/);
+  });
+
+  it("keeps a mixed-turn selection, asks the next question and confirms on bare assent only once", async () => {
+    const client = new InMemoryNormalizedSheetsClient(createRealTemplateWorkbook({ serviceKey: "charla_embarazo_1_20", multiSession: true }));
+    const core = new MaternalyCoreAdapter(undefined, undefined, undefined, new MaternalyToolExecutor(client));
+    const selectedId = "sesion_charla_erandio_20260924";
+    let conversation = dialogueTestConversation({ stage: "choosing_session", selectedSessionId: undefined, selectedGroupId: undefined,
+      peopleCount: undefined, fppOrDueDate: "2027-04-14", location: "erandio",
+      dialogueMemory: { offeredSessions: [{ sessionId: selectedId, date: "2026-09-24", startTime: "18:30", location: "Erandio" }], pendingQuestions: [] },
+    }, "Dime qué sesión prefieres.");
+    const turn = async (message: string, d: DialogueUnderstanding) => {
+      mockModel(d);
+      const result = await core.handle({ conversation, inbound: { provider: "twilio_sandbox", from: "whatsapp:+34999000999", text: message }, env: isolatedDialogueEnv({ NODE_ENV: "test", OPENAI_API_KEY: "synthetic-key" }) });
+      conversation = { ...conversation, ...result.conversationPatch };
+      expect(result.reply).not.toMatch(/He recogido:|He actualizado:/);
+      return result;
+    };
+    const selected = await turn("La primera, el 24 de septiembre. Seremos dos. ¿Es gratuita?", understanding({ goal: "continue",
+      selection: { sessionId: selectedId, evidence: "La primera, el 24 de septiembre" },
+      updates: [{ field: "people_count", value: "2", evidence: "Seremos dos", correction: false }],
+      questions: [{ text: "¿Es gratuita?", evidence: "¿Es gratuita?", serviceId: "charla_embarazo_1_20", focus: "pricing" }],
+    }));
+    expect(selected.state).toMatchObject({ stage: "collecting_contact", selectedSessionId: selectedId, peopleCount: 2, fppOrDueDate: "2027-04-14", pendingFields: ["fullName", "partnerName"] });
+    expect(selected.reply).toMatch(/vendréis dos/);
+    expect(selected.reply).toMatch(/Para continuar, dime.*nombre y apellidos.*acompañante/);
+    expect(client.appended).toHaveLength(0);
+    const completed = await turn("Prueba Conversacional Septiembre; acompañante Control. ¿Puede venir mi madre?", understanding({ goal: "continue", updates: [
+      { field: "full_name", value: "Prueba Conversacional Septiembre", evidence: "Prueba Conversacional Septiembre", correction: false },
+      { field: "partner_name", value: "Control", evidence: "Control", correction: false },
+    ], questions: [{ text: "¿Puede venir mi madre?", evidence: "¿Puede venir mi madre?", serviceId: "charla_embarazo_1_20", focus: "eligibility" }] }));
+    expect(completed.state).toMatchObject({ selectedSessionId: selectedId, pendingFields: [], partnerName: "Control", dialogueMemory: { awaitingBookingConsent: true } });
+    expect(completed.reply).toMatch(/Gracias, Prueba Conversacional Septiembre/);
+    expect(completed.reply).toMatch(/¿Quieres que continúe con la solicitud de reserva\?$/);
+    expect(client.appended).toHaveLength(0);
+    const confirmed = await turn("Sí", understanding({ goal: "continue", authorization: "confirm", actionEvidence: "Sí" }));
+    expect(confirmed.state?.stage).toBe("confirmed");
+    expect(client.appended.filter((a) => a.tabTitle === "Inscripciones")).toHaveLength(1);
+    await turn("Gracias", understanding({ goal: "continue" }));
+    expect(client.appended.filter((a) => a.tabTitle === "Inscripciones")).toHaveLength(1);
+  });
+
+  it.each([false, true])("does not leave an acknowledgement alone while choosing a session (question=%s)", async (question) => {
+    mockModel(understanding({ goal: "continue", updates: [{ field: "full_name", value: "Ana García", evidence: "Ana García", correction: false }],
+      questions: question ? [{ text: "¿Puede venir mi madre?", evidence: "¿Puede venir mi madre?", serviceId: "charla_embarazo_1_20", focus: "eligibility" }] : [],
+    }));
+    const client = new InMemoryNormalizedSheetsClient(createRealTemplateWorkbook({ serviceKey: "charla_embarazo_1_20" }));
+    const result = await new MaternalyCoreAdapter(undefined, undefined, undefined, new MaternalyToolExecutor(client)).handle({
+      conversation: dialogueTestConversation({ stage: "choosing_session", selectedSessionId: undefined, selectedGroupId: undefined }),
+      inbound: { provider: "twilio_sandbox", from: "whatsapp:+34999000999", text: `Ana García${question ? ". ¿Puede venir mi madre?" : ""}` }, env: env(),
+    });
+    expect(result.reply).toMatch(/Para continuar, dime qué fecha o número/);
+    expect(result.reply).not.toMatch(/He recogido:|He actualizado:|reserva ha quedado confirmada/);
+    expect(client.appended).toHaveLength(0);
+  });
+
+  it("answers a question without updates and then asks only for the missing field", async () => {
+    mockModel(understanding({ questions: [{ text: "¿Puede venir mi madre?", evidence: "¿Puede venir mi madre?", serviceId: "charla_embarazo_1_20", focus: "eligibility" }] }));
+    const client = new InMemoryNormalizedSheetsClient(createRealTemplateWorkbook({ serviceKey: "charla_embarazo_1_20" }));
+    const result = await new MaternalyCoreAdapter(undefined, undefined, undefined, new MaternalyToolExecutor(client)).handle({
+      conversation: dialogueTestConversation({ fullName: "Ana García", partnerName: "Mario" }),
+      inbound: { provider: "twilio_sandbox", from: "whatsapp:+34999000999", text: "¿Puede venir mi madre?" }, env: env(),
+    });
+    expect(result.reply).toMatch(/acompañante/);
+    expect(result.reply).toMatch(/Para continuar, dime fecha probable de parto/);
+    expect(result.reply).not.toMatch(/dime.*nombre y apellidos/);
+    expect(client.appended).toHaveLength(0);
   });
 });

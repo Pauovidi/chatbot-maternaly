@@ -1890,6 +1890,13 @@ export class MaternalyStateReducer {
         }
       : reducedState;
 
+    // Selecting an offered session is a draft change, even when the same turn
+    // asks a question. Advancing the draft must not execute a registration.
+    if (input.intent.dialogue?.selection.sessionId &&
+      ["choosing_session", "collecting_contact"].includes(state.stage ?? "")) {
+      state.stage = "collecting_contact";
+      if (previous?.selectedSessionId !== state.selectedSessionId) state.selectedGroupId = undefined;
+    }
     if (input.intent.dialogue && state.stage === "collecting_contact" && state.serviceKey) {
       state.pendingFields = requiredFieldsForService(state.serviceKey, state);
     }
