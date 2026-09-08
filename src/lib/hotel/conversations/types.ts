@@ -52,6 +52,10 @@ export interface PendingReservationContext {
 }
 
 export interface MaternalyNormalizedFlowState {
+  dialogueMemory?: {
+    offeredSessions: Array<{ sessionId: string; date?: string; startTime?: string; location?: string; modality?: string }>;
+    pendingQuestions: string[];
+  };
   serviceKey?: "charla_embarazo_1_20" | "taller_blw";
   journeyStage?: MaternalyJourneyStage;
   stage?:

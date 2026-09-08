@@ -99,6 +99,8 @@ export interface MaternalyNluSlots {
 }
 
 export interface StructuredIntent {
+  dialogue?: import("@/lib/maternaly/dialogue/understanding").DialogueUnderstanding;
+  dialogueUnavailable?: boolean;
   intent: MaternalyIntent;
   slots: MaternalyNluSlots;
   service_scope: MaternalyServiceScope;
@@ -425,7 +427,7 @@ function isCommunicationsOptOut(text: string): boolean {
   return explicitlyPreservesRegistration || !explicitRegistrationCancellation;
 }
 
-function isExplicitCancellationRequest(text: string): boolean {
+export function isExplicitCancellationRequest(text: string): boolean {
   return (
     CANCELLATION_REQUEST_PATTERN.test(text) &&
     !isCommunicationsOptOut(text) &&

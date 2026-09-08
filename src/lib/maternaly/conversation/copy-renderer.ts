@@ -4,6 +4,7 @@ import {
   MATERNALY_KNOWLEDGE_SERVICES,
   type KnowledgeService,
 } from "@/lib/maternaly/knowledge/catalog";
+import { answerDialogueQuestions } from "@/lib/maternaly/dialogue/answer";
 import type { MaternalyNormalizedFlowState } from "@/lib/hotel/conversations/types";
 import type { NormalizedAvailableSession } from "@/lib/maternaly/sheets/normalized-availability";
 import type { LookupNormalizedRegistrationResult } from "@/lib/maternaly/sheets/normalized-registration-management";
@@ -32,6 +33,7 @@ import {
 } from "@/lib/maternaly/conversation/grounded-copy-generator";
 
 export type MaternalyCopyAction =
+  | "dialogue_response"
   | "silent_human"
   | "reset"
   | "handoff"
@@ -103,6 +105,8 @@ function isConfirmedLiveCharlaWrite(result: MaternalyCopyToolResult): boolean {
 }
 
 export interface MaternalyCopyRenderInput {
+  dialogue?: StructuredIntent["dialogue"];
+  dialogueUnavailable?: boolean;
   decision: MaternalyCopyDecision;
   state?: MaternalyNormalizedFlowState;
   toolResult?: MaternalyCopyToolResult;
@@ -343,6 +347,9 @@ export class MaternalyCopyRenderer {
     input: MaternalyGroundedCopyRenderInput,
     env: NodeJS.ProcessEnv = process.env,
   ): Promise<MaternalyGroundedCopyResult | undefined> {
+    if ((input.intent.dialogue || input.intent.dialogueUnavailable) && !["silent_human", "reset", "handoff", "cancel_registration", "reservation_status"].includes(input.decision.action)) {
+      return this.renderDialogue(input, env);
+    }
     const service = serviceFromDecision(input.decision, input.state);
     const sharesPregnancyContext =
       (input.decision.action === "general" || input.decision.action === "service_info") &&
@@ -449,6 +456,7 @@ export class MaternalyCopyRenderer {
       case "normalized_registration":
         return this.renderNormalizedRegistration(input.toolResult, service, input.state);
       case "general":
+      case "dialogue_response":
       default:
         return this.renderGeneral(input.state);
     }
@@ -609,6 +617,44 @@ export class MaternalyCopyRenderer {
       return "Te sigo 😊 Ya tengo en cuenta que tu consulta no es de embarazo ni posparto. Cuéntame qué necesitas y seguimos desde ahí.";
     }
     return "Soy Ane, la asistente virtual de Maternaly. Puedo darte información precisa sobre nuestros servicios y ayudarte a preparar una reserva. Para orientarte sin dar nada por supuesto, dime primero en qué etapa estás: EMBARAZO, POSTPARTO u OTROS. 💛";
+  }
+
+  private async renderDialogue(input: MaternalyGroundedCopyRenderInput, env: NodeJS.ProcessEnv): Promise<MaternalyGroundedCopyResult> {
+    const d = input.intent.dialogue;
+    const parts: string[] = [];
+    let attempted = false;
+    let latencyMs = 0;
+    let generated = false;
+    if (input.intent.dialogueUnavailable || !d) {
+      parts.push("No he podido interpretar bien este mensaje. Conservo lo que ya habíamos hablado y no he realizado ninguna reserva ni cambio. ¿Puedes aclararme qué quieres corregir o resolver?");
+    } else {
+      if (d.updates.length) {
+        const labels: Record<string, string> = { full_name: "nombre y apellidos", partner_name: "acompañante", people_count: "número de asistentes", fpp_or_due_date: "fecha probable de parto", baby_birth_date: "fecha de nacimiento", pregnancy_week: "semana de embarazo", pregnancy_month: "mes de embarazo", journey_stage: "etapa", location: "sede", modality: "modalidad" };
+        parts.push(`${d.updates.some((u) => u.correction) ? "He actualizado" : "He recogido"}: ${d.updates.map((u) => labels[u.field]).join(", ")}.`);
+      }
+      const questions = d.questions.filter((q) => !(q.focus === "schedule" && input.toolResult));
+      if (questions.length) {
+        const answer = await answerDialogueQuestions({ ...d, questions }, env);
+        attempted = true; latencyMs = answer.latencyMs; generated = !!answer.text;
+        parts.push(answer.text ?? "No tengo información verificada suficiente para responder a esa consulta con seguridad. El equipo de Maternaly puede aclarar esa condición; mantengo tu solicitud sin confirmar ninguna plaza.");
+      }
+      if (d.ambiguities.length) {
+        const field = d.ambiguities[0].field;
+        const labels: Record<string, string> = { full_name: "el nombre y los apellidos de la titular", partner_name: "el nombre del acompañante", fpp_or_due_date: "la fecha probable de parto, con día, mes y año", baby_birth_date: "la fecha de nacimiento del bebé", service: "el servicio que te interesa", session: "la fecha o el número de la sesión", people_count: "cuántas personas acudiréis" };
+        parts.push(`Para no dar nada por supuesto, ¿puedes aclararme ${labels[field] ?? "ese dato"}?`);
+      } else if (input.toolResult || input.decision.action === "catalog_info" || input.decision.action === "booking_service_selection") {
+        const trusted = this.render(input);
+        if (trusted) parts.push(trusted);
+      } else if (d.goal === "decline") {
+        parts.push("De acuerdo, no continúo con la reserva. Podemos seguir con tus dudas cuando quieras.");
+      } else if (input.state?.stage === "collecting_contact" && (d.updates.length || !questions.length)) {
+        const missing = input.state.pendingFields ?? [];
+        parts.push(missing.length ? `Conservo la sesión elegida. Solo me falta: ${missing.map(fieldLabel).join(", ")}.` : "Conservo los datos y la sesión elegida. ¿Quieres que continúe con la solicitud de reserva?");
+      } else if (!parts.length) {
+        parts.push(this.render(input) ?? "¿Qué te gustaría saber de Maternaly?");
+      }
+    }
+    return { text: parts.join("\n\n"), source: generated ? "grounded_generator" : "safe_draft", mode: generated ? "generated" : "fallback", reason: generated ? "accepted" : "no_safe_candidate", attempted, latencyMs, candidateAudits: [] };
   }
 
   private renderReservationStatus(
@@ -957,6 +1003,7 @@ export class MaternalyCopyRenderer {
     }
 
     if (result.status === "collecting_fields") {
+      if (result.error === "dialogue_read_only") return "La sesión sigue publicada. No he realizado una reserva: si quieres que continúe con la solicitud, dímelo.";
       if (result.error === "charla_due_date_requires_clarification") {
         const otherMissing = result.missingFields.filter((field) => field !== "fppOrDueDate");
         return `La fecha probable de parto que has enviado parece pasada o no es válida. ¿Puedes confirmarla con día, mes y año? Conservo los demás datos y la sesión elegida; todavía no he reservado ninguna plaza.${otherMissing.length ? ` También me falta: ${otherMissing.map(fieldLabel).join(", ")}.` : ""}`;

@@ -1,4 +1,5 @@
 import type { ConversationRecord, MaternalyNormalizedFlowState } from "@/lib/hotel/conversations/types";
+import { dialogueMode, dialogueIntent, understandDialogue, type DialogueResult } from "@/lib/maternaly/dialogue/understanding";
 import { readMaternalyRuntimeConfig } from "@/lib/maternaly/config/env";
 import {
   MaternalyCopyRenderer,
@@ -153,6 +154,7 @@ export interface MaternalyAuthorityTurnTrace {
 }
 
 type PolicyAction =
+  | "dialogue_response"
   | "silent_human"
   | "reset"
   | "handoff"
@@ -1109,6 +1111,8 @@ function registrationSlotsForTurn(
   message = "",
 ): MaternalyNluSlots {
   const slots = intent.slots;
+  if (intent.dialogueUnavailable) return {};
+  if (intent.dialogue) return previous?.stage === "confirmed" ? {} : slots;
   const serviceKey = slots.normalized_service_key ?? previous?.serviceKey;
   const acceptsRegistrationData =
     isRegistrationRequestTurn(intent) || isRegistrationDataStage(previous?.stage);
@@ -1812,8 +1816,14 @@ export class MaternalyStateReducer {
     // Names are accepted only when the current text itself contains a valid
     // explicit name, or a valid bare name while that exact field is pending.
     // Never persist a free-form NLU guess independently of the source text.
-    registrationSlots.full_name = undefined;
-    registrationSlots.partner_name = undefined;
+    if (!input.intent.dialogue) {
+      registrationSlots.full_name = undefined;
+      registrationSlots.partner_name = undefined;
+    }
+    if (input.intent.dialogue && previous?.stage !== "confirmed") {
+      registrationSlots.phone = normalizeInboundWhatsappPhone(input.inbound?.from);
+      if (["continue", "register"].includes(input.intent.dialogue.goal)) registrationSlots.email = extractMessageEmail(input.message);
+    }
     const serviceKey = serviceKeyFromSlots(registrationSlots, previous);
     const contextual = extractContextualRegistrationSlots({
       message: input.message,
@@ -1821,8 +1831,8 @@ export class MaternalyStateReducer {
       slots: registrationSlots,
       serviceKey,
       inboundFrom: input.inbound?.from,
-      allowRegistrationData:
-        isRegistrationRequestTurn(input.intent) || isRegistrationDataStage(previous?.stage),
+      allowRegistrationData: !input.intent.dialogue && !input.intent.dialogueUnavailable &&
+        (isRegistrationRequestTurn(input.intent) || isRegistrationDataStage(previous?.stage)),
     });
     const observations = mergeObservations(
       previous?.observations,
@@ -1832,7 +1842,7 @@ export class MaternalyStateReducer {
 
     const journeyStage = input.intent.slots.journey_stage ?? previous?.journeyStage;
     const reducedState =
-      input.intent.intent === "service_discovery" || input.intent.service_scope === "catalog"
+      !input.intent.dialogue && (input.intent.intent === "service_discovery" || input.intent.service_scope === "catalog")
         ? {
             ...(previous ?? { updatedAt: nowIso() }),
             journeyStage,
@@ -1866,7 +1876,7 @@ export class MaternalyStateReducer {
           };
 
     const alternativeSessionsRequested = asksForAlternativeSessions(input.message);
-    const state = alternativeSessionsRequested
+    const state = alternativeSessionsRequested && !input.intent.dialogue
       ? {
           ...reducedState,
           selectedSessionId: undefined,
@@ -1877,6 +1887,9 @@ export class MaternalyStateReducer {
         }
       : reducedState;
 
+    if (input.intent.dialogue && state.stage === "collecting_contact" && state.serviceKey) {
+      state.pendingFields = requiredFieldsForService(state.serviceKey, state);
+    }
     return { state, diagnostics: contextual.diagnostics };
   }
 }
@@ -1966,6 +1979,25 @@ export class MaternalyConversationPolicy {
       intent.slots.last_question_answered === "reservation_declined"
     ) {
       return { action: "booking_declined", reason: "reservation_declined" };
+    }
+
+    if (intent.dialogueUnavailable) {
+      return { action: "dialogue_response", reason: "dialogue_unavailable", serviceKey: state.serviceKey };
+    }
+    if (intent.dialogue) {
+      const d = intent.dialogue;
+      if (conversation.maternalyNormalizedFlow?.stage === "confirmed" && (d.updates.length || d.selection.sessionId)) {
+        return { action: "handoff", reason: "confirmed_registration_change_requires_human" };
+      }
+      if (d.questions.length || d.ambiguities.length || d.goal === "decline") {
+        if (!d.ambiguities.length && d.questions.some((q) => q.focus === "schedule") && state.serviceKey && d.goal !== "decline") {
+          return { action: "normalized_registration", serviceKey: state.serviceKey, reason: "dialogue_read_only_availability" };
+        }
+        return { action: "dialogue_response", serviceKey: state.serviceKey, reason: "answer_before_continuing" };
+      }
+      if (d.authorization === "none" && !d.selection.sessionId && d.goal !== "continue" && d.goal !== "explore") {
+        return { action: "dialogue_response", serviceKey: state.serviceKey, reason: "no_booking_authorization" };
+      }
     }
 
     const service = getKnowledgeService(intent.service_candidate);
@@ -2075,6 +2107,7 @@ export class MaternalyToolExecutor {
     state: MaternalyNormalizedFlowState;
     message: string;
     env?: NodeJS.ProcessEnv;
+    readOnly?: boolean;
   }): Promise<NormalizedToolResult> {
     const env = input.env ?? process.env;
 
@@ -2199,6 +2232,10 @@ export class MaternalyToolExecutor {
       }
     }
 
+    if (input.readOnly) return {
+      status: "collecting_fields", serviceKey: input.serviceKey, snapshot, sessions, calendarSessions,
+      selectedSession, missingFields: [], availability, error: "dialogue_read_only",
+    };
     const draft = {
       serviceKey: input.serviceKey,
       fullName: stateWithSelection.fullName,
@@ -2493,16 +2530,21 @@ export class MaternalyCoreAdapter {
     const turnId = createTurnId();
     const stateBefore = input.conversation.maternalyNormalizedFlow;
     const nluStartedAt = Date.now();
-    const interpretedIntent = await this.interpreter.interpret(
-      input.inbound.text,
-      buildInterpretationContext(input.conversation),
-      input.env ?? process.env,
+    const runtimeEnv = input.env ?? process.env;
+    const mode = dialogueMode(runtimeEnv);
+    let dialogueResult: DialogueResult | undefined;
+    if (mode !== "off" && input.conversation.mode !== "human" && !isMaternalyResetRequest(input.inbound.text)) {
+      dialogueResult = await understandDialogue(input.inbound.text, input.conversation, runtimeEnv);
+    }
+    const semanticIntent = mode === "active" && dialogueResult?.understanding
+      ? dialogueIntent(dialogueResult.understanding, stateBefore) : undefined;
+    const interpretedIntent = semanticIntent ?? await this.interpreter.interpret(
+      input.inbound.text, buildInterpretationContext(input.conversation),
+      mode === "active" && dialogueResult ? { ...runtimeEnv, LLM_PROVIDER: "mock" } : runtimeEnv,
     );
-    const intent = enrichIntentWithConversationServiceContext(
-      interpretedIntent,
-      input.conversation,
-      input.inbound.text,
-    );
+    const intent = semanticIntent ?? (mode === "active" && dialogueResult
+      ? { ...interpretedIntent, intent: interpretedIntent.should_handoff ? "handoff_request" as const : "unknown" as const, slots: {}, should_handoff: interpretedIntent.should_handoff, safety_flags: interpretedIntent.safety_flags.filter((flag) => flag !== "cancel_registration_request"), needs_availability_lookup: false, dialogueUnavailable: true }
+      : enrichIntentWithConversationServiceContext(interpretedIntent, input.conversation, input.inbound.text));
     const replacesServiceFlow = shouldReplaceServiceFlow(stateBefore, intent);
     const nluTotalMs = elapsedSince(nluStartedAt);
     const reducerStartedAt = Date.now();
@@ -2575,6 +2617,15 @@ export class MaternalyCoreAdapter {
         },
       },
     ];
+    if (dialogueResult) events.push({ eventType: "maternaly_dialogue_understood", payload: {
+      version: "dialogue-v1", mode, reason: dialogueResult.reason, model: dialogueResult.model,
+      latencyMs: dialogueResult.latencyMs, goal: dialogueResult.understanding?.goal,
+      fields: dialogueResult.understanding?.updates.map((u) => u.field),
+      corrections: dialogueResult.understanding?.updates.filter((u) => u.correction).map((u) => u.field),
+      questionCount: dialogueResult.understanding?.questions.length,
+      ambiguityCount: dialogueResult.understanding?.ambiguities.length,
+      differsFromLegacy: mode === "shadow" && dialogueResult.understanding ? dialogueIntent(dialogueResult.understanding, stateBefore).intent !== intent.intent : undefined,
+    } });
 
     let toolResult: NormalizedToolResult | undefined;
     let cancellationResult: CancelNormalizedRegistrationResult | undefined;
@@ -2640,14 +2691,18 @@ export class MaternalyCoreAdapter {
             updatedAt: nowIso(),
           };
 
+    if (intent.dialogue && decision.action === "catalog_info" && stateBefore?.selectedSessionId) {
+      nextState = { ...toPersistedState(state), stage: stateBefore.stage, selectedSessionId: stateBefore.selectedSessionId, pendingFields: stateBefore.pendingFields };
+    }
     if (decision.action === "normalized_registration" && (decision.serviceKey ?? state.serviceKey)) {
       const serviceKey = (decision.serviceKey ?? state.serviceKey) as MaternalyNormalizedServiceKey;
       const toolsStartedAt = Date.now();
       toolResult = await this.toolExecutor.runNormalizedRegistration({
         serviceKey,
         state: { ...state, serviceKey },
-        message: input.inbound.text,
+        message: intent.dialogue && (intent.dialogue.selection.sessionId || state.stage === "collecting_contact") ? "" : input.inbound.text,
         env: input.env,
+        readOnly: decision.reason === "dialogue_read_only_availability",
       });
       toolsMs = elapsedSince(toolsStartedAt);
       const confirmedRegistrationWrite = isConfirmedRegistrationWrite(toolResult);
@@ -2658,6 +2713,14 @@ export class MaternalyCoreAdapter {
       nextState = {
         ...toPersistedState(state),
         serviceKey,
+        dialogueMemory: mode !== "off" ? {
+          pendingQuestions: [],
+          offeredSessions: (toolResult.calendarSessions ?? []).filter((s) =>
+            (!state.location || normalize(s.location ?? "").includes(normalize(state.location))) &&
+            (!state.modality || normalize(s.modality ?? "") === state.modality),
+          ).sort((a, b) => `${a.date} ${a.startTime}`.localeCompare(`${b.date} ${b.startTime}`))
+            .map(({ sessionId, date, startTime, location, modality }) => ({ sessionId, date, startTime, location, modality })),
+        } : state.dialogueMemory,
         selectedSessionId:
           toolResult.selectedSession?.sessionId ??
           (clearUnresolvedCharlaSelection ? undefined : state.selectedSessionId),
@@ -2968,6 +3031,8 @@ export class MaternalyCoreAdapter {
           }
         : intent;
     const renderInput = {
+      dialogue: intent.dialogue,
+      dialogueUnavailable: intent.dialogueUnavailable,
       decision,
       state: nextState,
       toolResult,
@@ -2976,6 +3041,12 @@ export class MaternalyCoreAdapter {
       reminderCancellationStatus,
       message: input.inbound.text,
     };
+    if (intent.dialogue && nextState) {
+      nextState.dialogueMemory = {
+        offeredSessions: nextState.dialogueMemory?.offeredSessions ?? [],
+        pendingQuestions: intent.dialogue.questions.map((q) => q.text),
+      };
+    }
     const groundedRender = await this.renderer.renderGrounded(
       {
         ...renderInput,
@@ -2985,6 +3056,7 @@ export class MaternalyCoreAdapter {
       input.env ?? process.env,
     );
     const baseReply = groundedRender?.text;
+    if (nextState?.dialogueMemory && groundedRender?.reason === "accepted") nextState.dialogueMemory.pendingQuestions = [];
     const distinctReply = baseReply
       ? ensureDistinctMaternalyReply({
           reply: baseReply,
@@ -3113,7 +3185,7 @@ export class MaternalyCoreAdapter {
       outboxMs: 0,
       persistenceMs: 0,
       eventLogMs: 0,
-      openaiCalls: (nluAttemptedOpenAi ? 1 : 0) + (groundedRender?.attempted ? 1 : 0),
+      openaiCalls: (nluAttemptedOpenAi ? 1 : 0) + (dialogueResult && mode === "shadow" ? 1 : 0) + (groundedRender?.attempted ? 1 : 0),
       usedDeterministicFastPath:
         nluSource === "deterministic_fast_path" && !groundedRender?.attempted,
       usedFallback:

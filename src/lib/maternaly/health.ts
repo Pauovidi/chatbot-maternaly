@@ -263,6 +263,8 @@ export async function getMaternalyHealth(env: NodeJS.ProcessEnv = process.env) {
       activeConversationAuthority: "maternaly_core_policy_copy",
     },
     llm: {
+      dialogueMode: ["active", "shadow"].includes(env.MATERNALY_DIALOGUE_MODE ?? "") ? env.MATERNALY_DIALOGUE_MODE : "off",
+      dialogueVersion: "dialogue-v1",
       provider: config.llmProvider,
       configured: config.configured.llm,
       modelConfigured: Boolean(config.llmModel),
