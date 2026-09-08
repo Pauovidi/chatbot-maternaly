@@ -23,6 +23,7 @@ export function validateDialogueAnswer(raw: unknown, facts: ReturnType<typeof di
   const text = value.answer.trim();
   if (/https?:|www\.|@|\b(?:reserva(?:da)?|plaza|inscripci[oó]n)\s+(?:ya\s+)?confirmad|\b(?:he|hemos)\s+(?:reservado|confirmado|cancelado)|\b(?:contrase[nñ]a|tarjeta|diagn[oó]stico)\b/i.test(text)) return undefined;
   const usedIds = value.usedFactIds as unknown[];
+  if (!usedIds.length && !/^(?:lo siento[,.:]?\s*)?no (?:puedo|dispongo|disponemos|tengo|tenemos|contamos|se especifica|hay información)/i.test(text)) return undefined;
   const citedFacts = facts.filter((f) => usedIds.includes(f.id)).map((f) => f.text).join(" ");
   // The catalogue legitimately names medication as a topic of the talk.
   // Permit only that exact sourced topic, never medication instructions.

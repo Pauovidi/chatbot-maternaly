@@ -18,10 +18,12 @@ Object.assign(process.env, env);
 // The only live requests in this process are model calls with synthetic data.
 const realFetch = globalThis.fetch;
 let rawOutputs: unknown[] = [];
+let modelCalls: Array<{ model?: string; status: number; inputTokens?: number; outputTokens?: number }> = [];
 globalThis.fetch = async (input, init) => {
   if (String(input) !== "https://api.openai.com/v1/responses") throw new Error("evaluation_network_boundary");
   const response = await realFetch(input, init);
   const payload = await response.clone().json();
+  modelCalls.push({ model: payload.model, status: response.status, inputTokens: payload.usage?.input_tokens, outputTokens: payload.usage?.output_tokens });
   const text = payload.output_text ?? payload.output?.flatMap((o: { content?: Array<{ type: string; text?: string }> }) => o.content ?? []).find((c: { type: string }) => c.type === "output_text")?.text;
   rawOutputs.push(text ? JSON.parse(text) : { status: response.status, code: payload.error?.code });
   return response;
@@ -33,6 +35,7 @@ async function main() {
     const cases = suite === "understanding" ? DIALOGUE_EVALUATIONS : suite === "answers" ? ANSWER_EVALUATIONS : CONVERSATION_EVALUATIONS;
     for (const test of cases.slice(offset, offset + count)) {
       rawOutputs = [];
+      modelCalls = [];
       let result;
       if (suite === "understanding") {
         const c = DIALOGUE_EVALUATIONS.find((c) => c.id === test.id)!;
@@ -40,7 +43,7 @@ async function main() {
         result = { id: c.id, passed: !!d.understanding && c.check(d.understanding), reason: d.reason, understanding: d.understanding, latencyMs: d.latencyMs };
       } else if (suite === "answers") result = await runAnswerEvaluation(ANSWER_EVALUATIONS.find((c) => c.id === test.id)!, env);
       else result = await runConversationEvaluation(CONVERSATION_EVALUATIONS.find((c) => c.id === test.id)!, env);
-      results.push({ run, ...result, rawOutputs });
+      results.push({ run, ...result, rawOutputs, modelCalls });
       console.log(JSON.stringify({ run, id: result.id, passed: result.passed,
         ...(result.passed ? {} : { failures: "turns" in result ? result.turns.filter((t) => !t.passed).map((t) => ({ index: t.index, failures: t.failures })) : result.reason }) }));
     }

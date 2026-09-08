@@ -25,6 +25,18 @@ La revisión manual de las respuestas también comprobó precios, límites de in
 
 Pruebas automáticas del artefacto 8de8b20: 1.065 superadas, una omitida y una pendiente; compilación y lint correctos. Estas cifras no sustituyen la evaluación del modelo real.
 
+## Ronda 3025261
+
+- Comprensión gpt-4.1-mini: 60/80 (40 casos repetidos dos veces), informe `1788881616504`.
+- Conversaciones gpt-4.1-mini: 19/29, informe `1788881580776`.
+- Respuestas gpt-4.1-mini: 18/20, informe `1788881739806`.
+- Piloto gpt-5.4-mini, parámetros predeterminados: 14/20, informe `1788881683788`.
+- Batería local: 1.072 superadas, una omitida, una pendiente; build y lint correctos.
+
+Esta ronda NO supera la puerta de calidad. Las salidas exactas mostraron solicitudes innecesarias de apellidos del acompañante, datos acompañados a la vez de una ambigüedad del mismo campo, autorización sin cita, confusión entre preguntas de la usuaria y preguntas que el asistente quería hacer, y uso de evidencia del historial. La indicación auxiliar de no extraer actualizaciones del historial podía contradecir la corrección del año de una fecha previa. Se preparó una revisión con contratos de campos más explícitos, contexto que permite resolver referencias sin reciclar evidencia, precedencia conservadora de la incertidumbre y validación de cualquier actionEvidence presente.
+
+Además se detectó una afirmación inventada sobre la empresa destinataria de una factura, con lista de fuentes vacía. Se añadió una barrera que rechaza afirmaciones sin fuentes (solo permite expresar desconocimiento), sin considerar ese control como prueba general de veracidad. Las políticas de pago/facturación y respuestas desconocidas requieren nueva comprobación.
+
 ## Ejecución comprobada
 
 Se ejecutaron los 20 casos ficticios de `dialogue/evaluation.ts` en una instancia temporal del mismo artefacto desplegado, iniciada desde la consola autorizada de EasyPanel. Escuchó únicamente en `127.0.0.1:3001`, con la evaluación habilitada, modo conversacional `off`, proveedor WhatsApp `mock` y escritura de Sheets deshabilitada. El proceso temporal terminó al finalizar la evaluación. No se cambiaron las variables guardadas del servicio principal.

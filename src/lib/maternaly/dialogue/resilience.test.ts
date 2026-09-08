@@ -63,6 +63,16 @@ describe("dialogue safety regression matrix", () => {
   });
   it("retains factual evidence before a separate question", () => {
     expect(validateDialogue(d({ updates: [{ field: "full_name", value: "Ana García", evidence: "Ana García", correction: false }] }), "Ana García. ¿Puede venir mi madre?")).toBeTruthy();
+    expect(validateDialogue(d({ updates: [{ field: "full_name", value: "Ana García", evidence: "Ana García", correction: false }] }), "Ana García\ncuánto cuesta?")).toBeTruthy();
+  });
+  it("never persists a value the model simultaneously marks uncertain", () => {
+    const message = "Yo Ana y él Pablo";
+    const result = validateDialogue(d({ updates: [
+      { field: "full_name", value: "Ana", evidence: "Ana", correction: false },
+      { field: "partner_name", value: "Pablo", evidence: "Pablo", correction: false },
+    ], ambiguities: [{ field: "full_name", question: "¿Cuáles son tus apellidos?", evidence: "Ana" }] }), message);
+    expect(result?.updates).toEqual([{ field: "partner_name", value: "Pablo", evidence: "Pablo", correction: false }]);
+    expect(result?.ambiguities).toHaveLength(1);
   });
   it("derives BLW duration from the verified timetable", () => {
     expect(dialogueFacts(d({ serviceId: "taller_blw" })).some((f) => f.text.includes("Duración del taller: 3 horas"))).toBe(true);
@@ -71,6 +81,10 @@ describe("dialogue safety regression matrix", () => {
     const facts = [{ id: "topic", service: "Charla", text: "Trata medicación segura para el bebé." }];
     expect(validateDialogueAnswer({ answer: "La charla trata medicación segura para el bebé.", usedFactIds: ["topic"] }, facts)).toBeTruthy();
     expect(validateDialogueAnswer({ answer: "Cambia tu medicación.", usedFactIds: ["topic"] }, facts)).toBeUndefined();
+  });
+  it("rejects an unsupported company assertion with no source", () => {
+    expect(validateDialogueAnswer({ answer: "La empresa para la factura es Maternaly.", usedFactIds: [] }, [])).toBeUndefined();
+    expect(validateDialogueAnswer({ answer: "No dispongo de esa información.", usedFactIds: [] }, [])).toBeTruthy();
   });
   it("routes discovery with a question to the verified catalogue", async () => {
     const interpretation = d({ goal: "explore", scope: "catalog", serviceId: null, questions: [{ text: "¿Qué ofrecéis?", evidence: "qué ofrecéis", serviceId: null, focus: "general" }] });
