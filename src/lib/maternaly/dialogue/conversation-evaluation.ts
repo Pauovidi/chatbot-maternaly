@@ -137,6 +137,26 @@ export const CONVERSATION_EVALUATIONS: Scenario[] = [
     { message: "La fecha probable de parto es 5/04/2027", expect: { noWrite: true, registrations: 0, reply: /acompañante|aclar/i } },
     { message: "Mi acompañante se llama Lucía", expect: { state: { partnerName: "Lucía", stage: "confirmed" }, registrations: 1 } },
   ] },
+  { id: "blw_all_contact_together", category: "blw", service: "taller_blw", state: {
+    serviceKey: "taller_blw", journeyStage: "postparto", peopleCount: 1, selectedSessionId: "sesion_blw_bilbao_20260925", selectedGroupId: "grupo_blw_bilbao",
+    pendingFields: ["fullName", "email", "babyBirthDate"],
+  }, lastQuestion: "Dime nombre y apellidos, email y fecha de nacimiento de tu bebé para la solicitud de BLW.", turns: [
+    { message: "Marta Vidal Roca, marta@example.com. Mi bebé nació el 14 de abril de 2026", expect: {
+      registrations: 1, state: { fullName: "Marta Vidal Roca", email: "marta@example.com", babyBirthDate: "2026-04-14", serviceKey: "taller_blw" },
+      notReply: /fecha probable de parto|nombre.*acompañante/i,
+    } },
+  ] },
+  { id: "blw_email_last", category: "blw", service: "taller_blw", state: {
+    serviceKey: "taller_blw", journeyStage: "postparto", peopleCount: 1, fullName: "Marta Vidal Roca", babyBirthDate: "2026-04-14",
+    selectedSessionId: "sesion_blw_bilbao_20260925", selectedGroupId: "grupo_blw_bilbao", pendingFields: ["email"],
+  }, lastQuestion: "Solo me falta tu email para la solicitud de BLW.", turns: [
+    { message: "marta@example.com", expect: { state: { email: "marta@example.com" }, notReply: noReset } },
+    { message: "Sí, continúa con mi inscripción", expect: { registrations: 1 } },
+  ] },
+  { id: "solo_after_companion_change", category: "correction", state: { fullName: data.fullName, partnerName: "Mario" }, turns: [
+    { message: "Al final iré sola, sin acompañante", expect: { state: { peopleCount: 1 }, noWrite: true } },
+    { message: "Mi FPP es 5/04/2027", expect: { registrations: 1, state: { peopleCount: 1 }, notReply: /falta.*acompañante/i } },
+  ] },
 ];
 
 export function isolatedDialogueEnv(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {

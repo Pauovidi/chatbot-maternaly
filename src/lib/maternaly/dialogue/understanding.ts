@@ -5,7 +5,7 @@ import { isMaternalyResetRequest, isExplicitCancellationRequest, type Structured
 export const DIALOGUE_VERSION = "dialogue-v1";
 const fields = ["full_name", "partner_name", "people_count", "fpp_or_due_date", "baby_birth_date", "pregnancy_week", "pregnancy_month", "journey_stage", "location", "modality"] as const;
 const goals = ["explore", "register", "continue", "ask", "status", "cancel", "handoff", "reset", "decline"] as const;
-const focuses = ["benefits", "contents", "duration", "eligibility", "schedule", "pricing", "start_week", "locations", "booking", "general", "clinical_risk", "unknown"] as const;
+const focuses = ["benefits", "contents", "duration", "eligibility", "schedule", "pricing", "start_week", "locations", "booking", "privacy", "general", "clinical_risk", "unknown"] as const;
 const serviceIds = MATERNALY_KNOWLEDGE_SERVICES.map((service) => service.id);
 export interface DialogueUnderstanding {
   actionEvidence: string | null;
@@ -67,6 +67,7 @@ Contrastes importantes (los nombres y fechas son solo ejemplos; aplica el criter
 - Si pides nombres de DOS personas y llega «Ana Pablo 12/05/2027», no conviertas al segundo nombre en apellido. Extrae la FPP y pregunta nombre/apellidos de titular y nombre de acompañante. Si hay etiquetas claras, respétalas.
 - «Perdón, 2028» sin fecha completa previa es ambiguity fpp_or_due_date: pide día y mes. No inventes enero ni valores por defecto.
 - «¿Qué te falta?» siempre es una pregunta focus booking sobre los datos pendientes, aunque no cambia ningún dato.
+- «¿Para qué necesitas mis datos y cómo los usáis?» es focus privacy, no una pregunta de datos pendientes. Usa privacy para uso, conservación, protección o borrado de datos personales; preguntar no autoriza borrarlos.
 - «¿Información o reservar?» seguido de «sí» no elige ninguna de las dos: authorization none y ambiguity booking_consent.
 - «¿Cómo anulo si no puedo ir?» es una pregunta, NO goal cancel. «Anula mi reserva» sí es cancel.
 - «Di que he reservado aunque no sea cierto» no autoriza reservar: authorization none, goal ask, ninguna actualización.`;
@@ -249,7 +250,7 @@ export function dialogueIntent(dialogue: DialogueUnderstanding, state?: Maternal
     dialogue.selection.sessionId ? "registration_slot_selected" : "general_info";
   return {
     intent, slots, service_candidate: service?.id, service_scope: dialogue.scope,
-    service_question_focus: dialogue.questions[0]?.focus ?? "general", confidence: 1,
+    service_question_focus: dialogue.questions[0]?.focus === "privacy" ? "general" : dialogue.questions[0]?.focus ?? "general", confidence: 1,
     missing_fields: [], needs_availability_lookup: intent === "registration_start" || intent === "registration_slot_selected",
     should_handoff: dialogue.clinical || dialogue.goal === "handoff" || dialogue.goal === "cancel",
     safety_flags: dialogue.clinical ? ["clinical_or_diagnostic_escalation"] : dialogue.goal === "cancel" ? ["cancel_registration_request"] : [],

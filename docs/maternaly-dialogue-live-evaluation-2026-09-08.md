@@ -77,6 +77,16 @@ La siguiente revisión probará razonamiento `low` para GPT-5, con límite de sa
 
 Respuestas: 19/20 automático (`1788883942440`), revisadas todas manualmente. El caso de psicología expresa correctamente que los temas concretos no están descritos en las fuentes; no coincide con la expresión regular del evaluador. Se conserva como 19/20 automático y se distingue la revisión humana favorable de ese caso. Las otras respuestas no inventan plazas, descuentos, cancelaciones ni contenidos desconocidos; aún hay formulaciones mejorables (por ejemplo «si devolvéis» al hablar de la propia empresa).
 
+## Ronda 49dfe67: razonamiento y comparación de modelos
+
+- Batería local: 1.089 superadas, una omitida y una pendiente; build/lint correctos. El chequeo TypeScript de todos los tests del repositorio detecta errores en tests antiguos; los dos de tipado del nuevo evaluador se corrigieron. No se presenta ese chequeo global como superado.
+- GPT-5.4-mini con razonamiento low: 78/80 comprensión (`1788884455286`), 59/64 conversaciones (`1788884526837`). Sin superar la puerta de calidad: errores de comprensión bloqueados y respuestas inadecuadas de privacidad/descubrimiento.
+- GPT-5.4 completo (`gpt-5.4-2026-03-05`) con low: 39/40 comprensión (`1788884683326`) y 31/32 conversaciones (`1788884636244`).
+
+La interpretación que falla el criterio automático de comprensión niega autorización usando `decline` en vez de `none`, conserva la pregunta y no modifica datos ni sesión. Se amplía ese criterio a ambas formas de denegar, reforzando que no haya ninguna actualización y sí una pregunta; se mantiene publicado el 39/40 original.
+
+La conversación pendiente del modelo completo pregunta por el uso de datos personales. El intérprete la reconoce como pregunta, pero el renderizador confunde «para qué necesitas mis datos» con datos pendientes. Se añade foco específico de privacidad y se limita la detección de preguntas sobre campos faltantes. La respuesta no afirma haber borrado datos ni tramitado derechos. Se añaden además tres conversaciones de aceptación: BLW con todos los datos, correo al final y cambio a acudir sola; las dos de BLW pasan con modelo simulado y correo oculto al modelo.
+
 ## Ejecución inicial comprobada (histórico: credencial ya corregida)
 
 Se ejecutaron los 20 casos ficticios de `dialogue/evaluation.ts` en una instancia temporal del mismo artefacto desplegado, iniciada desde la consola autorizada de EasyPanel. Escuchó únicamente en `127.0.0.1:3001`, con la evaluación habilitada, modo conversacional `off`, proveedor WhatsApp `mock` y escritura de Sheets deshabilitada. El proceso temporal terminó al finalizar la evaluación. No se cambiaron las variables guardadas del servicio principal.

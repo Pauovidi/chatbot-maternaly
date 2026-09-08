@@ -632,8 +632,12 @@ export class MaternalyCopyRenderer {
         const labels: Record<string, string> = { full_name: "nombre y apellidos", partner_name: "acompañante", people_count: "número de asistentes", fpp_or_due_date: "fecha probable de parto", baby_birth_date: "fecha de nacimiento", pregnancy_week: "semana de embarazo", pregnancy_month: "mes de embarazo", journey_stage: "etapa", location: "sede", modality: "modalidad" };
         parts.push(`${d.updates.some((u) => u.correction) ? "He actualizado" : "He recogido"}: ${d.updates.map((u) => labels[u.field]).join(", ")}.`);
       }
-      const pendingDataQuestion = d.questions.some((q) => q.focus === "booking" && /(?:qué|que).*(?:falta|dato)|datos.*(?:falta|necesita)/i.test(q.text));
+      const pendingDataQuestion = d.questions.some((q) => q.focus === "booking" && /falta|pendiente|qu[eé] datos? (?:necesitas|te env[ií]o)|cu[aá]les? son los datos/i.test(q.text));
+      if (d.questions.some((q) => q.focus === "privacy")) {
+        parts.push("Te pido los datos necesarios para gestionar tu consulta o solicitud de plaza. Para información detallada sobre privacidad, conservación o ejercicio de derechos, el equipo de Maternaly debe aclarártelo. No he borrado ni modificado ningún dato por esta consulta.");
+      }
       const questions = d.questions.filter((q) => !(q.focus === "schedule" && input.toolResult) &&
+        q.focus !== "privacy" &&
         !(input.decision.action === "catalog_info" && !q.serviceId) &&
         !(pendingDataQuestion && q.focus === "booking"));
       if (questions.length) {

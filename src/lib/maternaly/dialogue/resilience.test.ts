@@ -21,9 +21,9 @@ describe("dialogue safety regression matrix", () => {
   });
   it("constrains generated session IDs to the actually displayed options", () => {
     const schema = dialogueSchemaForConversation(dialogueTestConversation());
-    expect(schema.properties.selection.properties.sessionId.enum).toEqual([null]);
+    expect(schema.properties.selection.properties.sessionId).toMatchObject({ enum: [null] });
     const withMenu = dialogueSchemaForConversation(dialogueTestConversation({ dialogueMemory: { offeredSessions: [{ sessionId: "shown-1" }], pendingQuestions: [] } }));
-    expect(withMenu.properties.selection.properties.sessionId.enum).toEqual(["shown-1", null]);
+    expect(withMenu.properties.selection.properties.sessionId).toMatchObject({ enum: ["shown-1", null] });
   });
   it("accepts only punctuation-equivalent evidence, not invented questions", () => {
     const question = { text: "¿Dónde está el centro?", evidence: "¿dónde está el centro?", serviceId: "charla_embarazo_1_20", focus: "locations" as const };
@@ -195,5 +195,29 @@ describe("dialogue safety regression matrix", () => {
     const result = await runConversationEvaluation(CONVERSATION_EVALUATIONS.find((c) => c.id === "human_mode_silent")!, env());
     expect(result.passed).toBe(true);
     expect(fetcher).not.toHaveBeenCalled();
+  });
+  it("answers privacy questions without pretending to erase data or asking for missing fields instead", async () => {
+    const scenario = CONVERSATION_EVALUATIONS.find((c) => c.id === "privacy_question")!;
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ output_text: JSON.stringify(d({ goal: "ask", questions: [
+      { text: scenario.turns[0].message, evidence: scenario.turns[0].message, serviceId: "charla_embarazo_1_20", focus: "privacy" },
+    ] })) }))));
+    const result = await runConversationEvaluation(scenario, env());
+    expect(result.passed).toBe(true);
+    expect(result.turns[0].reply).toMatch(/No he borrado ni modificado/);
+  });
+  it.each(["blw_all_contact_together", "blw_email_last"])("completes BLW without sending contact email to the model: %s", async (id) => {
+    const scenario = CONVERSATION_EVALUATIONS.find((c) => c.id === id)!;
+    vi.stubGlobal("fetch", vi.fn(async (_url, init) => {
+      const body = JSON.parse(String(init?.body));
+      const message = body.input.at(-1).content as string;
+      expect(message).not.toContain("marta@example.com");
+      const interpretation = d({ serviceId: "taller_blw", ...(message.includes("Marta") ? { updates: [
+        { field: "full_name" as const, value: "Marta Vidal Roca", evidence: "Marta Vidal Roca", correction: false },
+        { field: "baby_birth_date" as const, value: "2026-04-14", evidence: "14 de abril de 2026", correction: false },
+      ] } : message.includes("continúa") ? { authorization: "continue" as const, actionEvidence: message } : {}) });
+      return new Response(JSON.stringify({ output_text: JSON.stringify(interpretation) }));
+    }));
+    const result = await runConversationEvaluation(scenario, env());
+    expect(result.passed, JSON.stringify(result.turns.map((t) => ({ failures: t.failures, reply: t.reply })))).toBe(true);
   });
 });
