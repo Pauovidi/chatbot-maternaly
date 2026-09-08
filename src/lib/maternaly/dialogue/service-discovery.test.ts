@@ -39,6 +39,15 @@ function harness(fresh = true, state: Partial<MaternalyNormalizedFlowState> = {}
 afterEach(() => vi.unstubAllGlobals());
 
 describe("service discovery is not a booking or a catalogue loop", () => {
+  it.each(["explore", "ask", "continue"] as const)("offers a next step after a stage declaration even when its scope is explicit (%s)", async (goal) => {
+    const result = await harness().turn("Estoy embarazada", interpretation({ goal, scope: "explicit", serviceId: null, updates: [
+      { field: "journey_stage", value: "embarazo", evidence: "Estoy embarazada", correction: false },
+    ] }));
+    expect(result.authorityTrace.policy.action).toBe("catalog_info");
+    expect(result.reply).toMatch(/Charla informativa/);
+    expect(result.reply).toMatch(/Dime cuál te interesa/);
+    expect(result.state?.journeyStage).toBe("embarazo");
+  });
   it.each(["explicit", "contextual"] as const)("maps a focused exploration to service information (%s)", (scope) => {
     const intent = dialogueIntent(interpretation({ scope }));
     expect(intent.intent).toBe("service_question");

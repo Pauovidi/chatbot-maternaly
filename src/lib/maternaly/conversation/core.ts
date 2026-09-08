@@ -1997,6 +1997,13 @@ export class MaternalyConversationPolicy {
     }
     if (intent.dialogue) {
       const d = intent.dialogue;
+      // A declared life stage without a chosen topic opens service discovery.
+      // The model may label this factual statement explicit or contextual;
+      // neither label should leave the user with an acknowledgement only.
+      if (!d.serviceId && !state.serviceKey && !d.questions.length && !d.ambiguities.length &&
+        ["explore", "ask", "continue"].includes(d.goal) && d.updates.some((u) => u.field === "journey_stage")) {
+        return { action: "catalog_info", reason: "journey_stage_without_topic", journeyStage: intent.slots.journey_stage ?? state.journeyStage };
+      }
       if (["continue", "register"].includes(d.goal) && !d.questions.length &&
         state.dialogueMemory?.unresolvedFields?.some((field) => !(field === "partner_name" && state.peopleCount === 1) && !d.updates.some((u) => u.field === field))) {
         return { action: "dialogue_response", serviceKey: state.serviceKey, reason: "unresolved_previous_field" };
