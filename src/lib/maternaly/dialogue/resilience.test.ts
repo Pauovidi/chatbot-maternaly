@@ -58,6 +58,15 @@ describe("dialogue safety regression matrix", () => {
     const result = await understandDialogue("Sí", dialogueTestConversation(), env(), vi.fn(async () => { throw new DOMException("Timed out", "AbortError"); }));
     expect(result.reason).toBe("timeout");
   });
+  it.each(["gpt-5.4-mini-2026-03-17", "gpt-4.1-mini"])("uses supported reasoning parameters for %s", async (model) => {
+    let request: Record<string, unknown> = {};
+    const result = await understandDialogue("Hola", dialogueTestConversation(), { ...env(), MATERNALY_DIALOGUE_MODEL: model }, vi.fn(async (_url, init) => {
+      request = JSON.parse(String(init?.body));
+      return new Response(JSON.stringify({ output_text: JSON.stringify(d()) }));
+    }));
+    expect(result.reason).toBe("accepted");
+    expect(request.reasoning).toEqual(model.startsWith("gpt-5") ? { effort: "low" } : undefined);
+  });
   it.each(["¿Y si fuésemos tres en vez de dos?", "Podríamos venir tres?"])("rejects fact updates supported only by a question: %s", (message) => {
     expect(validateDialogue(d({ updates: [{ field: "people_count", value: "3", evidence: message, correction: false }] }), message)).toBeUndefined();
   });
@@ -142,6 +151,21 @@ describe("dialogue safety regression matrix", () => {
     expect(result.passed).toBe(true);
     expect(result.turns[1].state?.dialogueMemory?.unresolvedFields).toEqual(["partner_name"]);
     expect(result.turns[2].state?.dialogueMemory?.unresolvedFields).toEqual([]);
+  });
+  it.each(["prima", "mi madre", "pareja", "acompañante"])("treats an unnamed relationship as a pending correction: %s", (value) => {
+    const message = `Vendrá ${value}, luego te digo su nombre`;
+    const result = validateDialogue(d({ updates: [{ field: "partner_name", value, evidence: message, correction: true }] }), message);
+    expect(result?.updates).toHaveLength(0);
+    expect(result?.ambiguities[0].field).toBe("partner_name");
+  });
+  it("preserves surnames that happen to include a relationship word", () => {
+    const message = "Mi nombre es Ana Prima";
+    expect(validateDialogue(d({ updates: [{ field: "full_name", value: "Ana Prima", evidence: message, correction: false }] }), message)?.updates[0].value).toBe("Ana Prima");
+  });
+  it("never completes a year-only FPP with today's day and month", () => {
+    const result = validateDialogue(d({ updates: [{ field: "fpp_or_due_date", value: "2027-09-08", evidence: "Perdón, 2027", correction: true }] }), "Perdón, 2027", dialogueTestConversation().maternalyNormalizedFlow);
+    expect(result?.updates).toHaveLength(0);
+    expect(result?.ambiguities[0].field).toBe("fpp_or_due_date");
   });
   it("routes discovery with a question to the verified catalogue", async () => {
     const interpretation = d({ goal: "explore", scope: "catalog", serviceId: null, questions: [{ text: "¿Qué ofrecéis?", evidence: "qué ofrecéis", serviceId: null, focus: "general" }] });

@@ -63,6 +63,20 @@ También pasa una prueba de entrada/persistencia con tres mensajes simultáneos 
 
 Respuestas informativas: 17/20 según el evaluador automático (`1788883047535`), revisadas manualmente. La respuesta sobre tres asistentes empezaba por «Sí» para después indicar que no podía confirmar ese aforo: no autorizó una reserva, pero resulta engañosa. Se reforzó que una condición desconocida se responda primero con esa incertidumbre. Los otros dos fallos fueron criterios léxicos demasiado estrechos: yoga se describió como «actividad prenatal» y psicología explicó que no podía confirmar temas concretos. Se amplió el criterio para aceptar «prenatal» o desconocimiento explícito, sin dar por demostradas otras afirmaciones ni reinterpretar el 17/20 original. También se pidió no sustituir contenidos desconocidos por precios/horarios no solicitados.
 
+## Ronda c24690b
+
+Batería local: 1.081 superadas, una omitida y una pendiente; build/lint correctos. Modelo real fijado a `gpt-5.4-mini-2026-03-17`, todavía sin razonamiento explícito:
+
+- Comprensión repetida: 77/80 (`1788883779085`).
+- Segunda ejecución adicional de comprensión: 77/80 (`1788883916792`); no se descarta. Incluye una FPP inventada a partir de un año sin referencia, por lo que se añade un control independiente que no permite tomar día/mes de la fecha actual.
+- Conversaciones: 30/32 (`1788883711671`) y 27/32 (`1788883816491`). La segunda ejecución se inició por una repetición del comando durante un retraso visual de la consola; se conserva y se cuenta su resultado, no se descarta por ser peor.
+
+No supera la puerta de calidad. Aparecieron preguntas inventadas a partir del historial, citas de acciones tomadas del mensaje anterior y «prima» guardado literalmente como nombre. Este último es un fallo transaccional en la simulación: reservó con ese valor al llegar la FPP. Se añadió validación de nombres que convierte un parentesco sin nombre en un campo pendiente, conservado entre turnos. No se modificaron inscripciones reales.
+
+La siguiente revisión probará razonamiento `low` para GPT-5, con límite de salida de 4.000 tokens y tiempo máximo de 20 segundos para el intérprete; GPT-4 mantiene los parámetros previos. Debe medirse de nuevo exactitud y latencia antes de activar. Se basa en los parámetros documentados oficialmente del modelo, sin asumir que el ajuste por sí solo garantiza calidad.
+
+Respuestas: 19/20 automático (`1788883942440`), revisadas todas manualmente. El caso de psicología expresa correctamente que los temas concretos no están descritos en las fuentes; no coincide con la expresión regular del evaluador. Se conserva como 19/20 automático y se distingue la revisión humana favorable de ese caso. Las otras respuestas no inventan plazas, descuentos, cancelaciones ni contenidos desconocidos; aún hay formulaciones mejorables (por ejemplo «si devolvéis» al hablar de la propia empresa).
+
 ## Ejecución inicial comprobada (histórico: credencial ya corregida)
 
 Se ejecutaron los 20 casos ficticios de `dialogue/evaluation.ts` en una instancia temporal del mismo artefacto desplegado, iniciada desde la consola autorizada de EasyPanel. Escuchó únicamente en `127.0.0.1:3001`, con la evaluación habilitada, modo conversacional `off`, proveedor WhatsApp `mock` y escritura de Sheets deshabilitada. El proceso temporal terminó al finalizar la evaluación. No se cambiaron las variables guardadas del servicio principal.
