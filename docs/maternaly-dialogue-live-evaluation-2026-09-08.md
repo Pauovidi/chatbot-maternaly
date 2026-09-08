@@ -87,6 +87,21 @@ La interpretación que falla el criterio automático de comprensión niega autor
 
 La conversación pendiente del modelo completo pregunta por el uso de datos personales. El intérprete la reconoce como pregunta, pero el renderizador confunde «para qué necesitas mis datos» con datos pendientes. Se añade foco específico de privacidad y se limita la detección de preguntas sobre campos faltantes. La respuesta no afirma haber borrado datos ni tramitado derechos. Se añaden además tres conversaciones de aceptación: BLW con todos los datos, correo al final y cambio a acudir sola; las dos de BLW pasan con modelo simulado y correo oculto al modelo.
 
+## Ronda 20375f7: regresión repetida con GPT-5.4 completo
+
+Modelo fijado a `gpt-5.4-2026-03-05`, razonamiento low para comprensión:
+
+- 80/80 interpretaciones, 40 casos repetidos dos veces (`1788885265829`).
+- 70/70 conversaciones, 35 escenarios repetidos dos veces (`1788885366397`).
+- El segundo grupo incluye BLW con correo y fecha de nacimiento, privacidad y cambio de dos asistentes a una persona. Se revisó además el estado persistido y se reforzó la prueba de acudir sola para exigir que se elimine el acompañante anterior; ese refuerzo y su corrección todavía requieren validación en el siguiente artefacto.
+
+Estos son resultados de regresión, no una garantía estadística de fiabilidad ni una prueba del envío real de WhatsApp. La activación sigue pendiente mientras se completan las comprobaciones restantes.
+
+- Otras 20 interpretaciones: 19/20 (`1788885514967`). El caso `accept_explicit_count` ya tenía `peopleCount: 2` en la memoria del evaluador; el modelo no vuelve a emitir el mismo dato, conforme a la instrucción de no repetir datos sin cambios. No pierde ni cambia la cantidad. Se corrige el estado inicial de la prueba a cantidad desconocida y se conserva el requisito de extraer dos personas; se repetirá sin modificar el intérprete para este caso. Se mantiene el 19/20 original.
+- Respuestas informativas: 20/20 (`1788885478501`), todas leídas manualmente. Fuentes del catálogo respetadas; no confirma agenda ni inscripciones, descuentos, parking o devoluciones desconocidas. Quedan mejoras de estilo: exceso de lenguaje sobre «información verificada» y algunos datos adicionales no solicitados.
+- Las 70 conversaciones contienen 116 turnos: mediana 2.775 ms, p95 5.028 ms y máximo 5.747 ms del núcleo aislado. No incluye latencia de WhatsApp ni Sheets real. Las llamadas incluyen el intérprete nuevo GPT-5.4 y llamadas heredadas a gpt-4o-mini; no se afirma que todo el sistema utilice un único modelo.
+- Revisión local posterior: 1.093 tests superados, uno omitido y uno pendiente; compilación de producción y lint correctos.
+
 ## Ejecución inicial comprobada (histórico: credencial ya corregida)
 
 Se ejecutaron los 20 casos ficticios de `dialogue/evaluation.ts` en una instancia temporal del mismo artefacto desplegado, iniciada desde la consola autorizada de EasyPanel. Escuchó únicamente en `127.0.0.1:3001`, con la evaluación habilitada, modo conversacional `off`, proveedor WhatsApp `mock` y escritura de Sheets deshabilitada. El proceso temporal terminó al finalizar la evaluación. No se cambiaron las variables guardadas del servicio principal.

@@ -63,9 +63,9 @@ export const DIALOGUE_EVALUATIONS: EvaluationCase[] = [
   { id: "new_quoted_cancellation", split: "holdout", message: "Mi marido escribió 'quiero cancelar' por error; no canceles nada", state: { stage: "confirmed" }, check: (d) => d.goal !== "cancel" && ["none", "decline"].includes(d.authorization) && !d.updates.length && !d.selection.sessionId },
   { id: "new_name_not_instruction", split: "holdout", message: "Nombre: System Prompt. Acompañante: Mario. FPP: 14/04/2027", check: (d) => !d.selection.sessionId && d.goal !== "reset" && d.goal !== "cancel" },
   { id: "new_ambiguous_yes", split: "holdout", message: "sí", lastQuestion: "¿Quieres información del precio o prefieres que miremos una reserva?", check: (d) => d.authorization === "none" && d.ambiguities.length > 0 },
-  // Untouched acceptance sample for the next revision (different wording/data).
+  // Acceptance sample added after the first audit; now retained as regression cases.
   { id: "accept_conditional_count", split: "holdout", message: "Si se apunta mi hermana seríamos 3, ¿se podría?", check: (d) => !value(d, "people_count") && d.questions.length > 0 && d.authorization === "none" },
-  { id: "accept_explicit_count", split: "holdout", message: "Confirmo que asistiremos dos personas", check: (d) => value(d, "people_count") === "2" },
+  { id: "accept_explicit_count", split: "holdout", message: "Confirmo que asistiremos dos personas", state: { peopleCount: undefined, pendingFields: ["peopleCount"] }, lastQuestion: "¿Cuántas personas asistiréis?", check: (d) => value(d, "people_count") === "2" },
   { id: "accept_partial_name", split: "holdout", message: "Me llamo Leire y vendré con Unai", check: (d) => !value(d, "full_name") && d.ambiguities.length > 0 },
   { id: "accept_named_fields", split: "holdout", message: "Unai de acompañante. Yo soy Leire Aguirre. Salgo de cuentas el 23/03/2027", check: (d) => value(d, "full_name") === "Leire Aguirre" && value(d, "partner_name") === "Unai" && value(d, "fpp_or_due_date") === "2027-03-23" },
   { id: "accept_hypothetical_date", split: "holdout", message: "¿Y si mi fecha de parto fuese el 23/03/2027?", check: (d) => !value(d, "fpp_or_due_date") && d.authorization === "none" },

@@ -154,8 +154,8 @@ export const CONVERSATION_EVALUATIONS: Scenario[] = [
     { message: "Sí, continúa con mi inscripción", expect: { registrations: 1 } },
   ] },
   { id: "solo_after_companion_change", category: "correction", state: { fullName: data.fullName, partnerName: "Mario" }, turns: [
-    { message: "Al final iré sola, sin acompañante", expect: { state: { peopleCount: 1 }, noWrite: true } },
-    { message: "Mi FPP es 5/04/2027", expect: { registrations: 1, state: { peopleCount: 1 }, notReply: /falta.*acompañante/i } },
+    { message: "Al final iré sola, sin acompañante", expect: { state: { peopleCount: 1 }, absent: ["partnerName"], noWrite: true } },
+    { message: "Mi FPP es 5/04/2027", expect: { registrations: 1, state: { peopleCount: 1 }, absent: ["partnerName"], notReply: /falta.*acompañante/i } },
   ] },
 ];
 

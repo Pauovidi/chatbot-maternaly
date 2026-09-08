@@ -205,6 +205,15 @@ describe("dialogue safety regression matrix", () => {
     expect(result.passed).toBe(true);
     expect(result.turns[0].reply).toMatch(/No he borrado ni modificado/);
   });
+  it("removes the old companion when the user explicitly changes to one attendee", async () => {
+    const scenario = CONVERSATION_EVALUATIONS.find((c) => c.id === "solo_after_companion_change")!;
+    const outputs = [
+      d({ updates: [{ field: "people_count", value: "1", evidence: scenario.turns[0].message, correction: true }] }),
+      d({ updates: [{ field: "fpp_or_due_date", value: "2027-04-05", evidence: "5/04/2027", correction: false }] }),
+    ];
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ output_text: JSON.stringify(outputs.shift()) }))));
+    expect((await runConversationEvaluation(scenario, env())).passed).toBe(true);
+  });
   it.each(["blw_all_contact_together", "blw_email_last"])("completes BLW without sending contact email to the model: %s", async (id) => {
     const scenario = CONVERSATION_EVALUATIONS.find((c) => c.id === id)!;
     vi.stubGlobal("fetch", vi.fn(async (_url, init) => {

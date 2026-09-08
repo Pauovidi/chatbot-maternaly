@@ -1876,6 +1876,9 @@ export class MaternalyStateReducer {
           };
 
     const alternativeSessionsRequested = asksForAlternativeSessions(input.message);
+    if (input.intent.dialogue && persistedPrevious?.stage !== "confirmed" && registrationSlots.people_count === 1) {
+      reducedState.partnerName = undefined;
+    }
     const state = alternativeSessionsRequested && !input.intent.dialogue
       ? {
           ...reducedState,
@@ -1987,7 +1990,7 @@ export class MaternalyConversationPolicy {
     if (intent.dialogue) {
       const d = intent.dialogue;
       if (["continue", "register"].includes(d.goal) && !d.questions.length &&
-        state.dialogueMemory?.unresolvedFields?.some((field) => !d.updates.some((u) => u.field === field))) {
+        state.dialogueMemory?.unresolvedFields?.some((field) => !(field === "partner_name" && state.peopleCount === 1) && !d.updates.some((u) => u.field === field))) {
         return { action: "dialogue_response", serviceKey: state.serviceKey, reason: "unresolved_previous_field" };
       }
       if (d.goal === "explore" && d.scope === "catalog" && !d.clinical && !d.ambiguities.length) {
@@ -3064,7 +3067,7 @@ export class MaternalyCoreAdapter {
         unresolvedFields: [...new Set([
           ...(stateBefore?.dialogueMemory?.unresolvedFields ?? []),
           ...intent.dialogue.ambiguities.filter((a) => !["service", "session", "booking_consent"].includes(a.field)).map((a) => a.field),
-        ])].filter((field) => !intent.dialogue!.updates.some((u) => u.field === field)),
+        ])].filter((field) => !(field === "partner_name" && nextState.peopleCount === 1) && !intent.dialogue!.updates.some((u) => u.field === field)),
       };
     }
     const groundedRender = await this.renderer.renderGrounded(
