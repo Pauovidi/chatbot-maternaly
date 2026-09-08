@@ -19,6 +19,21 @@ const data = { fullName: "Elena García López", partnerName: "Mario", fppOrDueD
 const sameSession = { selectedSessionId: "sesion_charla_erandio_20260924" };
 const noReset = /Soy Ane|dime primero en qué etapa/i;
 export const CONVERSATION_EVALUATIONS: Scenario[] = [
+  ...["Charla informativa", "la primera", "esa charla", "Me interesa la charla gratuita"].map((message): Scenario => ({
+    id: `service_choice_${message}`, category: "discovery", fresh: true, turns: [
+      { message: "Reiniciar", expect: { noWrite: true, action: "reset" } },
+      { message: "Estoy embarazada", expect: { noWrite: true, reply: /charla informativa/i } },
+      { message, expect: { noWrite: true, state: { serviceKey: "charla_embarazo_1_20" }, reply: /matronas|autocuidados|alimentación/i, notReply: /Estos son los servicios|Test ADN fetal|Detesex/ } },
+      { message: "Charla informativa", expect: { noWrite: true, state: { serviceKey: "charla_embarazo_1_20" }, reply: /matronas|autocuidados|alimentación/i, notReply: /Estos son los servicios|Test ADN fetal|Detesex/ } },
+      { message: "No quiero reservar todavía, solo información", expect: { noWrite: true, notReply: /Estos son los servicios|Test ADN fetal|reserva.*confirmada/i } },
+    ],
+  })),
+  { id: "service_interest_with_context", category: "discovery", fresh: true, turns: [
+    { message: "Estoy embarazada y me interesa la charla informativa", expect: { noWrite: true, state: { serviceKey: "charla_embarazo_1_20" }, reply: /matronas|autocuidados|alimentación/i, notReply: /Estos son los servicios|Test ADN fetal/ } },
+    { message: "¿Es gratuita?", expect: { noWrite: true, reply: /gratuita|gratis|sin coste/i, notReply: /Estos son los servicios|Test ADN fetal/ } },
+    { message: "Ahora cuéntame sobre BLW", expect: { noWrite: true, reply: /alimentación complementaria|autorregulación|alimentos/i, notReply: /Estos son los servicios|Test ADN fetal/ } },
+    { message: "¿Qué otros servicios ofrecéis?", expect: { noWrite: true, reply: /pilates|preparación/i } },
+  ] },
   { id: "mixed_selection_question_resume", category: "mixed", state: { stage: "choosing_session", selectedSessionId: undefined, selectedGroupId: undefined, peopleCount: undefined, fppOrDueDate: "2027-04-14", location: "erandio" }, turns: [
     { message: "Quiero ver las fechas de la charla en Erandio", expect: { noWrite: true, reply: /septiembre/i } },
     { message: "La primera, el 24 de septiembre. Iré con mi pareja, seremos dos. Por cierto, ¿es gratuita?", expect: { state: { ...sameSession, stage: "collecting_contact", peopleCount: 2, pendingFields: ["fullName", "partnerName"] }, noWrite: true, reply: /(?:Para continuar, dime|puedes aclararme).*nombre/i, notReply: /He recogido:|He actualizado:/ } },

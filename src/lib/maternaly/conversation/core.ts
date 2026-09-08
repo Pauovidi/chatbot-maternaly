@@ -1074,6 +1074,7 @@ function shouldReplaceServiceFlow(
   );
   const previousService = getKnowledgeServiceByNormalizedKey(previous.serviceKey);
   const changesService = Boolean(explicitService && explicitService.id !== previousService?.id);
+  if (intent.dialogue && previous.stage === "confirmed" && !isRegistrationRequestTurn(intent)) return false;
   return changesService && (
     isRegistrationRequestTurn(intent) || !isActiveRegistrationStage(previous.stage)
   );
@@ -2017,6 +2018,13 @@ export class MaternalyConversationPolicy {
         }
         return { action: "dialogue_response", serviceKey: state.serviceKey, reason: "answer_before_continuing" };
       }
+      // Naming a service is an informational choice, not a catalogue request
+      // or booking consent. Keep this ahead of legacy discovery/data routing.
+      const informationalService = getKnowledgeService(d.serviceId ?? (d.scope === "contextual" ? state.serviceKey : undefined));
+      if (["explore", "ask"].includes(d.goal) && d.scope !== "catalog" && informationalService && !d.selection.sessionId) {
+        return { action: "service_info", service: informationalService, reason: "focused_service_interest",
+          serviceQuestionFocus: "general", locationPreference: intent.slots.location, modalityPreference: intent.slots.modality };
+      }
       if (d.authorization === "none" && !d.selection.sessionId && d.goal !== "continue" && d.goal !== "explore") {
         return { action: "dialogue_response", serviceKey: state.serviceKey, reason: "no_booking_authorization" };
       }
@@ -2708,6 +2716,7 @@ export class MaternalyCoreAdapter {
                   ? "choosing_session"
                   : decision.action === "service_info" &&
                       decision.service?.id === "charla_embarazo_1_20" &&
+                      stateBefore?.stage !== "confirmed" &&
                       !isActiveRegistrationStage(stateBefore?.stage)
                     ? "awaiting_booking_decision"
                   : decision.action === "service_info" && (!stateBefore?.stage || replacesServiceFlow)
