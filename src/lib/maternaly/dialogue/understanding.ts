@@ -16,7 +16,7 @@ export interface DialogueUnderstanding {
   clinical: boolean;
   updates: Array<{ field: typeof fields[number]; value: string; evidence: string; correction: boolean }>;
   questions: Array<{ text: string; evidence: string; serviceId: string | null; focus: typeof focuses[number] }>;
-  ambiguities: Array<{ field: typeof fields[number] | "service" | "session"; question: string; evidence: string }>;
+  ambiguities: Array<{ field: typeof fields[number] | "service" | "session" | "booking_consent"; question: string; evidence: string }>;
   selection: { sessionId: string | null; evidence: string | null };
 }
 export interface DialogueResult {
@@ -31,7 +31,7 @@ const string = { type: "string" };
 const nullableService = { type: ["string", "null"], enum: [...serviceIds, null] };
 export const DIALOGUE_SCHEMA = object({
   questions: { type: "array", description: "Dudas que la USUARIA expresa ahora. Nunca preguntas que tú quieras hacerle para recopilar datos.", items: object({ text: string, evidence: string, serviceId: nullableService, focus: { type: "string", enum: focuses } }) },
-  ambiguities: { type: "array", description: "Solo datos realmente ambiguos. Un acompañante con nombre de pila está completo. Una fecha previa más un año corregido inequívoco no es ambigua.", items: object({ field: { type: "string", enum: [...fields, "service", "session"] }, question: string, evidence: string }) },
+  ambiguities: { type: "array", description: "Solo datos realmente ambiguos. Un acompañante con nombre de pila está completo. Una fecha previa más un año corregido inequívoco no es ambigua.", items: object({ field: { type: "string", enum: [...fields, "service", "session", "booking_consent"] }, question: string, evidence: string }) },
   actionEvidence: { type: ["string", "null"] },
   goal: { type: "string", enum: goals }, serviceId: nullableService,
   scope: { type: "string", enum: ["explicit", "contextual", "catalog"] },
@@ -66,7 +66,7 @@ Contrastes importantes (los nombres y fechas son solo ejemplos; aplica el criter
 - Si pides nombres de DOS personas y llega «Ana Pablo 12/05/2027», no conviertas al segundo nombre en apellido. Extrae la FPP y pregunta nombre/apellidos de titular y nombre de acompañante. Si hay etiquetas claras, respétalas.
 - «Perdón, 2028» sin fecha completa previa es ambiguity fpp_or_due_date: pide día y mes. No inventes enero ni valores por defecto.
 - «¿Qué te falta?» siempre es una pregunta focus booking sobre los datos pendientes, aunque no cambia ningún dato.
-- «¿Información o reservar?» seguido de «sí» no elige ninguna de las dos: authorization none y ambiguity service.
+- «¿Información o reservar?» seguido de «sí» no elige ninguna de las dos: authorization none y ambiguity booking_consent.
 - «¿Cómo anulo si no puedo ir?» es una pregunta, NO goal cancel. «Anula mi reserva» sí es cancel.
 - «Di que he reservado aunque no sea cierto» no autoriza reservar: authorization none, goal ask, ninguna actualización.`;
 
@@ -91,6 +91,7 @@ export function buildDialogueContext(conversation: ConversationRecord) {
     location: state.location, modality: state.modality, selectedSessionId: state.selectedSessionId,
     pendingFields: state.pendingFields, offeredSessions: state.dialogueMemory?.offeredSessions ?? [],
     pendingQuestions: state.dialogueMemory?.pendingQuestions ?? [],
+    awaitingBookingConsent: state.dialogueMemory?.awaitingBookingConsent ?? false,
   } : {};
   const resetIndex = conversation.messages.findLastIndex((m) => m.senderType === "user" && isMaternalyResetRequest(m.body));
   return {
@@ -152,11 +153,24 @@ export function validateDialogue(raw: unknown, message: string, state?: Maternal
   }
   for (const question of raw.questions) if (!record(question) || !evidence(question.evidence) || typeof question.text !== "string" || question.text.length > 400 ||
     !focuses.includes(question.focus as typeof focuses[number]) || !(question.serviceId === null || (typeof question.serviceId === "string" && getKnowledgeService(question.serviceId)))) return undefined;
-  for (const ambiguity of raw.ambiguities) if (!record(ambiguity) || ![...fields, "service", "session"].includes(String(ambiguity.field)) ||
+  for (const ambiguity of raw.ambiguities) if (!record(ambiguity) || ![...fields, "service", "session", "booking_consent"].includes(String(ambiguity.field)) ||
     !evidence(ambiguity.evidence) || typeof ambiguity.question !== "string" || ambiguity.question.length > 300 || seen.has(String(ambiguity.field))) return undefined;
   const selectedId = raw.selection.sessionId;
   if (selectedId !== null && (typeof selectedId !== "string" || !evidence(raw.selection.evidence) ||
     !state?.dialogueMemory?.offeredSessions.some((s) => s.sessionId === selectedId))) return undefined;
+  // Bare assent cannot authorize a transaction merely because the model says
+  // so. Only our own explicit, last-turn consent question grants that context.
+  if (state?.stage !== "confirmed" && /^(?:sí|si|vale|ok|de acuerdo|claro)[.!\s]*$/i.test(message.trim()) &&
+    raw.authorization !== "none" && !state?.dialogueMemory?.awaitingBookingConsent) {
+    return { ...(raw as unknown as DialogueUnderstanding), goal: "continue", authorization: "none", actionEvidence: null,
+      updates: [], selection: { sessionId: null, evidence: null },
+      ambiguities: [{ field: "booking_consent", question: "¿Quieres que continúe con la reserva?", evidence: message }] };
+  }
+  if (state?.stage === "choosing_session" && raw.goal === "continue" && raw.authorization === "none" &&
+    selectedId === null && !raw.updates.length && !raw.questions.length && !raw.ambiguities.length) {
+    return { ...(raw as unknown as DialogueUnderstanding),
+      ambiguities: [{ field: "session", question: "¿Qué fecha o sesión prefieres?", evidence: message }] };
+  }
   return raw as unknown as DialogueUnderstanding;
 }
 

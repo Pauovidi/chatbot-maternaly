@@ -37,6 +37,14 @@ Esta ronda NO supera la puerta de calidad. Las salidas exactas mostraron solicit
 
 Además se detectó una afirmación inventada sobre la empresa destinataria de una factura, con lista de fuentes vacía. Se añadió una barrera que rechaza afirmaciones sin fuentes (solo permite expresar desconocimiento), sin considerar ese control como prueba general de veracidad. Las políticas de pago/facturación y respuestas desconocidas requieren nueva comprobación.
 
+## Ronda 60d72d4
+
+Con exactamente el mismo código, gpt-4.1-mini superó 28/40 (`1788882246775`) y gpt-5.4-mini superó 38/40 (`1788882221855`). El segundo informe acredita el modelo efectivo devuelto por la API: `gpt-5.4-mini-2026-03-17`. La aclaración del contrato/contexto sí mejoró esta combinación; no basta con cambiar el nombre del modelo sin evaluar el conjunto.
+
+Los dos casos pendientes de gpt-5.4-mini: no pedir aclaración al elegir una opción que no estaba en la lista, y etiquetar «no canceles nada» como `decline` en lugar de `none`. Para el primero se añadió una repregunta de sesión al quedar sin resolver una selección. Para el segundo se aceptan ambas formas de denegar autorización, exigiendo además cero actualizaciones y ninguna selección; se añadió un turno de conversación que verifica reserva conservada y cero escrituras. Se corrigió también la respuesta de rechazo cuando ya existe una inscripción: no debe decir «no continúo con la reserva».
+
+Se añadió una memoria de autorización emitida por la aplicación: un asentimiento aislado solo puede autorizar tras una pregunta explícita de continuar con la reserva. La marca se consume/renueva con cada respuesta, y se prueba una conversación de dos turnos que primero pregunta y luego registra exactamente una vez.
+
 ## Ejecución comprobada
 
 Se ejecutaron los 20 casos ficticios de `dialogue/evaluation.ts` en una instancia temporal del mismo artefacto desplegado, iniciada desde la consola autorizada de EasyPanel. Escuchó únicamente en `127.0.0.1:3001`, con la evaluación habilitada, modo conversacional `off`, proveedor WhatsApp `mock` y escritura de Sheets deshabilitada. El proceso temporal terminó al finalizar la evaluación. No se cambiaron las variables guardadas del servicio principal.

@@ -53,6 +53,7 @@ export interface PendingReservationContext {
 
 export interface MaternalyNormalizedFlowState {
   dialogueMemory?: {
+    awaitingBookingConsent?: boolean;
     offeredSessions: Array<{ sessionId: string; date?: string; startTime?: string; location?: string; modality?: string }>;
     pendingQuestions: string[];
   };

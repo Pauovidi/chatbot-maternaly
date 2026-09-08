@@ -10,6 +10,7 @@ type Expectation = {
 };
 interface Scenario {
   id: string; category: string; state?: Partial<MaternalyNormalizedFlowState>;
+  lastQuestion?: string;
   fresh?: boolean; human?: boolean; capacity?: string; failWrite?: boolean;
   service?: "charla_embarazo_1_20" | "taller_blw";
   turns: Array<{ message: string; expect: Expectation }>;
@@ -71,6 +72,7 @@ export const CONVERSATION_EVALUATIONS: Scenario[] = [
   { id: "negative_cancellation_after_booking", category: "cancellation", turns: [
     { message: "Elena García López\nMario\n5/04/2027", expect: { registrations: 1, state: { stage: "confirmed" } } },
     { message: "No quiero cancelar mi reserva, solo saber dónde está el centro", expect: { state: { stage: "confirmed" }, noWrite: true, notReply: /he cancelado|reserva cancelada/i } },
+    { message: "Mi marido escribió 'quiero cancelar' por error; no canceles nada", expect: { state: { stage: "confirmed" }, noWrite: true, registrations: 1, notReply: /no continúo con la reserva|reserva cancelada/i } },
     { message: "¿Cómo se cancela si al final no puedo?", expect: { noWrite: true, notReply: /he cancelado|reserva cancelada/i } },
   ] },
   { id: "explicit_cancellation", category: "cancellation", turns: [
@@ -122,6 +124,14 @@ export const CONVERSATION_EVALUATIONS: Scenario[] = [
   { id: "privacy_question", category: "privacy", turns: [
     { message: "¿Para qué necesitas mis datos personales y cómo los usáis?", expect: { noWrite: true, notReply: /no tengo información verificada/i, reply: /datos|privacidad/i } },
   ] },
+  { id: "bare_yes_requires_clear_consent", category: "authorization", state: data,
+    lastQuestion: "¿Quieres información del precio o prefieres que miremos una reserva?", turns: [
+      { message: "sí", expect: { noWrite: true, registrations: 0, notReply: /ha quedado confirmada/i } },
+      { message: "Sí, continúa con mi reserva", expect: { registrations: 1, state: { stage: "confirmed" } } },
+    ] },
+  { id: "schedule_detour_preserves_booking", category: "detour", state: data, turns: [
+    { message: "Mantén la charla. ¿Qué fechas hay para BLW?", expect: { state: { ...sameSession, serviceKey: "charla_embarazo_1_20" }, noWrite: true, notReply: /24 de septiembre|6 de octubre/i } },
+  ] },
 ];
 
 export function isolatedDialogueEnv(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
@@ -145,7 +155,7 @@ export async function runConversationEvaluation(test: Scenario, source: NodeJS.P
   const client = new InMemoryNormalizedSheetsClient(createRealTemplateWorkbook({ serviceKey: test.service ?? "charla_embarazo_1_20", multiSession: true, sessionCapacity: test.capacity }),
     test.failWrite ? { failAppendTabs: ["Inscripciones"] } : {});
   const core = new MaternalyCoreAdapter(undefined, undefined, undefined, new MaternalyToolExecutor(client));
-  let conversation: ConversationRecord = dialogueTestConversation(test.state);
+  let conversation: ConversationRecord = dialogueTestConversation(test.state, test.lastQuestion);
   if (test.fresh) { conversation.maternalyNormalizedFlow = undefined; conversation.messages = []; }
   if (test.human) conversation.mode = "human";
   const results = [];

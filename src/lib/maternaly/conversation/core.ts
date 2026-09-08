@@ -3074,6 +3074,9 @@ export class MaternalyCoreAdapter {
         })
       : undefined;
     const reply = distinctReply?.reply;
+    if (nextState?.dialogueMemory) {
+      nextState.dialogueMemory.awaitingBookingConsent = Boolean(reply?.endsWith("¿Quieres que continúe con la solicitud de reserva?"));
+    }
     if (groundedRender) {
       events.push({
         eventType: "maternaly_grounded_copy_completed",

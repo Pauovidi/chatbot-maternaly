@@ -644,12 +644,14 @@ export class MaternalyCopyRenderer {
       if (d.ambiguities.length) {
         const field = d.ambiguities[0].field;
         const labels: Record<string, string> = { full_name: "el nombre y los apellidos de la titular", partner_name: "el nombre del acompañante", fpp_or_due_date: "la fecha probable de parto, con día, mes y año", baby_birth_date: "la fecha de nacimiento del bebé", service: "el servicio que te interesa", session: "la fecha o el número de la sesión", people_count: "cuántas personas acudiréis" };
-        parts.push(`Para no dar nada por supuesto, ¿puedes aclararme ${labels[field] ?? "ese dato"}?`);
+        parts.push(field === "booking_consent" ? "¿Quieres que continúe con la solicitud de reserva?" : `Para no dar nada por supuesto, ¿puedes aclararme ${labels[field] ?? "ese dato"}?`);
       } else if (input.toolResult || input.decision.action === "catalog_info" || input.decision.action === "booking_service_selection") {
         const trusted = this.render(input);
         if (trusted) parts.push(trusted);
       } else if (d.goal === "decline") {
-        parts.push("De acuerdo, no continúo con la reserva. Podemos seguir con tus dudas cuando quieras.");
+        parts.push(input.state?.stage === "confirmed"
+          ? "De acuerdo, no he realizado cambios ni he cancelado tu inscripción. Si quieres consultar algo sobre ella, seguimos desde aquí."
+          : "De acuerdo, no continúo con la reserva. Podemos seguir con tus dudas cuando quieras.");
       } else if (input.state?.stage === "collecting_contact" && (d.updates.length || !questions.length || pendingDataQuestion)) {
         const missing = input.state.pendingFields ?? [];
         parts.push(missing.length ? `Conservo la sesión elegida. Solo me falta: ${missing.map(fieldLabel).join(", ")}.` : "Conservo los datos y la sesión elegida. ¿Quieres que continúe con la solicitud de reserva?");

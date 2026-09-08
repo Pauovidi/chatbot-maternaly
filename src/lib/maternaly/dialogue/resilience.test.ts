@@ -86,6 +86,27 @@ describe("dialogue safety regression matrix", () => {
     expect(validateDialogueAnswer({ answer: "La empresa para la factura es Maternaly.", usedFactIds: [] }, [])).toBeUndefined();
     expect(validateDialogueAnswer({ answer: "No dispongo de esa información.", usedFactIds: [] }, [])).toBeTruthy();
   });
+  it("requires the application's last consent question before bare assent can authorize a booking", () => {
+    const candidate = d({ authorization: "confirm", actionEvidence: "sí" });
+    const state = dialogueTestConversation().maternalyNormalizedFlow!;
+    const unclear = validateDialogue(candidate, "sí", state);
+    expect(unclear?.authorization).toBe("none");
+    expect(unclear?.ambiguities[0].field).toBe("booking_consent");
+    const explicit = validateDialogue(candidate, "sí", { ...state, dialogueMemory: { offeredSessions: [], pendingQuestions: [], awaitingBookingConsent: true } });
+    expect(explicit?.authorization).toBe("confirm");
+  });
+  it("asks for clear consent and only books after that question is accepted", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (_url, init) => {
+      const message = JSON.parse(String(init?.body)).input.at(-1).content;
+      return new Response(JSON.stringify({ output_text: JSON.stringify(d({ authorization: "confirm", actionEvidence: message })) }));
+    }));
+    const scenario = CONVERSATION_EVALUATIONS.find((c) => c.id === "bare_yes_requires_clear_consent")!;
+    const result = await runConversationEvaluation({ ...scenario, turns: [scenario.turns[0], { message: "sí", expect: { registrations: 1, state: { stage: "confirmed" } } }] }, env());
+    expect(result.turns[0].state?.dialogueMemory?.awaitingBookingConsent).toBe(true);
+    expect(result.turns[0].registrations).toBe(0);
+    expect(result.passed).toBe(true);
+    expect(result.turns[1].state?.dialogueMemory?.awaitingBookingConsent).toBe(false);
+  });
   it("routes discovery with a question to the verified catalogue", async () => {
     const interpretation = d({ goal: "explore", scope: "catalog", serviceId: null, questions: [{ text: "¿Qué ofrecéis?", evidence: "qué ofrecéis", serviceId: null, focus: "general" }] });
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ output_text: JSON.stringify(interpretation) }))));

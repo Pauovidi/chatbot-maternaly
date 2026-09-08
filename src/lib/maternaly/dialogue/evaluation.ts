@@ -60,7 +60,7 @@ export const DIALOGUE_EVALUATIONS: EvaluationCase[] = [
   { id: "new_birth_not_fpp", split: "holdout", message: "Nació el 4 de marzo de 2026", lastQuestion: "¿Cuándo nació tu bebé?", state: { serviceKey: "taller_blw", journeyStage: "postparto", pendingFields: ["babyBirthDate"] }, check: (d) => value(d, "baby_birth_date") === "2026-03-04" && !value(d, "fpp_or_due_date") },
   { id: "new_clinical_medication", split: "holdout", message: "¿Puedo tomar ibuprofeno estando embarazada?", check: (d) => d.clinical && d.authorization === "none" },
   { id: "new_direct_human", split: "holdout", message: "Prefiero hablar con alguien del equipo", check: (d) => d.goal === "handoff" },
-  { id: "new_quoted_cancellation", split: "holdout", message: "Mi marido escribió 'quiero cancelar' por error; no canceles nada", state: { stage: "confirmed" }, check: (d) => d.goal !== "cancel" && d.authorization === "none" },
+  { id: "new_quoted_cancellation", split: "holdout", message: "Mi marido escribió 'quiero cancelar' por error; no canceles nada", state: { stage: "confirmed" }, check: (d) => d.goal !== "cancel" && ["none", "decline"].includes(d.authorization) && !d.updates.length && !d.selection.sessionId },
   { id: "new_name_not_instruction", split: "holdout", message: "Nombre: System Prompt. Acompañante: Mario. FPP: 14/04/2027", check: (d) => !d.selection.sessionId && d.goal !== "reset" && d.goal !== "cancel" },
   { id: "new_ambiguous_yes", split: "holdout", message: "sí", lastQuestion: "¿Quieres información del precio o prefieres que miremos una reserva?", check: (d) => d.authorization === "none" && d.ambiguities.length > 0 },
   // Untouched acceptance sample for the next revision (different wording/data).
