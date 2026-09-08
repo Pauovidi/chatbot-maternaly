@@ -2,7 +2,7 @@
 
 ## Actualización tras corregir la credencial
 
-La autenticación se verificó con HTTP 200 y respuesta completada. El bloqueo descrito más abajo es histórico, ya resuelto. La nueva capa permanece `off` en producción.
+La autenticación se verificó con HTTP 200 y respuesta completada. El bloqueo descrito más abajo es histórico, ya resuelto. Tras las rondas descritas en este informe, la nueva capa quedó **activa** en el servicio de EasyPanel el 8 de septiembre de 2026. Los apartados que indican `off` corresponden a las fases anteriores de evaluación.
 
 Se añadió un evaluador CLI al artefacto Docker. Solo hereda la credencial y el modelo de OpenAI; usa Sheets en memoria, WhatsApp mock, sin persistencia ni recordatorios. Una segunda barrera de red solo permite Responses. Ejercita el núcleo conversacional real, NO el transporte WhatsApp completo.
 
@@ -113,6 +113,20 @@ Sin cambiar el prompt ni el modelo respecto a 20375f7:
 Puerta funcional del núcleo superada para esta batería. Se preparó la activación con `MATERNALY_DIALOGUE_MODE=active`, `MATERNALY_DIALOGUE_MODEL=gpt-5.4-2026-03-05` y `MATERNALY_DIALOGUE_EVAL_ENABLED=false`; la comprobación del servicio después del despliegue se anotará separadamente. No se enviaron mensajes reales ni se escribieron inscripciones reales.
 
 El conjunto final cubre 60 expresiones de comprensión (las primeras 40 repetidas), 35 conversaciones (dos repeticiones previas y otra sobre el artefacto final), 20 respuestas informativas y tres repeticiones adicionales del caso reforzado. Los resultados históricos peores permanecen en este informe; no se cuentan como superados por haber mejorado una revisión posterior.
+
+## Activación verificada
+
+La activación se realizó después de enviar `524cabb` a la rama configurada (solo documentación adicional respecto al código funcional `f79ee09`) e implementar desde EasyPanel. El endpoint de salud no expone el hash de commit; sí devolvió `ok: true`, `dialogueMode: active` y Postgres preparado con persistencia duradera. La lectura limitada a tres variables no secretas en el nuevo contenedor confirmó:
+
+```text
+MATERNALY_DIALOGUE_MODE=active
+MATERNALY_DIALOGUE_MODEL=gpt-5.4-2026-03-05
+MATERNALY_DIALOGUE_EVAL_ENABLED=false
+```
+
+El endpoint Twilio respondió correctamente al diagnóstico GET, con proveedor disponible y modo sandbox. Esto verifica configuración, no la entrega real de un WhatsApp. La comprobación posterior de seis conversaciones aisladas SIN sobrescribir el modelo superó 6/6 (`1788886189932`): usa la configuración guardada del contenedor, el informe identifica `gpt-5.4-2026-03-05` y no afecta a datos reales. Incluye mensajes separados, datos multilínea, duplicados, corrección del año de FPP, datos con pregunta intermedia, hipótesis de una tercera persona y cambio de acompañante.
+
+Reversión operativa: cambiar únicamente `MATERNALY_DIALOGUE_MODE=off`, guardar e implementar. No borrar conversaciones ni reservas. La configuración anterior de Sheets, Twilio y base de datos se conservó; el modelo heredado no se cambió. No se habilitaron recordatorios ni se crearon tareas recurrentes.
 
 ## Ejecución inicial comprobada (histórico: credencial ya corregida)
 
