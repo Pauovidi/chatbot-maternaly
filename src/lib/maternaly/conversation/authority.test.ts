@@ -61,11 +61,14 @@ describe("Maternaly conversation authority", () => {
   let tempDir = "";
 
   beforeEach(async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-08-17T10:00:00.000Z"));
     vi.stubEnv("LLM_PROVIDER", "mock");
     tempDir = await mkdtemp(path.join(os.tmpdir(), "maternaly-authority-"));
   });
 
   afterEach(async () => {
+    vi.useRealTimers();
     vi.unstubAllEnvs();
     await rm(tempDir, { recursive: true, force: true });
   });
@@ -1799,6 +1802,32 @@ describe("Maternaly conversation authority", () => {
     expect(result.authorityTrace.policy.action).toBe("normalized_registration");
     expect(result.state?.selectedSessionId).toBe("sesion_charla_bilbao_20261006");
   });
+
+  it.each(["greeting", "service_discovery", "general_info", "unknown"])(
+    "keeps recognized contact answers in their booking when NLU returns %s",
+    async (wrongIntent) => {
+      const interpreter = new MaternalyConversationInterpreter();
+      const interpret = vi.spyOn(interpreter, "interpret").mockResolvedValue(validateStructuredIntent({
+        intent: wrongIntent, service_scope: wrongIntent === "service_discovery" ? "catalog" : "none",
+        slots: {}, confidence: 0.7, should_handoff: false, safety_flags: [],
+      }));
+      const client = new InMemoryNormalizedSheetsClient(createRealTemplateWorkbook({ serviceKey: "charla_embarazo_1_20" }));
+      const adapter = new MaternalyCoreAdapter(interpreter, undefined, undefined, new MaternalyToolExecutor(client));
+      const result = await adapter.handle({
+        conversation: fakeConversation({ maternalyNormalizedFlow: {
+          serviceKey: "charla_embarazo_1_20", stage: "collecting_contact", peopleCount: 2,
+          selectedSessionId: "sesion_charla_erandio_20260924", pendingFields: ["fullName", "partnerName", "fppOrDueDate"],
+          updatedAt: new Date().toISOString(),
+        } }),
+        inbound: { provider: "twilio_sandbox", from: "whatsapp:+34999000145", text: "Arantza Fulgencio mancisidor\nCarlos\n5/04/2026" },
+        env: normalizedTestEnv(),
+      });
+      expect(result.authorityTrace.policy.action).toBe("normalized_registration");
+      expect(result.state).toMatchObject({ fullName: "Arantza Fulgencio mancisidor", partnerName: "Carlos", stage: "collecting_contact", pendingFields: ["fppOrDueDate"] });
+      expect(client.appended).toHaveLength(0);
+      interpret.mockRestore();
+    },
+  );
 
   it("selects the unique visible session by day in 'la del diez'", async () => {
     const workbook = createRealTemplateWorkbook({

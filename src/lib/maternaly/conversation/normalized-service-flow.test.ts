@@ -1,7 +1,7 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FileConversationStore } from "@/lib/hotel/conversations/file-store";
 import { handleInboundMaternalyWhatsApp } from "@/lib/maternaly/conversation/twilio-inbound";
 import {
@@ -19,10 +19,13 @@ describe("normalized Maternaly WhatsApp flow", () => {
   let tempDir = "";
 
   beforeEach(async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-08-17T10:00:00.000Z"));
     tempDir = await mkdtemp(path.join(os.tmpdir(), "maternaly-normalized-flow-"));
   });
 
   afterEach(async () => {
+    vi.useRealTimers();
     await rm(tempDir, { recursive: true, force: true });
   });
 

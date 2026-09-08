@@ -475,6 +475,55 @@ describe("contrato conversacional del Word: Charla Informativa Gratuita", () => 
     expect(result.conversation.maternalyNormalizedFlow?.stage).toBe("choosing_session");
   });
 
+  it("filtra por la FPP antes de ofrecer las sesiones y conserva la numeración visible", async () => {
+    vi.setSystemTime(new Date("2026-09-07T19:00:00.000Z"));
+    const harness = makeHarness();
+    await harness.send("Cuéntame la charla informativa gratuita para las primeras veinte semanas");
+
+    const options = await harness.send(
+      "Sí, en Bilbao. Mi fecha probable de parto es el 1 de marzo de 2027",
+    );
+    const reply = options.botReply?.body ?? "";
+
+    expect(options.conversation.maternalyNormalizedFlow).toMatchObject({
+      stage: "choosing_session",
+      location: "bilbao",
+      fppOrDueDate: "2027-03-01",
+    });
+    expect(reply).toMatch(/6 de octubre de 2026/i);
+    expect(reply).not.toMatch(/15 de diciembre de 2026/i);
+    expect(reply).toMatch(/semanas 1 (?:a|y) 20/i);
+
+    const selected = await harness.send("1");
+    expect(selected.conversation.maternalyNormalizedFlow?.selectedSessionId).toBe(
+      "sesion_charla_bilbao_20261006",
+    );
+  });
+
+  it("no ofrece opciones incompatibles cuando ninguna encaja con la FPP conocida", async () => {
+    vi.setSystemTime(new Date("2026-09-07T19:00:00.000Z"));
+    const harness = makeHarness();
+    await harness.send("Cuéntame la charla informativa gratuita para las primeras veinte semanas");
+
+    const options = await harness.send("Sí, en Bilbao. Mi FPP es el 4 de diciembre");
+    const reply = options.botReply?.body ?? "";
+
+    expect(options.conversation.maternalyNormalizedFlow).toMatchObject({
+      stage: "blocked",
+      location: "bilbao",
+      fppOrDueDate: "2026-12-04",
+    });
+    expect(reply).toMatch(/ninguna de las sesiones publicadas|no hay sesiones publicadas/i);
+    expect(reply).toMatch(/semanas 1 (?:a|y) 20/i);
+    expect(reply).not.toMatch(/6 de octubre|15 de diciembre/i);
+
+    const staleChoice = await harness.send("2");
+    expect(staleChoice.conversation.maternalyNormalizedFlow?.selectedSessionId).toBeUndefined();
+    expect(staleChoice.conversation.mode).toBe("human");
+    expect(staleChoice.botReply).toBeUndefined();
+    expect(harness.client.appended).toHaveLength(0);
+  });
+
   it("mantiene la misma numeración mostrada al elegir solo la opción 1", async () => {
     const harness = makeHarness();
     await reachAvailableOptions(harness);
@@ -651,6 +700,107 @@ describe("contrato conversacional del Word: Charla Informativa Gratuita", () => 
     expect(completed.botReply?.body).toMatch(/reserva[\s\S]{0,30}confirmada/i);
     expect(completed.botReply?.body).not.toMatch(/preinscripci[oó]n|pendiente de validaci[oó]n/i);
     expect(completed.botReply?.body).not.toMatch(/me faltan estos datos|Te sigo/i);
+  });
+
+  it.each(["\n", ", ", "; "])("acepta nombres y FPP separados por %j y permite corregir el año sin reiniciar", async (separator) => {
+    vi.setSystemTime(new Date("2026-09-08T19:00:00.000Z"));
+    const harness = makeHarness("whatsapp:+34999000144", { liveWrite: true });
+    await reachAvailableOptions(harness);
+    await harness.send("Erandio, 24 de septiembre 2026");
+    await harness.send("2");
+    const invalid = await harness.send(["Arantza Fulgencio mancisidir", "Carlos", "5/04/2026"].join(separator));
+    expect(invalid.conversation.mode).toBe("bot");
+    expect(invalid.conversation.maternalyNormalizedFlow).toMatchObject({
+      stage: "collecting_contact", fullName: "Arantza Fulgencio mancisidir", partnerName: "Carlos",
+      pendingFields: ["fppOrDueDate"],
+    });
+    const selectedSessionId = invalid.conversation.maternalyNormalizedFlow?.selectedSessionId;
+    expect(selectedSessionId).toBeTruthy();
+    expect(invalid.botReply?.body).toMatch(/fecha probable de parto.*pasada/i);
+    expect(invalid.botReply?.body).not.toMatch(/me falta.*nombre|Soy Ane/i);
+    expect(harness.client.appended).toHaveLength(0);
+
+    const corrected = await harness.send("Arantza fulgencio mancisidor carlos\n5/04/2027");
+    expect(corrected.conversation.maternalyNormalizedFlow).toMatchObject({
+      stage: "confirmed", selectedSessionId, fppOrDueDate: "2027-04-05",
+      fullName: "Arantza fulgencio mancisidor", partnerName: "Carlos",
+    });
+    expect(corrected.botReply?.body).toMatch(/reserva[\s\S]{0,30}confirmada/i);
+    expect(corrected.botReply?.body).not.toMatch(/Soy Ane|en qu[eé] etapa/i);
+    expect(harness.client.appended.filter((entry) => entry.tabTitle === "Inscripciones")).toHaveLength(1);
+  });
+
+  it("no duplica el nombre de la titular como acompañante cuando llegan por separado", async () => {
+    const harness = makeHarness("whatsapp:+34999000146");
+    await reachAvailableOptions(harness);
+    await harness.send("Erandio, 24 de septiembre");
+    await harness.send("2");
+    const name = await harness.send("Arantza Fulgencio Mancisidor");
+    expect(name.conversation.maternalyNormalizedFlow?.fullName).toBe("Arantza Fulgencio Mancisidor");
+    expect(name.conversation.maternalyNormalizedFlow?.partnerName).toBeUndefined();
+    const companion = await harness.send("Carlos");
+    expect(companion.conversation.maternalyNormalizedFlow).toMatchObject({ partnerName: "Carlos", pendingFields: ["fppOrDueDate"] });
+  });
+
+  it("pide aclarar nombres sin separador y conserva la sesión al retomar el saludo", async () => {
+    const harness = makeHarness("whatsapp:+34999000147");
+    await reachAvailableOptions(harness);
+    await harness.send("Erandio, 24 de septiembre");
+    await harness.send("2");
+    const ambiguous = await harness.send("Arantza Fulgencio Mancisidor Carlos\n5/04/2027");
+    expect(ambiguous.conversation.maternalyNormalizedFlow).toMatchObject({
+      stage: "collecting_contact", pendingFields: ["fullName", "partnerName"],
+      selectedSessionId: "sesion_charla_erandio_20260924", fppOrDueDate: "2027-04-05",
+    });
+    expect(ambiguous.conversation.maternalyNormalizedFlow?.fullName).toBeUndefined();
+    const resumed = await harness.send("hola");
+    expect(resumed.conversation.maternalyNormalizedFlow?.selectedSessionId).toBe("sesion_charla_erandio_20260924");
+    expect(resumed.botReply?.body).toMatch(/nombre y apellidos/i);
+    expect(resumed.botReply?.body).not.toMatch(/Soy Ane|en qu[eé] etapa/i);
+    const correctedDate = await harness.send("6/04/2027");
+    expect(correctedDate.conversation.maternalyNormalizedFlow?.fppOrDueDate).toBe("2027-04-06");
+    expect(harness.client.appended).toHaveLength(0);
+  });
+
+  it("acumula los dos nombres y la FPP cuando llegan en mensajes separados", async () => {
+    vi.setSystemTime(new Date("2026-09-07T19:00:00.000Z"));
+    const harness = makeHarness("whatsapp:+34999000143");
+    await reachAvailableOptions(harness);
+    await harness.send("Erandio, 8 de octubre");
+    const attendees = await harness.send("yo y mi pareja");
+
+    expect(attendees.botReply?.body).toMatch(/nombre y apellidos/i);
+    expect(attendees.botReply?.body).toMatch(/nombre de la pareja|nombre del acompa[nñ]ante/i);
+    expect(attendees.botReply?.body).toMatch(/fecha probable de parto/i);
+
+    const names = await harness.send("José Antonio y lucía");
+
+    expect(names.conversation.maternalyNormalizedFlow).toMatchObject({
+      stage: "collecting_contact",
+      selectedSessionId: "sesion_charla_erandio_20261008",
+      peopleCount: 2,
+      fullName: "José Antonio",
+      partnerName: "lucía",
+      pendingFields: ["fppOrDueDate"],
+    });
+    expect(names.botReply?.body).toMatch(/fecha probable de parto/i);
+    expect(names.botReply?.body).not.toMatch(/Te sigo|elegir un servicio/i);
+    expect(names.botReply?.body).not.toMatch(/nombre y apellidos|nombre de la pareja|nombre del acompa[nñ]ante/i);
+
+    const dueDate = await harness.send("Fecha probable de parte 4 de diciembre");
+
+    expect(dueDate.conversation.maternalyNormalizedFlow).toMatchObject({
+      stage: "blocked",
+      selectedSessionId: "sesion_charla_erandio_20261008",
+      peopleCount: 2,
+      fullName: "José Antonio",
+      partnerName: "lucía",
+      fppOrDueDate: "2026-12-04",
+      pendingFields: [],
+    });
+    expect(dueDate.botReply?.body).toMatch(/ninguna de las sesiones publicadas|semanas 1 a 20/i);
+    expect(dueDate.botReply?.body).not.toMatch(/Te sigo|me faltan estos datos/i);
+    expect(harness.client.appended).toHaveLength(0);
   });
 
   it.each([

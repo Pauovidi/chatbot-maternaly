@@ -2,6 +2,8 @@
 
 Maternaly debe desplegarse en EasyPanel con Docker. No desplegar este repo en Vercel, no reutilizar el proyecto vivo de Somos Perros y no tocar `hotel-canino-demo`.
 
+Para la corrección de septiembre de 2026, consultar [la revisión de recogida de datos y su rama de publicación](maternaly-contact-recovery-2026-09-08.md). Las variables mock y la rama bootstrap de esta guía corresponden al arranque inicial, no deben sustituir la configuración del servicio ya operativo.
+
 ## 1. App
 
 - Nombre sugerido: `maternaly-chatbot`.

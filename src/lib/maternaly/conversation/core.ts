@@ -197,6 +197,10 @@ interface NormalizedToolResult {
   plan?: NormalizedRegistrationWritePlan;
   writeResult?: NormalizedRegistrationWriteResult;
   availability?: NormalizedServiceAvailabilityResult;
+  eligibilityFilter?: {
+    applied: boolean;
+    excludedSessions: number;
+  };
   error?: string;
 }
 
@@ -736,7 +740,64 @@ function normalizePartnerNameCandidate(
   return tokens.join(" ");
 }
 
-function extractContextualPartnerName(message: string): string | undefined {
+function extractContextualNamePair(input: {
+  message: string;
+  previous?: MaternalyNormalizedFlowState;
+  serviceKey?: MaternalyNormalizedServiceKey;
+}): { fullName: string; partnerName: string } | undefined {
+  const parts = input.message.split(/[\n;,]+/).map((part) => part.trim()).filter(Boolean);
+  const nameParts = parts.filter((part) =>
+    !extractDateFromMessage(part) && !extractMessageEmail(part) && !extractMessagePhone(part),
+  );
+  if (
+    input.previous?.stage === "collecting_contact" && input.serviceKey === "charla_embarazo_1_20" &&
+    input.previous.fullName && input.previous.partnerName && nameParts.length === 1 && parts.length > 1
+  ) {
+    // On a correction, a previously identified companion supplies an explicit
+    // boundary; never guess where two unknown names on one line separate.
+    const nameText = nameParts[0];
+    const suffix = ` ${input.previous.partnerName}`;
+    if (normalize(nameText).endsWith(` ${normalize(input.previous.partnerName)}`)) {
+      const fullName = normalizeFullNameCandidate(nameText.slice(0, -suffix.length));
+      if (fullName) return { fullName, partnerName: input.previous.partnerName };
+    }
+  }
+  const pendingFields = input.previous?.pendingFields ?? [];
+  if (
+    input.previous?.stage !== "collecting_contact" ||
+    input.serviceKey !== "charla_embarazo_1_20" ||
+    (input.previous.peopleCount ?? 0) < 2 ||
+    input.previous.fullName ||
+    input.previous.partnerName ||
+    !pendingFields.includes("fullName") ||
+    !pendingFields.includes("partnerName") ||
+    /[?¿]/.test(input.message)
+  ) {
+    return undefined;
+  }
+
+  // WhatsApp preserves line breaks: the requested fields in separate lines
+  // are a stronger boundary than capitalization (which is optional in chat).
+  if (nameParts.length === 2) {
+    const fullName = normalizeFullNameCandidate(nameParts[0]);
+    const partnerName = normalizePartnerNameCandidate(nameParts[1]);
+    if (fullName && partnerName) return { fullName, partnerName };
+  }
+  const nameText = nameParts.length === 1 ? nameParts[0] : input.message;
+  const coordinatedNames = nameText
+    .replace(/[.;:!?]+$/g, "")
+    .trim()
+    .match(/^(.+?)\s+y\s+(.+)$/i);
+  if (!coordinatedNames) {
+    return undefined;
+  }
+
+  const fullName = normalizeFullNameCandidate(coordinatedNames[1]);
+  const partnerName = normalizePartnerNameCandidate(coordinatedNames[2]);
+  return fullName && partnerName ? { fullName, partnerName } : undefined;
+}
+
+function extractContextualPartnerName(message: string, allowBareName = true): string | undefined {
   const explicit = extractPersonSegmentAfterPrefix(
     message,
     /\b(?:(?:mi\s+)?(?:pareja|acompa[nñ]ante)(?:\s+(?:se\s+llama|es))?\s*:?|se\s+llama)\s+/i,
@@ -746,7 +807,7 @@ function extractContextualPartnerName(message: string): string | undefined {
     return explicitCandidate;
   }
 
-  if (message.includes(",") || extractMessageEmail(message) || extractMessagePhone(message) || extractDateFromMessage(message)) {
+  if (!allowBareName || message.includes(",") || extractMessageEmail(message) || extractMessagePhone(message) || extractDateFromMessage(message)) {
     return undefined;
   }
 
@@ -789,7 +850,16 @@ function extractContextualRegistrationSlots(input: {
     peopleCount,
   });
   const partnerNameSkipped = collectPartnerName && isPendingPartnerNameReply(input.message);
-  const partnerName = collectPartnerName && !partnerNameSkipped ? extractContextualPartnerName(input.message) : undefined;
+  const namePair = input.allowRegistrationData && !partnerNameSkipped
+    ? extractContextualNamePair({
+        message: input.message,
+        previous: input.previous,
+        serviceKey: input.serviceKey,
+      })
+    : undefined;
+  const partnerName = collectPartnerName && !partnerNameSkipped
+    ? namePair?.partnerName ?? extractContextualPartnerName(input.message, Boolean(input.previous?.fullName))
+    : undefined;
   const collectingContact = input.allowRegistrationData && input.previous?.stage === "collecting_contact";
   const expectsBareFullName = Boolean(
     collectingContact &&
@@ -797,7 +867,9 @@ function extractContextualRegistrationSlots(input: {
       (input.previous?.pendingFields?.includes("fullName") ?? true),
   );
   const contextualFullName = input.allowRegistrationData
-    ? extractContextualFullName(input.message, { allowBareName: expectsBareFullName })
+    ? namePair?.fullName ?? extractContextualFullName(input.message, {
+        allowBareName: expectsBareFullName && !(collectPartnerName && extractDateFromMessage(input.message) && !/\b(?:pareja|acompa[nñ]ante)\b/i.test(input.message)),
+      })
     : undefined;
   const hasContactSignal =
     input.allowRegistrationData &&
@@ -861,7 +933,8 @@ function extractContextualRegistrationSlots(input: {
     contextualDate &&
     collectingContact &&
     input.serviceKey === "charla_embarazo_1_20" &&
-    !input.previous?.fppOrDueDate &&
+    (!input.previous?.fppOrDueDate || input.previous.pendingFields?.includes("fppOrDueDate") ||
+      /^\s*(?:\d{4}-\d{2}-\d{2}|\d{1,2}[/-]\d{1,2}[/-]\d{2,4})\s*$/.test(input.message)) &&
     !input.slots.fpp_or_due_date
   ) {
     contextualSlots.fppOrDueDate = contextualDate;
@@ -1279,6 +1352,29 @@ function enrichIntentWithConversationServiceContext(
   conversation: ConversationRecord,
   message: string,
 ): StructuredIntent {
+  const previous = conversation.maternalyNormalizedFlow;
+  // A recognized answer to the fields we just requested must not become a
+  // fresh catalog/greeting turn just because NLU fails to classify names.
+  // Safety, explicit questions and service changes keep their normal routing.
+  if (
+    previous?.stage === "collecting_contact" && previous.serviceKey &&
+    !intent.should_handoff && intent.safety_flags.length === 0 &&
+    ["unknown", "general_info", "greeting", "service_discovery"].includes(intent.intent) &&
+    !/[?¿]/.test(message) && !shouldReplaceServiceFlow(previous, intent)
+  ) {
+    const contact = extractContextualRegistrationSlots({
+      message, previous, slots: {}, serviceKey: previous.serviceKey, allowRegistrationData: true,
+    }).slots;
+    if (contact.fullName || contact.partnerName || contact.fppOrDueDate || contact.babyBirthDate || contact.email) {
+      return {
+        ...intent,
+        intent: "registration_start",
+        service_scope: "contextual",
+        service_candidate: getKnowledgeServiceByNormalizedKey(previous.serviceKey)?.id ?? intent.service_candidate,
+        slots: { ...intent.slots, normalized_service_key: previous.serviceKey },
+      };
+    }
+  }
   if (!shouldUsePreviousServiceForContextualQuestion(intent, message)) {
     return intent;
   }
@@ -1650,6 +1746,33 @@ function charlaEligibilityError(
     : "charla_outside_week_1_20";
 }
 
+function filterSessionsForKnownCharlaEligibility(input: {
+  serviceKey: MaternalyNormalizedServiceKey;
+  state: MaternalyNormalizedFlowState;
+  sessions: NormalizedAvailableSession[];
+}): {
+  sessions: NormalizedAvailableSession[];
+  eligibilityFilter?: NormalizedToolResult["eligibilityFilter"];
+} {
+  if (
+    input.serviceKey !== "charla_embarazo_1_20" ||
+    parseDateOnlyUtc(input.state.fppOrDueDate) === undefined
+  ) {
+    return { sessions: input.sessions };
+  }
+
+  const sessions = input.sessions.filter(
+    (session) => charlaEligibilityError(input.state, session) === undefined,
+  );
+  return {
+    sessions,
+    eligibilityFilter: {
+      applied: true,
+      excludedSessions: input.sessions.length - sessions.length,
+    },
+  };
+}
+
 function notesFromState(state: MaternalyNormalizedFlowState) {
   return [
     state.observations,
@@ -1831,6 +1954,9 @@ export class MaternalyConversationPolicy {
     }
 
     if (intent.intent === "greeting") {
+      if (state.stage === "collecting_contact" && state.serviceKey && state.pendingFields?.length) {
+        return { action: "normalized_registration", serviceKey: state.serviceKey, reason: "resume_pending_contact" };
+      }
       return { action: "greeting" };
     }
 
@@ -1874,7 +2000,8 @@ export class MaternalyConversationPolicy {
     );
     const continuesRegistration =
       isRegistrationRequestTurn(intent) ||
-      hasRelevantRegistrationDataChange(conversation.maternalyNormalizedFlow, state);
+      hasRelevantRegistrationDataChange(conversation.maternalyNormalizedFlow, state) ||
+      (intent.intent === "unknown" && state.stage === "collecting_contact" && Boolean(state.pendingFields?.length));
     const isInformationalServiceQuestion =
       ["general_info", "service_question"].includes(intent.intent) &&
       intent.service_question_focus !== "booking";
@@ -1979,7 +2106,45 @@ export class MaternalyToolExecutor {
 
     const snapshot = availability.snapshot;
     const sessions = availability.sessions;
-    const calendarSessions = sessions;
+    const dueDate = parseDateOnlyUtc(input.state.fppOrDueDate);
+    const today = parseDateOnlyUtc(new Date().toISOString().slice(0, 10));
+    if (
+      input.serviceKey === "charla_embarazo_1_20" && input.state.fppOrDueDate &&
+      (dueDate === undefined || (today !== undefined && dueDate < today))
+    ) {
+      return {
+        status: "collecting_fields",
+        serviceKey: input.serviceKey,
+        snapshot, sessions, calendarSessions: sessions,
+        selectedSession: sessions.find((session) => session.sessionId === input.state.selectedSessionId),
+        missingFields: [...new Set([...requiredFieldsForService(input.serviceKey, input.state), "fppOrDueDate"])],
+        availability,
+        error: "charla_due_date_requires_clarification",
+      };
+    }
+    const eligibility = filterSessionsForKnownCharlaEligibility({
+      serviceKey: input.serviceKey,
+      state: input.state,
+      sessions,
+    });
+    const calendarSessions = eligibility.sessions;
+    if (
+      eligibility.eligibilityFilter?.applied &&
+      sessions.length > 0 &&
+      calendarSessions.length === 0
+    ) {
+      return {
+        status: "manual_validation_required",
+        serviceKey: input.serviceKey,
+        snapshot,
+        sessions,
+        calendarSessions,
+        missingFields: [],
+        availability,
+        eligibilityFilter: eligibility.eligibilityFilter,
+        error: "charla_outside_week_1_20",
+      };
+    }
     const selectedSession = chooseSession(input.message, input.state, calendarSessions);
     if (!selectedSession) {
       return {
@@ -1990,6 +2155,7 @@ export class MaternalyToolExecutor {
         calendarSessions,
         missingFields: [],
         availability,
+        eligibilityFilter: eligibility.eligibilityFilter,
       };
     }
 
@@ -2011,6 +2177,7 @@ export class MaternalyToolExecutor {
         selectedSession,
         missingFields,
         availability,
+        eligibilityFilter: eligibility.eligibilityFilter,
       };
     }
 
@@ -2026,6 +2193,7 @@ export class MaternalyToolExecutor {
           selectedSession,
           missingFields: [],
           availability,
+          eligibilityFilter: eligibility.eligibilityFilter,
           error: eligibilityError,
         };
       }
@@ -2237,6 +2405,8 @@ function buildAvailabilityCheckedPayload(
         sessionsCount > 0),
     sessionsCount,
     calendarSessionsCount: toolResult.calendarSessions?.length ?? sessionsCount,
+    eligibilityFilterApplied: toolResult.eligibilityFilter?.applied ?? false,
+    ineligibleSessionsExcluded: toolResult.eligibilityFilter?.excludedSessions ?? 0,
     reason,
     headersDetected: availability?.diagnostics.headersDetected ?? Boolean(toolResult.snapshot),
     selectedSource: availability?.diagnostics.selectedSource ?? "normalized_sheets",

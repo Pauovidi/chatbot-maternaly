@@ -149,6 +149,9 @@ export async function getMaternalyHealth(env: NodeJS.ProcessEnv = process.env) {
       ? conversationsStore.runtimeTarget
       : "local-development",
     build: {
+      // Shipped with the code, so deployments remain identifiable even when
+      // the hosting platform does not inject a Git commit environment value.
+      conversationRevision: "2026-09-08-contact-recovery-v1",
       commit:
         env.GIT_COMMIT ??
         env.EASYPANEL_GIT_COMMIT_SHA ??

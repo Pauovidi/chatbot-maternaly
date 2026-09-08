@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readNormalizedServiceSheet } from "@/lib/maternaly/sheets/normalized-client";
 import {
   calculateSessionOccupancy,
@@ -14,6 +14,11 @@ import {
 import { rowsToObjects } from "@/lib/maternaly/sheets/normalized-template";
 
 describe("normalized Maternaly availability", () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-08-17T10:00:00.000Z"));
+  });
+  afterEach(() => vi.useRealTimers());
   it("reads optional online access details from a normalized session", async () => {
     const workbook = createNormalizedWorkbook({ serviceKey: "charla_embarazo_1_20" });
     const rows = workbook.Sesiones as unknown[][];

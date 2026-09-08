@@ -84,6 +84,10 @@ export interface MaternalyCopyToolResult {
     registrationPersisted?: boolean;
     registrationStatus?: "preinscrita" | "confirmada";
   };
+  eligibilityFilter?: {
+    applied: boolean;
+    excludedSessions: number;
+  };
   error?: string;
 }
 
@@ -953,6 +957,10 @@ export class MaternalyCopyRenderer {
     }
 
     if (result.status === "collecting_fields") {
+      if (result.error === "charla_due_date_requires_clarification") {
+        const otherMissing = result.missingFields.filter((field) => field !== "fppOrDueDate");
+        return `La fecha probable de parto que has enviado parece pasada o no es válida. ¿Puedes confirmarla con día, mes y año? Conservo los demás datos y la sesión elegida; todavía no he reservado ninguna plaza.${otherMissing.length ? ` También me falta: ${otherMissing.map(fieldLabel).join(", ")}.` : ""}`;
+      }
       if (result.serviceKey === "charla_embarazo_1_20" && result.missingFields.includes("peopleCount")) {
         return "Perfecto. Antes de continuar, ¿acudiréis una o dos personas?";
       }
@@ -960,6 +968,18 @@ export class MaternalyCopyRenderer {
       const selected = this.formatSession(result.selectedSession);
       const serviceName = service?.name ?? MATERNALY_NORMALIZED_SERVICES[result.serviceKey].label;
       return `Perfecto 🌸 Preparo la solicitud con cuidado para ${serviceName}, ${selected}; me faltan estos datos: ${missing}. Puedes enviármelos juntos en un solo mensaje.`;
+    }
+
+    if (
+      result.status === "manual_validation_required" &&
+      result.error === "charla_outside_week_1_20" &&
+      result.eligibilityFilter?.applied &&
+      !result.selectedSession
+    ) {
+      return [
+        "Con la fecha probable de parto que me has dado, ninguna de las sesiones publicadas permite que estés entre las semanas 1 y 20 en la fecha de la charla.",
+        "No he reservado ninguna plaza ni voy a ofrecerte una fecha que después no pueda tramitar. El equipo de Maternaly puede orientarte personalmente hacia la opción adecuada.",
+      ].join("\n\n");
     }
 
     if (result.status === "manual_validation_required" && result.selectedSession) {
@@ -1023,6 +1043,13 @@ export class MaternalyCopyRenderer {
     service: KnowledgeService | null,
     state?: MaternalyNormalizedFlowState,
   ): string {
+    if (
+      result.serviceKey === "charla_embarazo_1_20" &&
+      result.eligibilityFilter?.applied
+    ) {
+      return this.renderCharlaSessions(result.sessions, state, true);
+    }
+
     if (result.sessions.length === 0) {
       return "Ahora mismo no veo sesiones disponibles para ese servicio. Puedo recoger tus datos y dejarlo preparado para que lo revise el equipo.";
     }
@@ -1073,6 +1100,7 @@ export class MaternalyCopyRenderer {
   private renderCharlaSessions(
     sessions: NormalizedAvailableSession[],
     state?: MaternalyNormalizedFlowState,
+    eligibilityFilterApplied = false,
   ): string {
     const preferredLocation = normalizeCopy(state?.location ?? "");
     const preferredModality = normalizeCopy(state?.modality ?? "");
@@ -1093,6 +1121,17 @@ export class MaternalyCopyRenderer {
           `${right.date ?? "9999-12-31"} ${right.startTime ?? "99:99"}`,
         ),
       );
+    if (eligibilityFilterApplied && visibleSessions.length === 0) {
+      return sessions.length === 0
+        ? [
+            "Con la fecha probable de parto que me has dado, ninguna de las sesiones publicadas permite que estés entre las semanas 1 y 20 en la fecha de la charla.",
+            "No voy a ofrecerte una fecha que después no pueda tramitar. El equipo de Maternaly puede orientarte personalmente hacia la opción adecuada.",
+          ].join("\n\n")
+        : [
+            "Con la fecha probable de parto que me has dado, no hay sesiones publicadas que encajen a la vez con tu preferencia y con las semanas 1 a 20 de embarazo.",
+            "Puedo mostrarte las fechas compatibles de otras sedes o modalidades.",
+          ].join("\n\n");
+    }
     if (hasPreference && visibleSessions.length === 0) {
       return [
         "No encuentro sesiones publicadas que coincidan con esa preferencia.",
@@ -1116,13 +1155,18 @@ export class MaternalyCopyRenderer {
       return `${index + 1}. ${formatSpanishDate(session.date)}, ${session.startTime ?? "hora por confirmar"} — ${where}${modality}${availability ? ` (${availability})` : ""}`;
     });
 
-    const intro = hasPreference
-      ? "Perfecto. Estas son las sesiones publicadas que encajan con tu preferencia:"
-      : "Claro. Estas son las sesiones publicadas para la Charla Informativa:";
+    const intro = eligibilityFilterApplied
+      ? hasPreference
+        ? "Perfecto. Estas son las sesiones publicadas que encajan con tu preferencia y permiten que estés entre las semanas 1 y 20:"
+        : "Estas son las sesiones publicadas que permiten que estés entre las semanas 1 y 20:"
+      : hasPreference
+        ? "Perfecto. Estas son las sesiones publicadas que encajan con tu preferencia:"
+        : "Claro. Estas son las sesiones publicadas para la Charla Informativa:";
 
     return [
       intro,
       ...options,
+      ...(!eligibilityFilterApplied ? ["Cuando me indiques la fecha probable de parto, comprobaré que la sesión encaje entre las semanas 1 y 20 de embarazo."] : []),
       "Dime el número o la fecha que prefieres y continúo con la solicitud.",
     ].join("\n\n");
   }
