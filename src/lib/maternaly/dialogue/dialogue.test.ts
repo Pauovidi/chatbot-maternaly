@@ -82,7 +82,7 @@ describe("semantic dialogue boundary and flow", () => {
     expect(result.reply).not.toMatch(/Soy Ane/);
   });
 
-  it("keeps a mixed-turn selection, asks the next question and confirms on bare assent only once", async () => {
+  it.each([false, true])("keeps a mixed-turn selection and completes without repeated data (second question=%s)", async (secondQuestion) => {
     const client = new InMemoryNormalizedSheetsClient(createRealTemplateWorkbook({ serviceKey: "charla_embarazo_1_20", multiSession: true }));
     const core = new MaternalyCoreAdapter(undefined, undefined, undefined, new MaternalyToolExecutor(client));
     const selectedId = "sesion_charla_erandio_20260924";
@@ -106,10 +106,15 @@ describe("semantic dialogue boundary and flow", () => {
     expect(selected.reply).toMatch(/vendréis dos/);
     expect(selected.reply).toMatch(/Para continuar, dime.*nombre y apellidos.*acompañante/);
     expect(client.appended).toHaveLength(0);
-    const completed = await turn("Prueba Conversacional Septiembre; acompañante Control. ¿Puede venir mi madre?", understanding({ goal: "continue", updates: [
+    const completed = await turn(`Prueba Conversacional Septiembre; acompañante Control.${secondQuestion ? " ¿Puede venir mi madre?" : ""}`, understanding({ goal: "continue", updates: [
       { field: "full_name", value: "Prueba Conversacional Septiembre", evidence: "Prueba Conversacional Septiembre", correction: false },
       { field: "partner_name", value: "Control", evidence: "Control", correction: false },
-    ], questions: [{ text: "¿Puede venir mi madre?", evidence: "¿Puede venir mi madre?", serviceId: "charla_embarazo_1_20", focus: "eligibility" }] }));
+    ], questions: secondQuestion ? [{ text: "¿Puede venir mi madre?", evidence: "¿Puede venir mi madre?", serviceId: "charla_embarazo_1_20", focus: "eligibility" }] : [] }));
+    if (!secondQuestion) {
+      expect(completed.state).toMatchObject({ stage: "confirmed", selectedSessionId: selectedId, fullName: "Prueba Conversacional Septiembre", partnerName: "Control", fppOrDueDate: "2027-04-14", peopleCount: 2 });
+      expect(client.appended.filter((a) => a.tabTitle === "Inscripciones")).toHaveLength(1);
+      return;
+    }
     expect(completed.state).toMatchObject({ selectedSessionId: selectedId, pendingFields: [], partnerName: "Control", dialogueMemory: { awaitingBookingConsent: true } });
     expect(completed.reply).toMatch(/Gracias, Prueba Conversacional Septiembre/);
     expect(completed.reply).toMatch(/¿Quieres que continúe con la solicitud de reserva\?$/);

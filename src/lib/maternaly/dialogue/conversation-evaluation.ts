@@ -21,7 +21,7 @@ const noReset = /Soy Ane|dime primero en qué etapa/i;
 export const CONVERSATION_EVALUATIONS: Scenario[] = [
   { id: "mixed_selection_question_resume", category: "mixed", state: { stage: "choosing_session", selectedSessionId: undefined, selectedGroupId: undefined, peopleCount: undefined, fppOrDueDate: "2027-04-14", location: "erandio" }, turns: [
     { message: "Quiero ver las fechas de la charla en Erandio", expect: { noWrite: true, reply: /septiembre/i } },
-    { message: "La primera, el 24 de septiembre. Iré con mi pareja, seremos dos. Por cierto, ¿es gratuita?", expect: { state: { ...sameSession, stage: "collecting_contact", peopleCount: 2 }, noWrite: true, reply: /Para continuar, dime.*nombre y apellidos/i, notReply: /He recogido:|He actualizado:/ } },
+    { message: "La primera, el 24 de septiembre. Iré con mi pareja, seremos dos. Por cierto, ¿es gratuita?", expect: { state: { ...sameSession, stage: "collecting_contact", peopleCount: 2, pendingFields: ["fullName", "partnerName"] }, noWrite: true, reply: /(?:Para continuar, dime|puedes aclararme).*nombre/i, notReply: /He recogido:|He actualizado:/ } },
     { message: "Mi nombre es Prueba Conversacional Septiembre y mi acompañante se llama Control. ¿Puede venir mi madre en vez de mi pareja?", expect: { state: { ...sameSession, fullName: "Prueba Conversacional Septiembre", partnerName: "Control", peopleCount: 2 }, noWrite: true, reply: /¿Quieres que continúe con la solicitud de reserva\?$/, notReply: /He recogido:|He actualizado:/ } },
     { message: "Sí", expect: { state: { stage: "confirmed", ...sameSession }, registrations: 1 } },
     { message: "Gracias", expect: { noWrite: true, registrations: 1, notReply: /quieres reservar|He recogido:/i } },
