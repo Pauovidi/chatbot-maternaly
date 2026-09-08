@@ -2540,7 +2540,7 @@ export class MaternalyCoreAdapter {
       ? dialogueIntent(dialogueResult.understanding, stateBefore) : undefined;
     const interpretedIntent = semanticIntent ?? await this.interpreter.interpret(
       input.inbound.text, buildInterpretationContext(input.conversation),
-      mode === "active" && dialogueResult ? { ...runtimeEnv, LLM_PROVIDER: "mock" } : runtimeEnv,
+      input.conversation.mode === "human" || (mode === "active" && dialogueResult) ? { ...runtimeEnv, LLM_PROVIDER: "mock" } : runtimeEnv,
     );
     const intent = semanticIntent ?? (mode === "active" && dialogueResult
       ? { ...interpretedIntent, intent: interpretedIntent.should_handoff ? "handoff_request" as const : "unknown" as const, slots: {}, should_handoff: interpretedIntent.should_handoff, safety_flags: interpretedIntent.safety_flags.filter((flag) => flag !== "cancel_registration_request"), needs_availability_lookup: false, dialogueUnavailable: true }
