@@ -41,4 +41,17 @@ Segunda revisión: se añaden tres controles para declaraciones de etapa clasifi
 
 Una ejecución completa concurrente con la compilación terminó con 1.114 pruebas superadas y un timeout de 5 segundos en una prueba heredada de reserva. Esa prueba y su archivo completo pasan por separado (29/29). Se repite la batería completa con dos trabajadores, sin ampliar el timeout ni modificar las expectativas.
 
-Segunda repetición real pendiente de verificar.
+Repetición completa local con dos trabajadores: **1.115 superadas**, una omitida y una pendiente. No se modificó el timeout de las pruebas.
+
+Versión final desplegada: `3045bbb`, registro de EasyPanel «Ensure stage-only introductions offer service discovery», resultado Success. Health posterior: `ok: true`, modo de diálogo `active`, almacenamiento `postgres`, base de datos accesible, uptime 70 segundos.
+
+Segunda repetición real, sobre `3045bbb`, **sin relajar expectativas**:
+
+- **15/15** nuevos recorridos, cinco variantes por tres repeticiones. Informe del contenedor: `/tmp/maternaly-dialogue-conversation-0-gpt-5.4-2026-03-05-1788903977733.json`.
+- **36/36** recorridos de regresión. Informe: `/tmp/maternaly-dialogue-conversation-5-gpt-5.4-2026-03-05-1788903977623.json`.
+- Los 15 recorridos de descubrimiento suman **72 turnos**; todas las comprobaciones de ausencia de escritura pasan y el número de inscripciones simuladas es cero durante todos sus turnos.
+- Se inspeccionó la interpretación real de «Charla informativa»: `goal=explore`, `serviceId=charla_embarazo_1_20`, `scope=explicit`, `authorization=none`, sin selección de sesión. La respuesta explica la charla, matronas, gratuidad, autocuidados, alimentación y modalidad, en lugar del catálogo.
+- Modelo efectivo verificado en las respuestas de API: `gpt-5.4-2026-03-05`; el camino heredado de reinicio mantiene llamadas a `gpt-4o-mini-2024-07-18`.
+- Se ejecutó el núcleo incluido en el artefacto desplegado con llamadas reales a OpenAI. Sheets se mantuvo en memoria; WhatsApp, persistencia y recordatorios estaban aislados. **No es una nueva prueba humana por WhatsApp ni una prueba de escritura real en Excel.** No se crearon ni cancelaron reservas reales.
+
+El fallo concreto queda reparado y desplegado. Estos resultados no acreditan perfección general del chatbot fuera de los escenarios evaluados. Los informes `/tmp` son del contenedor y pueden perderse en un redeploy; este documento conserva el alcance, resultados, interpretación y límites verificados.
