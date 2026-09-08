@@ -4,6 +4,7 @@ import { CONVERSATION_EVALUATIONS, isolatedDialogueEnv, runConversationEvaluatio
 import { dialogueTestConversation } from "./evaluation";
 import { MaternalyCoreAdapter, MaternalyToolExecutor } from "@/lib/maternaly/conversation/core";
 import { InMemoryNormalizedSheetsClient, createRealTemplateWorkbook } from "@/lib/maternaly/sheets/normalized-test-utils";
+import { dialogueFacts, validateDialogueAnswer } from "./answer";
 
 const d = (patch: Partial<DialogueUnderstanding> = {}): DialogueUnderstanding => ({ actionEvidence: null, goal: "continue", serviceId: "charla_embarazo_1_20", scope: "contextual", authorization: "none", clinical: false, updates: [], questions: [], ambiguities: [], selection: { sessionId: null, evidence: null }, ...patch });
 const env = () => isolatedDialogueEnv({ NODE_ENV: "test", OPENAI_API_KEY: "synthetic-key" });
@@ -56,6 +57,43 @@ describe("dialogue safety regression matrix", () => {
   it("recognizes an aborted request as a timeout", async () => {
     const result = await understandDialogue("Sí", dialogueTestConversation(), env(), vi.fn(async () => { throw new DOMException("Timed out", "AbortError"); }));
     expect(result.reason).toBe("timeout");
+  });
+  it.each(["¿Y si fuésemos tres en vez de dos?", "Podríamos venir tres?"])("rejects fact updates supported only by a question: %s", (message) => {
+    expect(validateDialogue(d({ updates: [{ field: "people_count", value: "3", evidence: message, correction: false }] }), message)).toBeUndefined();
+  });
+  it("retains factual evidence before a separate question", () => {
+    expect(validateDialogue(d({ updates: [{ field: "full_name", value: "Ana García", evidence: "Ana García", correction: false }] }), "Ana García. ¿Puede venir mi madre?")).toBeTruthy();
+  });
+  it("derives BLW duration from the verified timetable", () => {
+    expect(dialogueFacts(d({ serviceId: "taller_blw" })).some((f) => f.text.includes("Duración del taller: 3 horas"))).toBe(true);
+  });
+  it("allows a sourced talk topic but not medication instructions", () => {
+    const facts = [{ id: "topic", service: "Charla", text: "Trata medicación segura para el bebé." }];
+    expect(validateDialogueAnswer({ answer: "La charla trata medicación segura para el bebé.", usedFactIds: ["topic"] }, facts)).toBeTruthy();
+    expect(validateDialogueAnswer({ answer: "Cambia tu medicación.", usedFactIds: ["topic"] }, facts)).toBeUndefined();
+  });
+  it("routes discovery with a question to the verified catalogue", async () => {
+    const interpretation = d({ goal: "explore", scope: "catalog", serviceId: null, questions: [{ text: "¿Qué ofrecéis?", evidence: "qué ofrecéis", serviceId: null, focus: "general" }] });
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ output_text: JSON.stringify(interpretation) }))));
+    const conversation = dialogueTestConversation(); conversation.maternalyNormalizedFlow = undefined; conversation.messages = [];
+    const result = await new MaternalyCoreAdapter().handle({ conversation, inbound: { provider: "twilio_sandbox", from: "whatsapp:+34999000999", text: "Estoy embarazada y me gustaría saber qué ofrecéis" }, env: env() });
+    expect(result.authorityTrace.policy.action).toBe("catalog_info");
+    expect(result.reply).toMatch(/charla|pilates|preparación/i);
+    expect(result.reply).not.toMatch(/No tengo información verificada/i);
+  });
+  it("does not answer a BLW schedule detour with the current talk calendar", async () => {
+    const message = "¿Qué fechas hay de BLW?";
+    const interpretation = d({ goal: "ask", questions: [{ text: message, evidence: message, serviceId: "taller_blw", focus: "schedule" }] });
+    vi.stubGlobal("fetch", vi.fn(async (_url, init) => {
+      const body = JSON.parse(String(init?.body));
+      return new Response(JSON.stringify({ output_text: JSON.stringify(body.text.format.name === "maternaly_dialogue_v1" ? interpretation : { answer: "No puedo confirmar las fechas de BLW sin consultar su agenda.", usedFactIds: [] }) }));
+    }));
+    const client = new InMemoryNormalizedSheetsClient(createRealTemplateWorkbook({ serviceKey: "charla_embarazo_1_20", multiSession: true }));
+    const result = await new MaternalyCoreAdapter(undefined, undefined, undefined, new MaternalyToolExecutor(client)).handle({ conversation: dialogueTestConversation(), inbound: { provider: "twilio_sandbox", from: "whatsapp:+34999000999", text: message }, env: env() });
+    expect(result.authorityTrace.policy.action).toBe("dialogue_response");
+    expect(result.state?.selectedSessionId).toBe("sesion_charla_erandio_20260924");
+    expect(result.reply).not.toMatch(/septiembre|octubre/);
+    expect(client.appended).toHaveLength(0);
   });
   it("does not call the model or write in human mode", async () => {
     const fetcher = vi.fn(); vi.stubGlobal("fetch", fetcher);

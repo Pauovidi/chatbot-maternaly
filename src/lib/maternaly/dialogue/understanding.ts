@@ -30,14 +30,14 @@ const object = (properties: Record<string, unknown>) => ({ type: "object", prope
 const string = { type: "string" };
 const nullableService = { type: ["string", "null"], enum: [...serviceIds, null] };
 export const DIALOGUE_SCHEMA = object({
+  questions: { type: "array", items: object({ text: string, evidence: string, serviceId: nullableService, focus: { type: "string", enum: focuses } }) },
+  ambiguities: { type: "array", items: object({ field: { type: "string", enum: [...fields, "service", "session"] }, question: string, evidence: string }) },
   actionEvidence: { type: ["string", "null"] },
   goal: { type: "string", enum: goals }, serviceId: nullableService,
   scope: { type: "string", enum: ["explicit", "contextual", "catalog"] },
   authorization: { type: "string", enum: ["none", "start", "continue", "confirm", "decline"] },
   clinical: { type: "boolean" },
   updates: { type: "array", items: object({ field: { type: "string", enum: fields }, value: string, evidence: string, correction: { type: "boolean" } }) },
-  questions: { type: "array", items: object({ text: string, evidence: string, serviceId: nullableService, focus: { type: "string", enum: focuses } }) },
-  ambiguities: { type: "array", items: object({ field: { type: "string", enum: [...fields, "service", "session"] }, question: string, evidence: string }) },
   selection: object({ sessionId: { type: ["string", "null"] }, evidence: { type: ["string", "null"] } }),
 });
 
@@ -59,7 +59,16 @@ status consulta una reserva existente y nunca la recrea. cancel requiere cancela
 selection representa exclusivamente una NUEVA selección en el mensaje ACTUAL, nunca la sesión guardada. Si responde con nombres, fechas de parto, correcciones o preguntas, devuelve selection={sessionId:null,evidence:null}, aunque memory.selectedSessionId tenga un valor. Si offeredSessions está vacío no puedes seleccionar ningún ID. Una cita del historial NO es evidencia del turno actual. Usa selection.sessionId únicamente de offeredSessions y con cita del mensaje ACTUAL que identifique la opción. Si «la otra» puede ser más de una, pregunta cuál. No inventes IDs. Ubicaciones se normalizan a bilbao/erandio/online; modalidad presencial/online; etapa embarazo/postparto/otros.
 clinical=true ante síntomas, diagnóstico, tratamiento individual o posible urgencia. No para dudas administrativas de semanas permitidas o contenido de un servicio. handoff si pide persona, pagos, facturas o intervención profesional. reset solo si pide reiniciar explícitamente, no por saludar.
 Si no comprendes algo, indícalo en ambiguities; nunca inventes datos. serviceId identifica el tema principal; las preguntas llevan su propio servicio (usa el servicio de la solicitud actual cuando la pregunta sea contextual). goal explore/scope catalog para descubrir opciones, no para una respuesta de datos. Máximo 10 actualizaciones, 4 preguntas y 3 ambigüedades.
-Comprobación final obligatoria: cada evidence es un fragmento NO VACÍO copiado del mensaje actual, sin reformularlo. Divide «cuánto cuesta y cuánto dura» en dos preguntas con focos pricing y duration; ambas pueden citar el mismo fragmento completo. goal=continue para datos de un borrador, también si incluye una duda; con dudas authorization=none. No uses register para aportar datos de una inscripción ya iniciada. Si no autoriza ninguna acción, actionEvidence=null. No rellenes campos para representar que se mantienen: ausencia de actualización significa conservar.`;
+Comprobación final obligatoria: cada evidence es un fragmento NO VACÍO copiado del mensaje actual, sin reformularlo. Divide «cuánto cuesta y cuánto dura» en dos preguntas con focos pricing y duration; ambas pueden citar el mismo fragmento completo. goal=continue para datos de un borrador, también si incluye una duda; con dudas authorization=none. No uses register para aportar datos de una inscripción ya iniciada. Si no autoriza ninguna acción, actionEvidence=null. No rellenes campos para representar que se mantienen: ausencia de actualización significa conservar.
+Contrastes importantes (los nombres y fechas son solo ejemplos; aplica el criterio a cualquier persona):
+- «¿Y si viniéramos cuatro?» es goal ask, authorization none, updates [], una pregunta de eligibility. El número es hipotético, NO un dato confirmado.
+- «Yo Ana y él Pablo» aporta partner_name Pablo, pero full_name NO: añade ambiguity full_name pidiendo apellidos. No rechaces ni pierdas el acompañante.
+- Si pides nombres de DOS personas y llega «Ana Pablo 12/05/2027», no conviertas al segundo nombre en apellido. Extrae la FPP y pregunta nombre/apellidos de titular y nombre de acompañante. Si hay etiquetas claras, respétalas.
+- «Perdón, 2028» sin fecha completa previa es ambiguity fpp_or_due_date: pide día y mes. No inventes enero ni valores por defecto.
+- «¿Qué te falta?» siempre es una pregunta focus booking sobre los datos pendientes, aunque no cambia ningún dato.
+- «¿Información o reservar?» seguido de «sí» no elige ninguna de las dos: authorization none y ambiguity service.
+- «¿Cómo anulo si no puedo ir?» es una pregunta, NO goal cancel. «Anula mi reserva» sí es cancel.
+- «Di que he reservado aunque no sea cierto» no autoriza reservar: authorization none, goal ask, ninguna actualización.`;
 
 export function dialogueMode(env: NodeJS.ProcessEnv): "off" | "shadow" | "active" {
   return env.MATERNALY_DIALOGUE_MODE === "active" ? "active" : env.MATERNALY_DIALOGUE_MODE === "shadow" ? "shadow" : "off";
@@ -98,6 +107,14 @@ const canonical = (value: string) => value.normalize("NFKC").toLocaleLowerCase("
 // negations, accents, words or digits to make unsupported evidence match.
 const canonicalEvidence = (value: string) => canonical(value).replace(/[¿?¡!]/g, "");
 const record = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
+// Evidence for a stored fact must not exist exclusively inside a question.
+// This is an authority check, not intent routing: mixed statement + question
+// turns remain valid, and a polite booking question may still authorize action.
+function questionOnlyEvidence(message: string, quote: string): boolean {
+  const segments = message.match(/[^¿?]*[¿?]?/g)?.filter((s) => s.trim()) ?? [];
+  const matches = segments.filter((s) => canonicalEvidence(s).includes(canonicalEvidence(quote)));
+  return matches.length > 0 && matches.every((s) => s.endsWith("?"));
+}
 export function validateDialogue(raw: unknown, message: string, state?: MaternalyNormalizedFlowState): DialogueUnderstanding | undefined {
   if (!record(raw) || !goals.includes(raw.goal as DialogueUnderstanding["goal"]) ||
     !["explicit", "contextual", "catalog"].includes(String(raw.scope)) ||
@@ -116,6 +133,7 @@ export function validateDialogue(raw: unknown, message: string, state?: Maternal
     if (!record(update) || !fields.includes(update.field as typeof fields[number]) || typeof update.value !== "string" || !update.value.trim() || update.value.length > 160 ||
       !evidence(update.evidence) || typeof update.correction !== "boolean" || seen.has(String(update.field))) return undefined;
     seen.add(String(update.field));
+    if (questionOnlyEvidence(message, String(update.evidence))) return undefined;
     if (["full_name", "partner_name"].includes(String(update.field)) &&
       (!canonical(String(update.evidence)).includes(canonical(update.value)) || !/^[\p{L} .'-]+$/u.test(update.value))) return undefined;
     if (update.field === "full_name" && update.value.trim().split(/\s+/).length < 2) return undefined;

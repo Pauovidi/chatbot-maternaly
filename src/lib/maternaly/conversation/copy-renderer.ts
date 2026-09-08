@@ -632,7 +632,10 @@ export class MaternalyCopyRenderer {
         const labels: Record<string, string> = { full_name: "nombre y apellidos", partner_name: "acompañante", people_count: "número de asistentes", fpp_or_due_date: "fecha probable de parto", baby_birth_date: "fecha de nacimiento", pregnancy_week: "semana de embarazo", pregnancy_month: "mes de embarazo", journey_stage: "etapa", location: "sede", modality: "modalidad" };
         parts.push(`${d.updates.some((u) => u.correction) ? "He actualizado" : "He recogido"}: ${d.updates.map((u) => labels[u.field]).join(", ")}.`);
       }
-      const questions = d.questions.filter((q) => !(q.focus === "schedule" && input.toolResult));
+      const pendingDataQuestion = d.questions.some((q) => q.focus === "booking" && /(?:qué|que).*(?:falta|dato)|datos.*(?:falta|necesita)/i.test(q.text));
+      const questions = d.questions.filter((q) => !(q.focus === "schedule" && input.toolResult) &&
+        !(input.decision.action === "catalog_info" && !q.serviceId) &&
+        !(pendingDataQuestion && q.focus === "booking"));
       if (questions.length) {
         const answer = await answerDialogueQuestions({ ...d, questions }, env);
         attempted = true; latencyMs = answer.latencyMs; generated = !!answer.text;
@@ -647,7 +650,7 @@ export class MaternalyCopyRenderer {
         if (trusted) parts.push(trusted);
       } else if (d.goal === "decline") {
         parts.push("De acuerdo, no continúo con la reserva. Podemos seguir con tus dudas cuando quieras.");
-      } else if (input.state?.stage === "collecting_contact" && (d.updates.length || !questions.length)) {
+      } else if (input.state?.stage === "collecting_contact" && (d.updates.length || !questions.length || pendingDataQuestion)) {
         const missing = input.state.pendingFields ?? [];
         parts.push(missing.length ? `Conservo la sesión elegida. Solo me falta: ${missing.map(fieldLabel).join(", ")}.` : "Conservo los datos y la sesión elegida. ¿Quieres que continúe con la solicitud de reserva?");
       } else if (!parts.length) {

@@ -1986,11 +1986,16 @@ export class MaternalyConversationPolicy {
     }
     if (intent.dialogue) {
       const d = intent.dialogue;
+      if (d.goal === "explore" && d.scope === "catalog" && !d.clinical && !d.ambiguities.length) {
+        return { action: "catalog_info", reason: "catalog_scope", journeyStage: intent.slots.journey_stage ?? state.journeyStage };
+      }
       if (conversation.maternalyNormalizedFlow?.stage === "confirmed" && (d.updates.length || d.selection.sessionId)) {
         return { action: "handoff", reason: "confirmed_registration_change_requires_human" };
       }
       if (d.questions.length || d.ambiguities.length || d.goal === "decline") {
-        if (!d.ambiguities.length && d.questions.some((q) => q.focus === "schedule") && state.serviceKey && d.goal !== "decline") {
+        if (!d.ambiguities.length && d.questions.some((q) => q.focus === "schedule") &&
+          d.questions.filter((q) => q.focus === "schedule").every((q) => !q.serviceId || getKnowledgeService(q.serviceId)?.normalizedServiceKey === state.serviceKey) &&
+          state.serviceKey && d.goal !== "decline") {
           return { action: "normalized_registration", serviceKey: state.serviceKey, reason: "dialogue_read_only_availability" };
         }
         return { action: "dialogue_response", serviceKey: state.serviceKey, reason: "answer_before_continuing" };
@@ -2715,7 +2720,7 @@ export class MaternalyCoreAdapter {
         serviceKey,
         dialogueMemory: mode !== "off" ? {
           pendingQuestions: [],
-          offeredSessions: (toolResult.calendarSessions ?? []).filter((s) =>
+          offeredSessions: (toolResult.status === "sessions_available" ? toolResult.calendarSessions ?? [] : []).filter((s) =>
             (!state.location || normalize(s.location ?? "").includes(normalize(state.location))) &&
             (!state.modality || normalize(s.modality ?? "") === state.modality),
           ).sort((a, b) => `${a.date} ${a.startTime}`.localeCompare(`${b.date} ${b.startTime}`))
