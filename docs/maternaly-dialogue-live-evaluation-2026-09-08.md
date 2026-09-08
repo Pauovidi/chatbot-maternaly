@@ -45,7 +45,25 @@ Los dos casos pendientes de gpt-5.4-mini: no pedir aclaración al elegir una opc
 
 Se añadió una memoria de autorización emitida por la aplicación: un asentimiento aislado solo puede autorizar tras una pregunta explícita de continuar con la reserva. La marca se consume/renueva con cada respuesta, y se prueba una conversación de dos turnos que primero pregunta y luego registra exactamente una vez.
 
-## Ejecución comprobada
+## Ronda f9834b1: primera muestra independiente y conversaciones
+
+Modelo fijado al snapshot `gpt-5.4-mini-2026-03-17`:
+
+- 18/20 casos nuevos no ejecutados anteriormente (`1788882692419`).
+- 28/31 conversaciones completas (`1788882748150`).
+- Batería local del artefacto: 1.076 superadas, una omitida y una pendiente.
+
+Los dos fallos de comprensión fueron hipótesis (cantidad y FPP) que el modelo incluyó simultáneamente como pregunta y actualización. Uno quedó bloqueado; el otro evidenció que la segmentación no cubría una pregunta con dos cláusulas. Se añadió una regla conservadora: una cita que el propio modelo identifica como parte de una pregunta no puede respaldar una actualización de datos; se conserva la pregunta y los datos independientes.
+
+Las conversaciones revelaron comillas de cita añadidas alrededor de evidence, una sede heredada convertida en actualización y una derivación del clasificador antiguo tras rechazar la interpretación de una cancelación negada. Se toleran delimitadores exteriores de cita sin cambiar palabras, se excluyen las actualizaciones contenidas en preguntas y se impide que una señal antigua de cancelación/reactualización reactive una derivación al fallar el intérprete nuevo. Las derivaciones de seguridad clínica/pagos siguen preservadas.
+
+Se añadió memoria persistente de campos pendientes de aclaración: una corrección ambigua no puede olvidarse al llegar después otro dato y terminar reservando con el acompañante antiguo. Una prueba de tres turnos verifica que solo registra después de conocer el acompañante nuevo.
+
+También pasa una prueba de entrada/persistencia con tres mensajes simultáneos y un SID duplicado, modelo simulado y Sheets en memoria: procesa en orden, conserva los datos previos en el contexto siguiente y crea una sola inscripción. Esto cubre el adaptador de entrada y el almacenamiento; sigue sin enviar WhatsApps reales ni validar el transporte externo en producción.
+
+Respuestas informativas: 17/20 según el evaluador automático (`1788883047535`), revisadas manualmente. La respuesta sobre tres asistentes empezaba por «Sí» para después indicar que no podía confirmar ese aforo: no autorizó una reserva, pero resulta engañosa. Se reforzó que una condición desconocida se responda primero con esa incertidumbre. Los otros dos fallos fueron criterios léxicos demasiado estrechos: yoga se describió como «actividad prenatal» y psicología explicó que no podía confirmar temas concretos. Se amplió el criterio para aceptar «prenatal» o desconocimiento explícito, sin dar por demostradas otras afirmaciones ni reinterpretar el 17/20 original. También se pidió no sustituir contenidos desconocidos por precios/horarios no solicitados.
+
+## Ejecución inicial comprobada (histórico: credencial ya corregida)
 
 Se ejecutaron los 20 casos ficticios de `dialogue/evaluation.ts` en una instancia temporal del mismo artefacto desplegado, iniciada desde la consola autorizada de EasyPanel. Escuchó únicamente en `127.0.0.1:3001`, con la evaluación habilitada, modo conversacional `off`, proveedor WhatsApp `mock` y escritura de Sheets deshabilitada. El proceso temporal terminó al finalizar la evaluación. No se cambiaron las variables guardadas del servicio principal.
 
@@ -57,7 +75,7 @@ Una petición mínima a Responses, utilizado tanto por el intérprete anterior c
 
 La comprobación de salud que informa `configured: true` solo acredita presencia de configuración, no autenticación válida contra OpenAI. El fallo actual no permite concluir cuándo empezó ni atribuirle por sí solo todas las incidencias históricas.
 
-## Pendiente
+## Pendiente en la ejecución inicial (histórico)
 
 1. El titular debe introducir una credencial válida de OpenAI mediante el gestor de secretos/configuración, sin enviarla al chat.
 2. Volver a desplegar y verificar autenticación.

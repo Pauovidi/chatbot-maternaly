@@ -65,6 +65,29 @@ describe("dialogue safety regression matrix", () => {
     expect(validateDialogue(d({ updates: [{ field: "full_name", value: "Ana García", evidence: "Ana García", correction: false }] }), "Ana García. ¿Puede venir mi madre?")).toBeTruthy();
     expect(validateDialogue(d({ updates: [{ field: "full_name", value: "Ana García", evidence: "Ana García", correction: false }] }), "Ana García\ncuánto cuesta?")).toBeTruthy();
   });
+  it("discards hypothetical data while retaining the question and independent facts", () => {
+    const quote = "Si se apunta mi hermana seríamos 3, ¿se podría?";
+    const parsed = validateDialogue(d({ goal: "ask", questions: [{ text: quote, evidence: quote, focus: "eligibility", serviceId: "charla_embarazo_1_20" }], updates: [
+      { field: "full_name", value: "Ana García", evidence: "Ana García", correction: false },
+      { field: "people_count", value: "3", evidence: quote, correction: false },
+    ] }), `Ana García. ${quote}`);
+    expect(parsed?.questions).toHaveLength(1);
+    expect(parsed?.updates.map((u) => u.field)).toEqual(["full_name"]);
+  });
+  it("accepts quote delimiters without changing words or cancellation authority", () => {
+    const parsed = validateDialogue(d({ goal: "decline", authorization: "decline", actionEvidence: '"no canceles nada"' }), "Mi marido se equivocó; no canceles nada");
+    expect(parsed?.goal).toBe("decline");
+    expect(validateDialogue(d({ goal: "cancel", actionEvidence: '"canceles"' }), "no canceles nada")).toBeUndefined();
+  });
+  it("does not let a failed model turn a negated cancellation into a human-mode reset", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("unavailable", { status: 503 })));
+    const result = await new MaternalyCoreAdapter().handle({ conversation: dialogueTestConversation({ stage: "confirmed" }), inbound: {
+      provider: "twilio_sandbox", from: "whatsapp:+34999000999", text: "Mi marido escribió 'quiero cancelar' por error; no canceles nada",
+    }, env: env() });
+    expect(result.authorityTrace.policy.action).toBe("dialogue_response");
+    expect(result.state?.stage).toBe("confirmed");
+    expect(result.conversationPatch.mode).not.toBe("human");
+  });
   it("never persists a value the model simultaneously marks uncertain", () => {
     const message = "Yo Ana y él Pablo";
     const result = validateDialogue(d({ updates: [
@@ -106,6 +129,19 @@ describe("dialogue safety regression matrix", () => {
     expect(result.turns[0].registrations).toBe(0);
     expect(result.passed).toBe(true);
     expect(result.turns[1].state?.dialogueMemory?.awaitingBookingConsent).toBe(false);
+  });
+  it("keeps an uncertain correction blocking a booking across later data messages", async () => {
+    const scenario = CONVERSATION_EVALUATIONS.find((c) => c.id === "unresolved_companion_survives_next_data")!;
+    const outputs = [
+      d({ ambiguities: [{ field: "partner_name", question: "¿Cómo se llama?", evidence: scenario.turns[0].message }] }),
+      d({ updates: [{ field: "fpp_or_due_date", value: "2027-04-05", evidence: "5/04/2027", correction: false }] }),
+      d({ updates: [{ field: "partner_name", value: "Lucía", evidence: "Lucía", correction: true }] }),
+    ];
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ output_text: JSON.stringify(outputs.shift()) }))));
+    const result = await runConversationEvaluation(scenario, env());
+    expect(result.passed).toBe(true);
+    expect(result.turns[1].state?.dialogueMemory?.unresolvedFields).toEqual(["partner_name"]);
+    expect(result.turns[2].state?.dialogueMemory?.unresolvedFields).toEqual([]);
   });
   it("routes discovery with a question to the verified catalogue", async () => {
     const interpretation = d({ goal: "explore", scope: "catalog", serviceId: null, questions: [{ text: "¿Qué ofrecéis?", evidence: "qué ofrecéis", serviceId: null, focus: "general" }] });

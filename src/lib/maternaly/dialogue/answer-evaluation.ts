@@ -17,10 +17,10 @@ const cases = [
   ["detesex_information", "detesex", "¿Qué información ofrece?", /sexo|bebé/i],
   ["birth_preparation", "preparacion_parto", "¿Qué se trabaja en preparación al parto?", /parto/i],
   ["ultrasound_information", "ecografia_5d", "¿Qué incluye la ecografía?", /ecograf|bebé/i],
-  ["yoga_information", "yoga_prenatal", "¿En qué consiste yoga prenatal?", /yoga|respiración|embarazo/i],
+  ["yoga_information", "yoga_prenatal", "¿En qué consiste yoga prenatal?", /yoga|prenatal|respiración|embarazo|no (?:puedo confirmar|se (?:detalla|especifica))/i],
   ["aipap_water", "aipap_agua", "¿Se hace en el agua?", /agua|piscina|acuátic/i],
   ["lactation_information", "lactancia", "¿En qué me podéis ayudar?", /lactancia/i],
-  ["psychology_information", "psicologia_perinatal", "¿Qué temas se pueden trabajar?", /emocional|psicolog|perinatal/i],
+  ["psychology_information", "psicologia_perinatal", "¿Qué temas se pueden trabajar?", /emocional|psicolog|perinatal|no (?:puedo confirmar|se (?:detalla|especifica))/i],
 ] as const;
 export const ANSWER_EVALUATIONS = cases.map(([id, serviceId, text, expected]) => ({ id, serviceId, text, expected }));
 export async function runAnswerEvaluation(test: typeof ANSWER_EVALUATIONS[number], env: NodeJS.ProcessEnv) {

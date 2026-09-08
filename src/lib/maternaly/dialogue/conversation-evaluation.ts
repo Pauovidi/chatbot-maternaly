@@ -26,7 +26,7 @@ export const CONVERSATION_EVALUATIONS: Scenario[] = [
   ] },
   { id: "multiline_and_duplicate", category: "booking", turns: [
     { message: "elena garcía lópez\nMario\n5/04/2027", expect: { state: { fullName: "elena garcía lópez", partnerName: "Mario", stage: "confirmed" }, registrations: 1 } },
-    { message: "Sí, confirmado", expect: { registrations: 1, noWrite: true, notReply: noReset } },
+    { message: "Sí, confirmado", expect: { registrations: 1, noWrite: true, notReply: /Soy Ane|dime primero en qué etapa|quieres reservar|quieres que miremos/i } },
     { message: "¿Ya está reservada?", expect: { action: "reservation_status", reply: /confirmada/i, noWrite: true, registrations: 1 } },
   ] },
   { id: "past_fpp_year_repair", category: "correction", turns: [
@@ -131,6 +131,11 @@ export const CONVERSATION_EVALUATIONS: Scenario[] = [
     ] },
   { id: "schedule_detour_preserves_booking", category: "detour", state: data, turns: [
     { message: "Mantén la charla. ¿Qué fechas hay para BLW?", expect: { state: { ...sameSession, serviceKey: "charla_embarazo_1_20" }, noWrite: true, notReply: /24 de septiembre|6 de octubre/i } },
+  ] },
+  { id: "unresolved_companion_survives_next_data", category: "memory", state: { fullName: data.fullName, partnerName: "Mario" }, turns: [
+    { message: "Ya no viene Mario, vendrá mi prima, luego te digo su nombre", expect: { noWrite: true, registrations: 0 } },
+    { message: "La fecha probable de parto es 5/04/2027", expect: { noWrite: true, registrations: 0, reply: /acompañante|aclar/i } },
+    { message: "Mi acompañante se llama Lucía", expect: { state: { partnerName: "Lucía", stage: "confirmed" }, registrations: 1 } },
   ] },
 ];
 

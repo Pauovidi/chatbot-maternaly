@@ -92,6 +92,7 @@ export function buildDialogueContext(conversation: ConversationRecord) {
     pendingFields: state.pendingFields, offeredSessions: state.dialogueMemory?.offeredSessions ?? [],
     pendingQuestions: state.dialogueMemory?.pendingQuestions ?? [],
     awaitingBookingConsent: state.dialogueMemory?.awaitingBookingConsent ?? false,
+    unresolvedFields: state.dialogueMemory?.unresolvedFields ?? [],
   } : {};
   const resetIndex = conversation.messages.findLastIndex((m) => m.senderType === "user" && isMaternalyResetRequest(m.body));
   return {
@@ -106,7 +107,7 @@ export function buildDialogueContext(conversation: ConversationRecord) {
 const canonical = (value: string) => value.normalize("NFKC").toLocaleLowerCase("es").replace(/\s+/g, " ").trim();
 // Question/exclamation marks do not change the quoted words. Never remove
 // negations, accents, words or digits to make unsupported evidence match.
-const canonicalEvidence = (value: string) => canonical(value).replace(/[¿?¡!]/g, "");
+const canonicalEvidence = (value: string) => canonical(value).replace(/[¿?¡!]/g, "").replace(/^["'“”‘’]+|["'“”‘’]+$/g, "").trim();
 const record = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
 // Evidence for a stored fact must not exist exclusively inside a question.
 // This is an authority check, not intent routing: mixed statement + question
@@ -134,7 +135,10 @@ export function validateDialogue(raw: unknown, message: string, state?: Maternal
   // other independently supported fields instead of discarding the whole turn.
   const uncertainFields = new Set(raw.ambiguities.filter((a) => record(a) && evidence(a.evidence) &&
     typeof a.question === "string" && a.question.trim() && a.question.length <= 300).map((a) => String(a.field)));
-  raw = { ...raw, updates: raw.updates.filter((u) => !record(u) || !uncertainFields.has(String(u.field))) };
+  const questions = raw.questions;
+  raw = { ...raw, updates: raw.updates.filter((u) => !record(u) ||
+    (!uncertainFields.has(String(u.field)) && !questions.some((q) => record(q) && evidence(q.evidence) && evidence(u.evidence) &&
+      canonicalEvidence(String(q.evidence)).includes(canonicalEvidence(String(u.evidence)))))) };
   if (!record(raw) || !Array.isArray(raw.updates) || !Array.isArray(raw.questions) || !Array.isArray(raw.ambiguities) || !record(raw.selection)) return undefined;
   const seen = new Set<string>();
   for (const update of raw.updates) {

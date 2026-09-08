@@ -641,8 +641,9 @@ export class MaternalyCopyRenderer {
         attempted = true; latencyMs = answer.latencyMs; generated = !!answer.text;
         parts.push(answer.text ?? "No tengo información verificada suficiente para responder a esa consulta con seguridad. El equipo de Maternaly puede aclarar esa condición; mantengo tu solicitud sin confirmar ninguna plaza.");
       }
-      if (d.ambiguities.length) {
-        const field = d.ambiguities[0].field;
+      const unresolvedField = d.ambiguities[0]?.field ?? input.state?.dialogueMemory?.unresolvedFields?.[0];
+      if (unresolvedField) {
+        const field = unresolvedField;
         const labels: Record<string, string> = { full_name: "el nombre y los apellidos de la titular", partner_name: "el nombre del acompañante", fpp_or_due_date: "la fecha probable de parto, con día, mes y año", baby_birth_date: "la fecha de nacimiento del bebé", service: "el servicio que te interesa", session: "la fecha o el número de la sesión", people_count: "cuántas personas acudiréis" };
         parts.push(field === "booking_consent" ? "¿Quieres que continúe con la solicitud de reserva?" : `Para no dar nada por supuesto, ¿puedes aclararme ${labels[field] ?? "ese dato"}?`);
       } else if (input.toolResult || input.decision.action === "catalog_info" || input.decision.action === "booking_service_selection") {
@@ -656,7 +657,9 @@ export class MaternalyCopyRenderer {
         const missing = input.state.pendingFields ?? [];
         parts.push(missing.length ? `Conservo la sesión elegida. Solo me falta: ${missing.map(fieldLabel).join(", ")}.` : "Conservo los datos y la sesión elegida. ¿Quieres que continúe con la solicitud de reserva?");
       } else if (!parts.length) {
-        parts.push(this.render(input) ?? "¿Qué te gustaría saber de Maternaly?");
+        parts.push(input.state?.stage === "confirmed"
+          ? "De acuerdo. No he realizado cambios ni he creado otra inscripción. Si tienes alguna duda, seguimos desde aquí."
+          : this.render(input) ?? "¿Qué te gustaría saber de Maternaly?");
       }
     }
     return { text: parts.join("\n\n"), source: generated ? "grounded_generator" : "safe_draft", mode: generated ? "generated" : "fallback", reason: generated ? "accepted" : "no_safe_candidate", attempted, latencyMs, candidateAudits: [] };

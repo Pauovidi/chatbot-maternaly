@@ -1986,11 +1986,18 @@ export class MaternalyConversationPolicy {
     }
     if (intent.dialogue) {
       const d = intent.dialogue;
+      if (["continue", "register"].includes(d.goal) && !d.questions.length &&
+        state.dialogueMemory?.unresolvedFields?.some((field) => !d.updates.some((u) => u.field === field))) {
+        return { action: "dialogue_response", serviceKey: state.serviceKey, reason: "unresolved_previous_field" };
+      }
       if (d.goal === "explore" && d.scope === "catalog" && !d.clinical && !d.ambiguities.length) {
         return { action: "catalog_info", reason: "catalog_scope", journeyStage: intent.slots.journey_stage ?? state.journeyStage };
       }
       if (conversation.maternalyNormalizedFlow?.stage === "confirmed" && (d.updates.length || d.selection.sessionId)) {
         return { action: "handoff", reason: "confirmed_registration_change_requires_human" };
+      }
+      if (state.stage === "confirmed" && d.goal === "continue" && !d.questions.length && !d.ambiguities.length) {
+        return { action: "dialogue_response", serviceKey: state.serviceKey, reason: "acknowledge_existing_registration" };
       }
       if (d.questions.length || d.ambiguities.length || d.goal === "decline") {
         if (!d.ambiguities.length && d.questions.some((q) => q.focus === "schedule") &&
@@ -2547,8 +2554,12 @@ export class MaternalyCoreAdapter {
       input.inbound.text, buildInterpretationContext(input.conversation),
       input.conversation.mode === "human" || (mode === "active" && dialogueResult) ? { ...runtimeEnv, LLM_PROVIDER: "mock" } : runtimeEnv,
     );
+    const fallbackFlags = interpretedIntent.safety_flags.filter((flag) => !["cancel_registration_request", "handoff_cancel_or_reschedule"].includes(flag));
+    const onlyCancellationFallback = interpretedIntent.safety_flags.some((flag) => ["cancel_registration_request", "handoff_cancel_or_reschedule"].includes(flag)) &&
+      !fallbackFlags.some((flag) => ["clinical_or_diagnostic_escalation", "handoff_payment_or_invoice", "stop_requested_no_follow_up"].includes(flag));
+    const fallbackHandoff = interpretedIntent.should_handoff && !onlyCancellationFallback;
     const intent = semanticIntent ?? (mode === "active" && dialogueResult
-      ? { ...interpretedIntent, intent: interpretedIntent.should_handoff ? "handoff_request" as const : "unknown" as const, slots: {}, should_handoff: interpretedIntent.should_handoff, safety_flags: interpretedIntent.safety_flags.filter((flag) => flag !== "cancel_registration_request"), needs_availability_lookup: false, dialogueUnavailable: true }
+      ? { ...interpretedIntent, intent: fallbackHandoff ? "handoff_request" as const : "unknown" as const, slots: {}, should_handoff: fallbackHandoff, safety_flags: fallbackFlags, needs_availability_lookup: false, dialogueUnavailable: true }
       : enrichIntentWithConversationServiceContext(interpretedIntent, input.conversation, input.inbound.text));
     const replacesServiceFlow = shouldReplaceServiceFlow(stateBefore, intent);
     const nluTotalMs = elapsedSince(nluStartedAt);
@@ -3050,6 +3061,10 @@ export class MaternalyCoreAdapter {
       nextState.dialogueMemory = {
         offeredSessions: nextState.dialogueMemory?.offeredSessions ?? [],
         pendingQuestions: intent.dialogue.questions.map((q) => q.text),
+        unresolvedFields: [...new Set([
+          ...(stateBefore?.dialogueMemory?.unresolvedFields ?? []),
+          ...intent.dialogue.ambiguities.filter((a) => !["service", "session", "booking_consent"].includes(a.field)).map((a) => a.field),
+        ])].filter((field) => !intent.dialogue!.updates.some((u) => u.field === field)),
       };
     }
     const groundedRender = await this.renderer.renderGrounded(
