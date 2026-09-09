@@ -71,6 +71,21 @@ describe("service discovery is not a booking or a catalogue loop", () => {
     }
   });
 
+  it.each(["Sí", "Claro", "Te he dicho que sí"])("continues immediately after the charla booking question: %s", async (confirmation) => {
+    const h = harness();
+    const info = await h.turn("Charla informativa", interpretation());
+    expect(info.state).toMatchObject({
+      serviceKey: "charla_embarazo_1_20",
+      stage: "awaiting_booking_decision",
+      dialogueMemory: { awaitingBookingConsent: true },
+    });
+    const result = await h.turn(confirmation, interpretation({ goal: "continue", authorization: "confirm", actionEvidence: confirmation }));
+    expect(result.authorityTrace.policy.action).toBe("normalized_registration");
+    expect(result.state?.stage).toBe("choosing_session");
+    expect(result.reply).toMatch(/sesiones|fecha|septiembre|octubre/i);
+    expect(result.reply).not.toMatch(/¿Quieres que continúe con la solicitud de reserva\?|está pensada para acompañarte/i);
+  });
+
   it.each(["explore", "ask"] as const)("explains a named service with personal context and no explicit question (%s)", async (goal) => {
     const result = await harness().turn("Estoy embarazada y me interesa la charla", interpretation({ goal, updates: [
       { field: "journey_stage", value: "embarazo", evidence: "Estoy embarazada", correction: false },

@@ -24,6 +24,7 @@ export interface DialogueResult {
   reason: "accepted" | "disabled" | "missing_key" | "timeout" | "http_error" | "invalid_output";
   latencyMs: number;
   model?: string;
+  source?: "openai" | "deterministic_fast_path";
 }
 
 const object = (properties: Record<string, unknown>) => ({ type: "object", properties, required: Object.keys(properties), additionalProperties: false });
@@ -113,6 +114,62 @@ const canonical = (value: string) => value.normalize("NFKC").toLocaleLowerCase("
 // negations, accents, words or digits to make unsupported evidence match.
 const canonicalEvidence = (value: string) => canonical(value).replace(/[¿?¡!]/g, "").replace(/^["'“”‘’]+|["'“”‘’]+$/g, "").trim();
 const record = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
+
+function consentText(value: string): string {
+  return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("es")
+    .replace(/[^\p{L}\p{N}\s]/gu, " ").replace(/\s+/g, " ").trim();
+}
+
+export function isBookingConsentPrompt(value: string | undefined): boolean {
+  const text = consentText(value ?? "");
+  if (!text ||
+    /\b(?:informacion|informarte|explicacion)\b.{0,80}\bo\b.{0,80}\b(?:reserv|apunt|inscrib)/.test(text) ||
+    /\b(?:reserv|apunt|inscrib)\w*\b.{0,80}\bo\b.{0,80}\b(?:informacion|informarte|explicacion)\b/.test(text)) {
+    return false;
+  }
+  return (
+    /\b(?:quieres|deseas|te gustaria)\b.{0,70}\b(?:reservar|apuntarte|inscribirte)\b/.test(text) ||
+    /\b(?:quieres|dime si quieres|confirmame si quieres)\b.{0,80}\b(?:continuar|continues?|seguir|sigas?)\b.{0,60}\b(?:reserva|solicitud|inscripcion)\b/.test(text) ||
+    /\b(?:quieres|deseas)\b.{0,70}\b(?:mirar|comprobar|preparar)\b.{0,60}\b(?:plaza|reserva|inscripcion)\b/.test(text)
+  );
+}
+
+export function isBookingConsentAffirmative(value: string): boolean {
+  const text = consentText(value);
+  if (!text || /[?¿]/.test(value) || /\b(?:pero|antes|primero|aunque|siempre que|todavia no|ahora no)\b/.test(text)) {
+    return false;
+  }
+  return (
+    /^(?:si(?: claro| adelante| de acuerdo| por supuesto| quiero)?|claro|claro que si|vale|ok|okay|de acuerdo|perfecto|por supuesto|adelante|hazlo|continua|continuemos|correcto|dale)(?: por favor| gracias)?$/.test(text) ||
+    /^(?:si )?(?:quiero reservar|quiero que continues|continua con (?:la|mi) (?:reserva|solicitud|inscripcion)|sigue con (?:la|mi) (?:reserva|solicitud|inscripcion))$/.test(text) ||
+    /^(?:ya )?te he dicho que si$/.test(text)
+  );
+}
+
+function contextualBookingConsent(
+  message: string,
+  conversation: ConversationRecord,
+): DialogueUnderstanding | undefined {
+  const state = conversation.maternalyNormalizedFlow;
+  if (!state || state.stage === "confirmed" || !isBookingConsentAffirmative(message)) return undefined;
+  const lastAssistantMessage = [...conversation.messages].reverse()
+    .find((entry) => entry.senderType === "bot" && entry.body.trim())?.body;
+  if (!state.dialogueMemory?.awaitingBookingConsent && !isBookingConsentPrompt(lastAssistantMessage)) return undefined;
+  const service = getKnowledgeService(state.serviceKey);
+  const startsBooking = state.stage === "awaiting_booking_decision";
+  return {
+    actionEvidence: message,
+    goal: startsBooking ? "register" : "continue",
+    serviceId: service?.id ?? null,
+    scope: "contextual",
+    authorization: startsBooking ? "start" : "confirm",
+    clinical: false,
+    updates: [],
+    questions: [],
+    ambiguities: [],
+    selection: { sessionId: null, evidence: null },
+  };
+}
 // Evidence for a stored fact must not exist exclusively inside a question.
 // This is an authority check, not intent routing: mixed statement + question
 // turns remain valid, and a polite booking question may still authorize action.
@@ -204,6 +261,8 @@ export function validateDialogue(raw: unknown, message: string, state?: Maternal
 export async function understandDialogue(message: string, conversation: ConversationRecord, env: NodeJS.ProcessEnv, fetcher: typeof fetch = fetch): Promise<DialogueResult> {
   const started = Date.now();
   const model = env.MATERNALY_DIALOGUE_MODEL || env.LLM_MODEL || "gpt-4.1-mini";
+  const contextualConsent = contextualBookingConsent(message, conversation);
+  if (contextualConsent) return { understanding: contextualConsent, reason: "accepted", latencyMs: Date.now() - started, source: "deterministic_fast_path" };
   if (!env.OPENAI_API_KEY) return { reason: "missing_key", latencyMs: 0, model };
   const controller = new AbortController();
   const reasoningModel = /^gpt-5[.-]/.test(model);
@@ -225,13 +284,17 @@ export async function understandDialogue(message: string, conversation: Conversa
     const content = payload.output?.flatMap((o: { content?: Array<{ type: string; text?: string }> }) => o.content ?? []) ?? [];
     const text = payload.output_text ?? content.find((c: { type: string }) => c.type === "output_text")?.text;
     const understanding = validateDialogue(JSON.parse(text ?? "null"), message, conversation.maternalyNormalizedFlow);
-    return { understanding, reason: understanding ? "accepted" : "invalid_output", latencyMs: Date.now() - started, model };
+    return { understanding, reason: understanding ? "accepted" : "invalid_output", latencyMs: Date.now() - started, model, source: "openai" };
   } catch (error) {
     return { reason: error instanceof Error && error.name === "AbortError" ? "timeout" : "invalid_output", latencyMs: Date.now() - started, model };
   } finally { clearTimeout(timer); }
 }
 
-export function dialogueIntent(dialogue: DialogueUnderstanding, state?: MaternalyNormalizedFlowState): StructuredIntent {
+export function dialogueIntent(
+  dialogue: DialogueUnderstanding,
+  state?: MaternalyNormalizedFlowState,
+  classificationSource: NonNullable<StructuredIntent["classification_source"]> = "openai",
+): StructuredIntent {
   const slots: MaternalyNluSlots = {};
   for (const u of dialogue.updates) {
     Object.assign(slots, { [u.field]: ["people_count", "pregnancy_week", "pregnancy_month"].includes(u.field) ? Number(u.value) : u.value });
@@ -248,6 +311,7 @@ export function dialogueIntent(dialogue: DialogueUnderstanding, state?: Maternal
     dialogue.goal === "status" ? "registration_status_query" :
     dialogue.goal === "explore" ? (dialogue.scope === "catalog" ? "service_discovery" : service ? "service_question" : "general_info") :
     dialogue.goal === "decline" ? "general_info" : dialogue.questions.length ? "service_question" :
+    ["register", "continue"].includes(dialogue.goal) && dialogue.authorization !== "none" && state?.stage === "awaiting_booking_decision" ? "registration_start" :
     dialogue.goal === "register" && dialogue.authorization !== "none" ? "registration_start" :
     dialogue.goal === "continue" && state?.stage === "collecting_contact" && (dialogue.updates.length || dialogue.authorization !== "none") ? "registration_confirm" :
     dialogue.selection.sessionId ? "registration_slot_selected" : "general_info";
@@ -257,6 +321,6 @@ export function dialogueIntent(dialogue: DialogueUnderstanding, state?: Maternal
     missing_fields: [], needs_availability_lookup: intent === "registration_start" || intent === "registration_slot_selected",
     should_handoff: dialogue.clinical || dialogue.goal === "handoff" || dialogue.goal === "cancel",
     safety_flags: dialogue.clinical ? ["clinical_or_diagnostic_escalation"] : dialogue.goal === "cancel" ? ["cancel_registration_request"] : [],
-    classification_source: "openai", dialogue,
+    classification_source: classificationSource, dialogue,
   };
 }

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { understandDialogue, validateDialogue, dialogueSchemaForConversation, type DialogueUnderstanding } from "./understanding";
+import { understandDialogue, validateDialogue, dialogueIntent, dialogueSchemaForConversation, isBookingConsentAffirmative, isBookingConsentPrompt, type DialogueUnderstanding } from "./understanding";
 import { CONVERSATION_EVALUATIONS, isolatedDialogueEnv, runConversationEvaluation } from "./conversation-evaluation";
 import { dialogueTestConversation } from "./evaluation";
 import { MaternalyCoreAdapter, MaternalyToolExecutor } from "@/lib/maternaly/conversation/core";
@@ -126,6 +126,40 @@ describe("dialogue safety regression matrix", () => {
     expect(unclear?.ambiguities[0].field).toBe("booking_consent");
     const explicit = validateDialogue(candidate, "sí", { ...state, dialogueMemory: { offeredSessions: [], pendingQuestions: [], awaitingBookingConsent: true } });
     expect(explicit?.authorization).toBe("confirm");
+  });
+  it("recognizes only unambiguous booking prompts and affirmative replies", () => {
+    expect(isBookingConsentPrompt("¿Quieres reservar tu plaza?")).toBe(true);
+    expect(isBookingConsentPrompt("¿Quieres que continúe con la solicitud de reserva?")).toBe(true);
+    expect(isBookingConsentPrompt("¿Quieres información o reservar?")).toBe(false);
+    expect(isBookingConsentPrompt("¿Quieres reservar o prefieres información?")).toBe(false);
+    for (const reply of ["Sí", "claro", "sí, por favor", "sí, quiero", "Te he dicho que sí", "continúa con mi reserva", "dale"]) {
+      expect(isBookingConsentAffirmative(reply)).toBe(true);
+    }
+    for (const reply of ["Sí, pero antes dime el precio", "todavía no", "¿sí?"]) {
+      expect(isBookingConsentAffirmative(reply)).toBe(false);
+    }
+  });
+  it("maps a confirmed continuation to registration while awaiting the booking decision", () => {
+    const intent = dialogueIntent(d({ authorization: "confirm", actionEvidence: "sí" }), {
+      serviceKey: "charla_embarazo_1_20", stage: "awaiting_booking_decision", updatedAt: new Date().toISOString(),
+    });
+    expect(intent.intent).toBe("registration_start");
+    expect(intent.needs_availability_lookup).toBe(true);
+  });
+  it.each(["Sí", "Claro", "Te he dicho que sí"])("resolves a clear booking answer without calling the model: %s", async (message) => {
+    const conversation = dialogueTestConversation({
+      stage: "awaiting_booking_decision",
+      selectedSessionId: undefined,
+      selectedGroupId: undefined,
+      pendingFields: [],
+      dialogueMemory: { offeredSessions: [], pendingQuestions: [], awaitingBookingConsent: true },
+    }, "¿Quieres reservar tu plaza?");
+    const fetchSpy = vi.fn(async () => { throw new Error("The model must not run for clear contextual consent"); });
+    const result = await understandDialogue(message, conversation, env(), fetchSpy as typeof fetch);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ reason: "accepted", understanding: {
+      goal: "register", authorization: "start", actionEvidence: message, serviceId: "charla_embarazo_1_20",
+    }, source: "deterministic_fast_path" });
   });
   it("asks for clear consent and only books after that question is accepted", async () => {
     vi.stubGlobal("fetch", vi.fn(async (_url, init) => {

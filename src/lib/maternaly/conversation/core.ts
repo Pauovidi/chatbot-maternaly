@@ -1,5 +1,5 @@
 import type { ConversationRecord, MaternalyNormalizedFlowState } from "@/lib/hotel/conversations/types";
-import { dialogueMode, dialogueIntent, understandDialogue, type DialogueResult } from "@/lib/maternaly/dialogue/understanding";
+import { dialogueMode, dialogueIntent, understandDialogue, isBookingConsentPrompt, type DialogueResult } from "@/lib/maternaly/dialogue/understanding";
 import { readMaternalyRuntimeConfig } from "@/lib/maternaly/config/env";
 import {
   MaternalyCopyRenderer,
@@ -2574,7 +2574,7 @@ export class MaternalyCoreAdapter {
       dialogueResult = await understandDialogue(input.inbound.text, input.conversation, runtimeEnv);
     }
     const semanticIntent = mode === "active" && dialogueResult?.understanding
-      ? dialogueIntent(dialogueResult.understanding, stateBefore) : undefined;
+      ? dialogueIntent(dialogueResult.understanding, stateBefore, dialogueResult.source ?? "openai") : undefined;
     const interpretedIntent = semanticIntent ?? await this.interpreter.interpret(
       input.inbound.text, buildInterpretationContext(input.conversation),
       input.conversation.mode === "human" || (mode === "active" && dialogueResult) ? { ...runtimeEnv, LLM_PROVIDER: "mock" } : runtimeEnv,
@@ -3116,7 +3116,7 @@ export class MaternalyCoreAdapter {
       : undefined;
     const reply = distinctReply?.reply;
     if (nextState?.dialogueMemory) {
-      nextState.dialogueMemory.awaitingBookingConsent = Boolean(reply?.endsWith("¿Quieres que continúe con la solicitud de reserva?"));
+      nextState.dialogueMemory.awaitingBookingConsent = isBookingConsentPrompt(reply);
     }
     if (groundedRender) {
       events.push({
