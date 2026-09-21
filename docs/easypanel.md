@@ -131,6 +131,24 @@ el Sheet normalizado de Charla. Por eso `reminders.ready=true` exige tambien
 configuradas. El health solo muestra los nombres de los requisitos ausentes;
 nunca sus valores.
 
+### Integración protegida con Hermes
+
+La integración de Hermes con Charla Informativa usa una ruta específica y no
+expone a Hermes acceso general a Google Sheets. En la aplicación de EasyPanel
+configurar el secreto `MATERNALY_HERMES_INTEGRATION_TOKEN` y compartir el mismo
+valor únicamente con el agente Hermes mediante estas variables:
+
+```text
+MATERNALY_HERMES_API_URL=https://<dominio-maternaly>/api/maternaly/integrations/hermes/charla
+MATERNALY_HERMES_API_TOKEN=<mismo-secreto-largo>
+```
+
+El agente solo debe llamar a la ruta después de que la persona confirme la
+reserva. La ruta vuelve a leer la agenda, comprueba semanas 1–20, cupos,
+duplicados e idempotencia y solo escribe cuando `GOOGLE_SHEETS_ACCESS_MODE=live`,
+`MATERNALY_NORMALIZED_SHEETS_WRITE_MODE=live` y `BOT_SHEETS_LIVE_WRITE_ENABLED=true`.
+Una respuesta distinta de `ok: true` no es una reserva confirmada.
+
 La tarea recurrente de EasyPanel debe hacer `POST` cada pocos minutos a:
 
 ```text
