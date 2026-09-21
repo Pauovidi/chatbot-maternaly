@@ -16,6 +16,8 @@ export interface AdminTaskAuthSuccess {
 
 export type AdminTaskAuthResult = AdminTaskAuthSuccess | AdminTaskAuthFailure;
 
+export type MaternalyIntegrationAuthResult = AdminTaskAuthSuccess | AdminTaskAuthFailure;
+
 function readPresentedToken(request: Request): string {
   const bearer = request.headers.get("authorization")?.match(/^Bearer\s+(.+)$/i)?.[1]?.trim();
   return bearer || request.headers.get("x-maternaly-admin-task-token")?.trim() || "";
@@ -35,34 +37,54 @@ function tokensMatch(expected: string, presented: string): boolean {
   return crypto.timingSafeEqual(expectedBuffer, presentedBuffer);
 }
 
-export function verifyMaternalyAdminTaskRequest(
+function verifyTokenRequest(
   request: Request,
-  env: Partial<NodeJS.ProcessEnv> = process.env,
+  expected: string | undefined,
+  messages: { missing: string; unauthorized: string },
 ): AdminTaskAuthResult {
-  const expected = env.MATERNALY_ADMIN_TASK_TOKEN?.trim();
-  if (!expected) {
+  const configured = expected?.trim();
+  if (!configured) {
     return {
       ok: false,
       status: 503,
-      body: {
-        ok: false,
-        error: "MATERNALY_ADMIN_TASK_TOKEN is not configured.",
-      },
+      body: { ok: false, error: messages.missing },
     };
   }
 
-  if (!tokensMatch(expected, readPresentedToken(request))) {
+  if (!tokensMatch(configured, readPresentedToken(request))) {
     return {
       ok: false,
       status: 401,
-      body: {
-        ok: false,
-        error: "Unauthorized admin task request.",
-      },
+      body: { ok: false, error: messages.unauthorized },
     };
   }
 
   return { ok: true };
+}
+
+export function verifyMaternalyAdminTaskRequest(
+  request: Request,
+  env: Partial<NodeJS.ProcessEnv> = process.env,
+): AdminTaskAuthResult {
+  return verifyTokenRequest(request, env.MATERNALY_ADMIN_TASK_TOKEN, {
+    missing: "MATERNALY_ADMIN_TASK_TOKEN is not configured.",
+    unauthorized: "Unauthorized admin task request.",
+  });
+}
+
+/**
+ * Authenticates machine-to-machine integrations without reusing the admin
+ * task token. The dedicated secret is intended for a single integration,
+ * such as the remote Hermes Charla Informativa skill.
+ */
+export function verifyMaternalyIntegrationRequest(
+  request: Request,
+  env: Partial<NodeJS.ProcessEnv> = process.env,
+): MaternalyIntegrationAuthResult {
+  return verifyTokenRequest(request, env.MATERNALY_HERMES_INTEGRATION_TOKEN, {
+    missing: "MATERNALY_HERMES_INTEGRATION_TOKEN is not configured.",
+    unauthorized: "Unauthorized Maternaly integration request.",
+  });
 }
 
 export function verifyMaternalyAdminDebugRequest(
