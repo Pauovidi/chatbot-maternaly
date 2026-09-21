@@ -48,5 +48,5 @@ objeto JSON por stdin. El script añade `action: "reserve"` y `source:
 ```
 
 La respuesta `ok: true` significa que la fila fue persistida o que ya estaba
-persistentemente registrada (idempotencia). Cualquier otro resultado no es una
+registrada (idempotencia). Cualquier otro resultado no es una
 confirmación de plaza.
