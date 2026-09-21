@@ -27,6 +27,25 @@ KEY_PATH = os.environ.get(
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 SHEET_BASE_DATE = dt.date(1899, 12, 30)
 OPEN_STATUSES = {"activa", "pendiente confirmar", "preinscrita", "confirmada"}
+GROUP_HEADERS = [
+    "inscripcion_id",
+    "cliente_id",
+    "nombre",
+    "apellidos",
+    "telefono",
+    "email",
+    "grupo_id",
+    "servicio_id",
+    "fecha_inscripcion",
+    "canal_origen",
+    "precio_acordado",
+    "estado_pago",
+    "estado_inscripcion",
+    "fpp",
+    "fecha_nacimiento_bebe",
+    "pareja_nombre",
+    "observaciones",
+]
 
 
 def emit(payload: dict[str, Any], exit_code: int = 0) -> int:
@@ -147,15 +166,80 @@ def row_values(headers: list[str], values: dict[str, Any]) -> list[Any]:
     return [normalized.get(header, "") for header in headers]
 
 
-def append_row(service: Any, title: str, headers: list[str], values: dict[str, Any]) -> None:
+def append_row(service: Any, title: str, headers: list[str], values: dict[str, Any], anchor_row: int = 3) -> None:
     service.spreadsheets().values().append(
         spreadsheetId=SPREADSHEET_ID,
-        range=f"'{title}'!A3",
+        range=f"'{title}'!A{anchor_row}",
         valueInputOption="USER_ENTERED",
         insertDataOption="INSERT_ROWS",
         includeValuesInResponse=False,
         body={"majorDimension": "ROWS", "values": [row_values(headers, values)]},
     ).execute()
+
+
+def session_tab_title(session: dict[str, Any], session_date: dt.date) -> str:
+    center = text(get_first(session, "centro", "center", "sede", "ubicacion")) or "Sesión"
+    safe_center = re.sub(r"[\[\]*?/\\:]+", " ", center).strip()
+    return f"GRP_ Charla {safe_center} {session_date.isoformat()}"[:100]
+
+
+def profile_tabs(service: Any) -> dict[str, int]:
+    result = service.spreadsheets().get(
+        spreadsheetId=SPREADSHEET_ID,
+        fields="sheets.properties(sheetId,title)",
+    ).execute()
+    return {
+        str(item["properties"]["title"]): int(item["properties"]["sheetId"])
+        for item in result.get("sheets", [])
+        if item.get("properties", {}).get("title")
+    }
+
+
+def ensure_group_tab(service: Any, title: str, session: dict[str, Any], session_date: dt.date) -> None:
+    tabs = profile_tabs(service)
+    if title in tabs:
+        return
+    response = service.spreadsheets().batchUpdate(
+        spreadsheetId=SPREADSHEET_ID,
+        body={"requests": [{"addSheet": {"properties": {"title": title}}}]},
+    ).execute()
+    if not response.get("replies"):
+        raise RuntimeError("session_tab_create_failed")
+    center = text(get_first(session, "centro", "center", "sede", "ubicacion"))
+    start = text(get_first(session, "hora_inicio", "inicio", "start_time", "hora"))
+    group_id = text(get_first(session, "grupo_id", "group_id"))
+    values = [
+        [f"Inscripciones — {SERVICE_ID} · {center} · {session_date.isoformat()} {start}"],
+        ["Servicio", "Charla", "Centro", center, "Horario", start, "Fecha", session_date.isoformat(), "Grupo", group_id, "Fuente", "Inscripciones"],
+        ["VISTA GENERADA AUTOMÁTICAMENTE. Editar la pestaña Inscripciones como fuente de verdad."],
+        GROUP_HEADERS,
+    ]
+    service.spreadsheets().values().update(
+        spreadsheetId=SPREADSHEET_ID,
+        range=f"'{title}'!A1",
+        valueInputOption="USER_ENTERED",
+        body={"majorDimension": "ROWS", "values": values},
+    ).execute()
+
+
+def append_group_tab_row(
+    service: Any,
+    session: dict[str, Any],
+    session_date: dt.date,
+    registration_values: dict[str, Any],
+) -> tuple[str, bool]:
+    title = session_tab_title(session, session_date)
+    ensure_group_tab(service, title, session, session_date)
+    existing = service.spreadsheets().values().get(
+        spreadsheetId=SPREADSHEET_ID,
+        range=f"'{title}'!A4:Q2000",
+        valueRenderOption="UNFORMATTED_VALUE",
+    ).execute().get("values", [])
+    registration_id = text(registration_values.get("inscripcion_id"))
+    if any(row and text(row[0]) == registration_id for row in existing[1:]):
+        return title, False
+    append_row(service, title, GROUP_HEADERS, registration_values, anchor_row=4)
+    return title, True
 
 
 def load_sheets() -> tuple[Any, list[dict[str, Any]], list[str], list[dict[str, Any]], list[str], list[dict[str, Any]], list[str]]:
@@ -353,7 +437,8 @@ def main() -> int:
 
     registration_values = {
         "inscripcion_id": registration_id, "cliente_id": client_id, "nombre": first_name,
-        "apellidos": last_name, "telefono": phone, "grupo_id": group_id, "servicio_id": SERVICE_ID,
+        "apellidos": last_name, "telefono": phone, "email": text(payload.get("email")),
+        "grupo_id": group_id, "servicio_id": SERVICE_ID,
         "fecha_inscripcion": now, "canal_origen": "whatsapp", "precio_acordado": 0,
         "estado_pago": "no_aplica", "estado_inscripcion": "Activa", "fpp": sheet_date(due_date),
         "pareja_nombre": partner_name, "consentimiento_comunicaciones": "", "observaciones": notes,
@@ -370,6 +455,8 @@ def main() -> int:
         "accion_realizada": "hermes_charla_direct_registration", "resultado": "confirmed",
         "requiere_humano": "no", "conversation_id": key, "observaciones": notes,
     }
+    session_tab_title_value = session_tab_title(session, session_date)
+    session_tab_synced = False
     try:
         lock_path = Path("/opt/data/maternaly-charla-write.lock")
         with lock_path.open("a+") as lock_file:
@@ -381,6 +468,17 @@ def main() -> int:
             append_row(service, "Inscripciones", registration_headers, registration_values)
             if existing_client is None:
                 append_row(service, "Clientes_Local", client_headers, client_values)
+            try:
+                session_tab_title_value, _ = append_group_tab_row(
+                    service,
+                    session,
+                    session_date,
+                    registration_values,
+                )
+                session_tab_synced = True
+            except Exception:
+                notes = f"{notes} | session_tab_sync_failed"
+                interaction_values["observaciones"] = notes
             append_row(service, "Interacciones_Chatbot", interaction_headers, interaction_values)
     except Exception:
         return blocked("write_failed", "No he podido completar la reserva en la hoja. No la confirmes como realizada.")
@@ -390,6 +488,8 @@ def main() -> int:
         "registrationId": registration_id,
         "sessionId": session_id,
         "sessionDate": session_date.isoformat(),
+        "sessionTab": session_tab_title_value,
+        "sessionTabSynced": session_tab_synced,
         "message": "Reserva registrada correctamente.",
     })
 

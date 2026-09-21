@@ -74,9 +74,11 @@ La consulta `list_sessions` es siempre de solo lectura y devuelve el
 reserva hasta haber seleccionado uno de esos identificadores.
 
 Escribe la reserva en `Inscripciones`, crea el cliente solo si no existe en
-`Clientes_Local` y añade la traza en `Interacciones_Chatbot`. La clave de
-servicio se lee de `/opt/data/maternaly-google-service-account.json`; nunca la
-muestres ni la incluyas en mensajes.
+`Clientes_Local`, añade la traza en `Interacciones_Chatbot` y replica la fila
+en la pestaña `GRP_ Charla ...` correspondiente a la sesión. `Inscripciones`
+sigue siendo la fuente maestra. La clave de servicio se lee de
+`/opt/data/maternaly-google-service-account.json`; nunca la muestres ni la
+incluyas en mensajes.
 
 ## Interpretación de la respuesta
 
